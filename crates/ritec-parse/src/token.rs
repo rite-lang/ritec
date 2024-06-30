@@ -9,7 +9,7 @@ pub enum Delim {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Ident(String),
-    
+
     Integer(u64),
     Float(f64),
     String(String),
@@ -131,6 +131,9 @@ impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Ident(ident) => write!(f, "{}", ident),
+            Token::Integer(int) => write!(f, "{}", int),
+            Token::Float(float) => write!(f, "{}", float),
+            Token::String(string) => write!(f, "\"{}\"", string),
             Token::Newline => write!(f, "newline"),
             Token::Indent => write!(f, "indent"),
             Token::Dedent => write!(f, "dedent"),
