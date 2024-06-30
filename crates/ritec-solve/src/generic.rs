@@ -1,20 +1,18 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ritec_span::Span;
-
-/// A unique identifier for an unknown type.
+/// A unique identifier for a generic type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Uid {
+pub struct Generic {
     id: usize,
 }
 
-impl Default for Uid {
+impl Default for Generic {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Uid {
+impl Generic {
     /// Create a new unique identifier.
     pub fn new() -> Self {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -23,14 +21,4 @@ impl Uid {
             id: NEXT_ID.fetch_add(1, Ordering::SeqCst),
         }
     }
-}
-
-/// An unknown type.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Unknown {
-    /// A unique identifier for this unknown type.
-    pub uid: Uid,
-
-    /// The span of this unknown type.
-    pub span: Span,
 }

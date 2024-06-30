@@ -1,7 +1,7 @@
 use crate::{Partial, Projected, Unknown};
 
 /// A type variable.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Variable {
     /// An unknown type.
     Unknown(Unknown),

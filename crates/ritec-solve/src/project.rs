@@ -1,20 +1,20 @@
-use crate::Variable;
-
-/// An associated type.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Assoc {
-    pub trait_: todo!(),
-}
+use crate::{TraitId, Variable};
 
 /// A type projection.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Projection {
     /// An associated type.
-    Assoc(Assoc),
+    Associated {
+        /// The trait that defines the associated type.
+        trait_: TraitId,
+
+        /// The index of the associated type.
+        index: usize,
+    },
 }
 
 /// A projected type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Projected {
     /// The base type of this projected type.
     pub base: Box<Variable>,
