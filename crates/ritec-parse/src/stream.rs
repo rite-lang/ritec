@@ -19,4 +19,25 @@ impl TokenStream {
             span,
         }
     }
+
+    pub fn peek(&self) -> (Token, Span) {
+        let eof_span = Span::new(self.span.hi, self.span.hi);
+
+        match self.tokens.get(self.index) {
+            Some(token) => token.clone(),
+            None => (Token::Eof, eof_span),
+        }
+    }
+
+    pub fn consume(&mut self) -> (Token, Span) {
+        let eof_span = Span::new(self.span.hi, self.span.hi);
+
+        match self.tokens.get(self.index) {
+            Some(token) => {
+                self.index += 1;
+                token.clone()
+            }
+            None => (Token::Eof, eof_span),
+        }
+    }
 }

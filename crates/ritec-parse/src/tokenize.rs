@@ -1,4 +1,5 @@
-use crate::{token::Token, TokenStream};
+use crate::{token::Token, ParseError, TokenStream};
+use ritec_diagnostic::Diagnostic;
 use ritec_span::Span;
 use std::cmp::Ordering;
 
@@ -17,7 +18,7 @@ impl Tokenizer {
         }
     }
 
-    fn skip_whitespace(&mut self, line: &mut &str) -> () {
+    fn skip_whitespace(&mut self, line: &mut &str) {
         let mut len = 0;
 
         for c in line.chars() {
@@ -59,7 +60,7 @@ impl Tokenizer {
         (ident, len)
     }
 
-    fn parse_indent(&self, line: &mut &str) -> Result<(usize, usize), ()> {
+    fn parse_indent(&self, line: &mut &str) -> Result<(usize, usize), ParseError> {
         let mut len = 0;
         let mut indent = 0;
 
@@ -78,7 +79,7 @@ impl Tokenizer {
         Ok((indent, len))
     }
 
-    fn parse_token(&self, line: &mut &str) -> Result<(Token, usize), ()> {
+    fn parse_token(&self, line: &mut &str) -> Result<(Token, usize), ParseError> {
         let c = line.chars().next().unwrap();
 
         //if c.is_ascii_digit() {
@@ -113,11 +114,11 @@ impl Tokenizer {
 
         let span = Span::new(self.lo, self.lo + c.len_utf8());
 
-        // Err(ParseError::UnexpectedCharacter { c, span })
-        Err(())
+        let diagnostic = Diagnostic::new("unexpected character").with_span(span);
+        Err(ParseError::from(diagnostic))
     }
 
-    fn tokenize_line(&mut self, line: &mut &str) -> Result<(), ()> {
+    fn tokenize_line(&mut self, line: &mut &str) -> Result<(), ParseError> {
         if line.trim().is_empty() {
             // Empty lines account for one newline character in the original source.
             // But it does not produce a token.
@@ -179,7 +180,7 @@ impl Tokenizer {
         Ok(())
     }
 
-    fn tokenize(&mut self, source: &str) -> Result<(), ()> {
+    fn tokenize(&mut self, source: &str) -> Result<(), ParseError> {
         for mut line in source.lines() {
             self.tokenize_line(&mut line)?;
         }
@@ -202,7 +203,7 @@ impl Tokenizer {
 }
 
 impl TokenStream {
-    pub fn from_source(source: &str) -> Result<TokenStream, ()> {
+    pub fn from_source(source: &str) -> Result<TokenStream, ParseError> {
         let mut tokenizer = Tokenizer::new();
         tokenizer.tokenize(source)?;
 
