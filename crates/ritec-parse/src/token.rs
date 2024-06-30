@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Delim {
     Open,
@@ -121,6 +123,59 @@ impl Token {
             "[" => Some(Token::Bracket(Delim::Open)),
             "]" => Some(Token::Bracket(Delim::Close)),
             _ => None,
+        }
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Ident(ident) => write!(f, "{}", ident),
+            Token::Newline => write!(f, "newline"),
+            Token::Indent => write!(f, "indent"),
+            Token::Dedent => write!(f, "dedent"),
+            Token::Eof => write!(f, "eof"),
+            Token::Fn => write!(f, "fn"),
+            Token::Let => write!(f, "let"),
+            Token::If => write!(f, "if"),
+            Token::Else => write!(f, "else"),
+            Token::Match => write!(f, "match"),
+            Token::Where => write!(f, "where"),
+            Token::Struct => write!(f, "struct"),
+            Token::Trait => write!(f, "trait"),
+            Token::DotDotDot => write!(f, "..."),
+            Token::SlashSlash => write!(f, "//"),
+            Token::FatArrot => write!(f, "=>"),
+            Token::Arrot => write!(f, "->"),
+            Token::ColonColon => write!(f, "::"),
+            Token::DotDot => write!(f, ".."),
+            Token::EqEq => write!(f, "=="),
+            Token::LtEq => write!(f, "<="),
+            Token::GtEq => write!(f, ">="),
+            Token::AndAnd => write!(f, "&&"),
+            Token::OrOr => write!(f, "||"),
+            Token::Colon => write!(f, ":"),
+            Token::Semi => write!(f, ";"),
+            Token::Dot => write!(f, "."),
+            Token::Comma => write!(f, ","),
+            Token::Eq => write!(f, "="),
+            Token::Lt => write!(f, "<"),
+            Token::Gt => write!(f, ">"),
+            Token::And => write!(f, "&"),
+            Token::Or => write!(f, "|"),
+            Token::Plus => write!(f, "+"),
+            Token::Minus => write!(f, "-"),
+            Token::Star => write!(f, "*"),
+            Token::Slash => write!(f, "/"),
+            Token::Caret => write!(f, "^"),
+            Token::Quote => write!(f, "'"),
+            Token::Under => write!(f, "_"),
+            Token::Paren(Delim::Open) => write!(f, "("),
+            Token::Paren(Delim::Close) => write!(f, ")"),
+            Token::Brace(Delim::Open) => write!(f, "{{"),
+            Token::Brace(Delim::Close) => write!(f, "}}"),
+            Token::Bracket(Delim::Open) => write!(f, "["),
+            Token::Bracket(Delim::Close) => write!(f, "]"),
         }
     }
 }
