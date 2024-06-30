@@ -7,6 +7,13 @@ name = "ritec"
 version = "0.1.0"
 
 [[package]]
+name = "ritec-parse"
+version = "0.1.0"
+dependencies = [
+ "ritec-span",
+]
+
+[[package]]
 name = "ritec-solve"
 version = "0.1.0"
 dependencies = [

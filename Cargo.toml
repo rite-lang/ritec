@@ -1,7 +1,15 @@
 [package]
 name = "ritec"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
+authors = ["Rite contributors"]
+license = "MIT"
 
 [workspace]
 members = ["crates/*"]

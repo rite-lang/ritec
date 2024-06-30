@@ -1,5 +1,5 @@
 [package]
-name = "ritec-solve"
+name = "ritec-parse"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

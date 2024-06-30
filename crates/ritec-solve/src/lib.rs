@@ -6,6 +6,6 @@ mod variable;
 
 pub use partial::*;
 pub use project::*;
-pub use r#trait;
+pub use r#trait::*;
 pub use unknown::*;
 pub use variable::*;
