@@ -79,12 +79,160 @@ impl Tokenizer {
         Ok((indent, len))
     }
 
+    fn parse_string(&self, line: &mut &str) -> Result<(Token, usize), ParseError> {
+        let mut len = 0;
+        let mut buf = String::new();
+        let mut escape = false;
+        let mut valid = false;
+
+        // skip the opening quote
+        *line = &line[1..];
+
+        for c in line.chars() {
+            len += c.len_utf8();
+
+            if escape {
+                match c {
+                    'n' => buf.push('\n'),
+                    'r' => buf.push('\r'),
+                    't' => buf.push('\t'),
+                    '\\' => buf.push('\\'),
+                    '"' => buf.push('"'),
+                    _ => buf.push(c),
+                }
+
+                escape = false;
+            } else {
+                match c {
+                    '\\' => escape = true,
+                    '"' => {
+                        valid = true;
+                        break;
+                    }
+                    _ => buf.push(c),
+                }
+            }
+        }
+
+        if !valid {
+            let span = Span::new(self.lo, self.lo + len);
+            let diagnostic = Diagnostic::new("unterminated string").with_span(span);
+            return Err(ParseError::from(diagnostic));
+        }
+
+        *line = &line[len..];
+
+        Ok((Token::String(buf), len))
+    }
+
+    fn parse_integer(&self, line: &mut &str) -> (Token, usize) {
+        let mut len = 0;
+        let mut radix = 10;
+
+        match line.get(..2) {
+            Some("0x") => {
+                radix = 16;
+                len += 2;
+            }
+            Some("0b") => {
+                radix = 2;
+                len += 2;
+            }
+            Some("0o") => {
+                radix = 8;
+                len += 2;
+            }
+            _ => {}
+        }
+
+        let mut value = 0;
+
+        for c in line.chars() {
+            match c.to_digit(radix) {
+                Some(digit) => {
+                    value = value * radix + digit;
+                    len += c.len_utf8();
+                }
+                None => break,
+            }
+        }
+
+        *line = &line[len..];
+
+        (Token::Integer(value as u64), len)
+    }
+
+    fn parse_float(&self, line: &mut &str) -> (Token, usize) {
+        let mut len = 0;
+        let mut buf = String::new();
+
+        for c in line.chars() {
+            match c {
+                '0'..='9' | '.' | 'e' | 'E' => {
+                    buf.push(c);
+                    len += c.len_utf8();
+                }
+                _ => break,
+            }
+        }
+
+        let float = buf.parse::<f64>().unwrap();
+
+        *line = &line[len..];
+
+        (Token::Float(float), len)
+    }
+
+    fn parse_number(&self, line: &mut &str) -> (Token, usize) {
+        // Check if we see a dot or an 'e' character that is followed by another number before something else.F
+        let mut has_dot = false;
+        let mut has_e = false;
+        let mut has_valid_e = false;
+
+        for c in line.chars() {
+            match c {
+                '0'..='9' => {
+                    if has_e {
+                        has_valid_e = true;
+                    }
+                }
+                '.' => {
+                    if has_dot {
+                        break;
+                    }
+
+                    has_dot = true;
+                }
+                'e' | 'E' => {
+                    if has_e {
+                        break;
+                    }
+
+                    has_e = true;
+                }
+                _ => break,
+            }
+        }
+
+        return if has_dot || (has_e && has_valid_e) {
+            self.parse_float(line)
+        } else {
+            self.parse_integer(line)
+        };
+    }
+
+
     fn parse_token(&self, line: &mut &str) -> Result<(Token, usize), ParseError> {
         let c = line.chars().next().unwrap();
 
-        //if c.is_ascii_digit() {
-        //    return Ok(self.parse_number(line));
-        //}
+        if c.is_ascii_digit() {
+            return Ok(self.parse_number(line));
+        }
+
+        // Parse a string
+        if c == '"' {
+            return self.parse_string(line);
+        }
 
         // parse a two character symbol
         if line.len() >= 2 {
@@ -186,7 +334,6 @@ impl Tokenizer {
         }
 
         let span = Span::new(self.lo, self.lo);
-        self.tokens.push((Token::Newline, span));
 
         // at the end of the file,
         // dedent all the way back to the first indent
@@ -220,13 +367,13 @@ mod tests {
 
     #[test]
     fn test_tokenize() {
-        let source = r#"
-            let x = 1;
-            let y = 2;
-        "#;
-
+        let source = r#"10.10 "WOW SO COOL" "#;
         let mut tokenizer = Tokenizer::new();
-        tokenizer.tokenize(source).unwrap();
+
+        match tokenizer.tokenize(source) {
+            Ok(()) => {}
+            Err(e) => eprintln!("{:?}", e),
+        }
 
         let tokens = tokenizer.tokens;
 

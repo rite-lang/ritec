@@ -7,6 +7,10 @@ pub enum Delim {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Ident(String),
+    
+    Integer(u64),
+    Float(f64),
+    String(String),
 
     /* control tokens */
     Newline,
