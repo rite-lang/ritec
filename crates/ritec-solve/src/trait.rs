@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{TraitBound, Variable, Where};
 
 /// An associated type.
@@ -31,3 +33,9 @@ pub struct Trait {
 }
 
 ritec_arena::arena!(Traits[TraitId]: Trait);
+
+impl Display for TraitId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "trait{}", self.index)
+    }
+}

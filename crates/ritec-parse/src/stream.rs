@@ -64,7 +64,7 @@ impl TokenStream {
     }
 
     pub fn expect(&mut self, token: Token) -> Result<Span, ParseError> {
-        let (actual, span) = self.peek();
+        let (actual, span) = self.consume();
 
         if actual == token {
             Ok(span)

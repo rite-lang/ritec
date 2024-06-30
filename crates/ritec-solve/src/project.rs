@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{TraitId, Variable};
 
 /// A type projection.
@@ -13,6 +15,14 @@ pub enum Projection {
     },
 }
 
+impl Display for Projection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Projection::Associated { trait_, index } => write!(f, "<{}>::{}", trait_, index),
+        }
+    }
+}
+
 /// A projected type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Projected {
@@ -21,4 +31,10 @@ pub struct Projected {
 
     /// The projection of this projected type.
     pub projection: Projection,
+}
+
+impl Display for Projected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}::{}", self.base, self.projection)
+    }
 }

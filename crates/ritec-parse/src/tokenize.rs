@@ -1,16 +1,17 @@
 use crate::{token::Token, ParseError, TokenStream};
 use ritec_diagnostic::Diagnostic;
 use ritec_span::Span;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, mem};
 
-struct Tokenizer {
+#[derive(Clone, Debug, Default)]
+pub struct Tokenizer {
     lo: usize,
     tokens: Vec<(Token, Span)>,
     indents: Vec<usize>,
 }
 
 impl Tokenizer {
-    fn new() -> Tokenizer {
+    pub fn new() -> Tokenizer {
         Tokenizer {
             lo: 0,
             tokens: Vec::new(),
@@ -214,13 +215,12 @@ impl Tokenizer {
             }
         }
 
-        return if has_dot || (has_e && has_valid_e) {
+        if has_dot || (has_e && has_valid_e) {
             self.parse_float(line)
         } else {
             self.parse_integer(line)
-        };
+        }
     }
-
 
     fn parse_token(&self, line: &mut &str) -> Result<(Token, usize), ParseError> {
         let c = line.chars().next().unwrap();
@@ -266,7 +266,7 @@ impl Tokenizer {
         Err(ParseError::from(diagnostic))
     }
 
-    fn tokenize_line(&mut self, line: &mut &str) -> Result<(), ParseError> {
+    pub fn tokenize_line(&mut self, mut line: &str) -> Result<(), ParseError> {
         if line.trim().is_empty() {
             // Empty lines account for one newline character in the original source.
             // But it does not produce a token.
@@ -274,7 +274,7 @@ impl Tokenizer {
             return Ok(());
         }
 
-        let (line_indent, len) = self.parse_indent(line)?;
+        let (line_indent, len) = self.parse_indent(&mut line)?;
 
         // Update indent stack.
         match line_indent.cmp(self.indents.last().unwrap()) {
@@ -304,13 +304,13 @@ impl Tokenizer {
 
         // parse the tokens on the current line
         loop {
-            self.skip_whitespace(line);
+            self.skip_whitespace(&mut line);
 
             if line.is_empty() {
                 break;
             }
 
-            let (token, len) = self.parse_token(line)?;
+            let (token, len) = self.parse_token(&mut line)?;
 
             let span = Span::new(self.lo, self.lo + len);
             self.tokens.push((token, span));
@@ -328,9 +328,14 @@ impl Tokenizer {
         Ok(())
     }
 
-    fn tokenize(&mut self, source: &str) -> Result<(), ParseError> {
-        for mut line in source.lines() {
-            self.tokenize_line(&mut line)?;
+    pub fn take_stream(&mut self) -> TokenStream {
+        let span = Span::new(0, self.lo);
+        TokenStream::new(mem::take(&mut self.tokens), span)
+    }
+
+    pub fn tokenize(&mut self, source: &str) -> Result<TokenStream, ParseError> {
+        for line in source.lines() {
+            self.tokenize_line(line)?;
         }
 
         let span = Span::new(self.lo, self.lo);
@@ -341,23 +346,7 @@ impl Tokenizer {
             self.tokens.push((Token::Dedent, span));
         }
 
-        Ok(())
-    }
-
-    fn finish(self) -> Vec<(Token, Span)> {
-        self.tokens
-    }
-}
-
-impl TokenStream {
-    pub fn from_source(source: &str) -> Result<TokenStream, ParseError> {
-        let mut tokenizer = Tokenizer::new();
-        tokenizer.tokenize(source)?;
-
-        let tokens = tokenizer.finish();
-
-        let span = Span::new(0, source.len());
-        Ok(TokenStream::new(tokens, span))
+        Ok(self.take_stream())
     }
 }
 
@@ -371,12 +360,8 @@ mod tests {
         let mut tokenizer = Tokenizer::new();
 
         match tokenizer.tokenize(source) {
-            Ok(()) => {}
+            Ok(tokens) => println!("{:?}", tokens),
             Err(e) => eprintln!("{:?}", e),
         }
-
-        let tokens = tokenizer.tokens;
-
-        println!("{:?}", tokens);
     }
 }

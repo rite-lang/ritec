@@ -6,3 +6,4 @@ mod tokenize;
 pub use error::*;
 pub use stream::*;
 pub use token::*;
+pub use tokenize::*;

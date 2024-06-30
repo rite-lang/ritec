@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    fmt::Display,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use ritec_span::Span;
 
@@ -11,6 +14,12 @@ pub struct Uid {
 impl Default for Uid {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Display for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
     }
 }
 
@@ -33,4 +42,10 @@ pub struct Unknown {
 
     /// The span of this unknown type.
     pub span: Span,
+}
+
+impl Display for Unknown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "_{}", self.uid)
+    }
 }
