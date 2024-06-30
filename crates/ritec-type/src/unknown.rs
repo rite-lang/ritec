@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use ritec_span::Span;
+use ritec_diagnostic::Span;
 
 /// A unique identifier for an unknown type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

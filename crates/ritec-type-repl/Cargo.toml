@@ -1,5 +1,5 @@
 [package]
-name = "ritec-solve-repl"
+name = "ritec-type-repl"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,5 +8,4 @@ license.workspace = true
 [dependencies]
 ritec-diagnostic = { path = "../ritec-diagnostic", version = "0.1.0" }
 ritec-parse = { path = "../ritec-parse", version = "0.1.0" }
-ritec-solve = { path = "../ritec-solve", version = "0.1.0" }
-ritec-span = { path = "../ritec-span", version = "0.1.0" }
+ritec-type = { path = "../ritec-type", version = "0.1.0" }

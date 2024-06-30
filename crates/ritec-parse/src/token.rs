@@ -26,6 +26,7 @@ pub enum Token {
     If,
     Else,
     Match,
+    Mut,
     Where,
     Struct,
     Trait,
@@ -75,6 +76,7 @@ impl Token {
             "if" => Some(Token::If),
             "else" => Some(Token::Else),
             "match" => Some(Token::Match),
+            "mut" => Some(Token::Mut),
             "where" => Some(Token::Where),
             "struct" => Some(Token::Struct),
             "trait" => Some(Token::Trait),
@@ -134,19 +136,28 @@ impl Display for Token {
             Token::Integer(int) => write!(f, "{}", int),
             Token::Float(float) => write!(f, "{}", float),
             Token::String(string) => write!(f, "\"{}\"", string),
+
+            /* control tokens */
             Token::Newline => write!(f, "newline"),
             Token::Indent => write!(f, "indent"),
             Token::Dedent => write!(f, "dedent"),
             Token::Eof => write!(f, "eof"),
+
+            /* keywords */
             Token::Fn => write!(f, "fn"),
             Token::Let => write!(f, "let"),
             Token::If => write!(f, "if"),
             Token::Else => write!(f, "else"),
             Token::Match => write!(f, "match"),
+            Token::Mut => write!(f, "mut"),
             Token::Where => write!(f, "where"),
             Token::Struct => write!(f, "struct"),
             Token::Trait => write!(f, "trait"),
+
+            /* triple-character symbols */
             Token::DotDotDot => write!(f, "..."),
+
+            /* double-character symbols */
             Token::SlashSlash => write!(f, "//"),
             Token::FatArrot => write!(f, "=>"),
             Token::Arrot => write!(f, "->"),
@@ -157,6 +168,8 @@ impl Display for Token {
             Token::GtEq => write!(f, ">="),
             Token::AndAnd => write!(f, "&&"),
             Token::OrOr => write!(f, "||"),
+
+            /* single-character symbols */
             Token::Colon => write!(f, ":"),
             Token::Semi => write!(f, ";"),
             Token::Dot => write!(f, "."),

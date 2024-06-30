@@ -6,4 +6,3 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-ritec-span = { path = "../ritec-span", version = "0.1.0" }

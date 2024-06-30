@@ -1,5 +1,4 @@
-use ritec_diagnostic::Diagnostic;
-use ritec_span::Span;
+use ritec_diagnostic::{Diagnostic, Span};
 
 #[derive(Debug)]
 pub struct ParseError {

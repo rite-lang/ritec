@@ -1,13 +1,18 @@
+mod error;
+mod forall;
 mod generic;
 mod partial;
 mod project;
 mod solver;
 mod r#trait;
+mod unify;
 mod unknown;
 mod variable;
 mod r#where;
 mod world;
 
+pub use error::*;
+pub use forall::*;
 pub use generic::*;
 pub use partial::*;
 pub use project::*;

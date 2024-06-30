@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{TraitId, Variable};
+use crate::{TraitId, Variable, WhereId};
 
 /// A type projection.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -26,6 +26,9 @@ impl Display for Projection {
 /// A projected type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Projected {
+    /// The where clause this is attached to.
+    pub where_: WhereId,
+
     /// The base type of this projected type.
     pub base: Box<Variable>,
 

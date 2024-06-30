@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{TraitBound, Variable, Where};
+use crate::{TraitBound, Variable, WhereId};
 
 /// An associated type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -19,14 +19,14 @@ pub struct TraitMethod {
     pub output: Variable,
 
     /// The where clause of the method.
-    pub where_: Where,
+    pub where_: WhereId,
 }
 
 /// A trait.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Trait {
     /// The where clause of the trait.
-    pub where_: Where,
+    pub where_: WhereId,
 
     /// The associated types of the trait.
     pub types: Vec<TraitType>,

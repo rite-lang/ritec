@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{Partial, Projected, Unknown};
+use crate::{Forall, Partial, Projected, Unknown};
 
 /// A type variable.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -13,6 +13,9 @@ pub enum Variable {
 
     /// A projected type.
     Projected(Projected),
+
+    /// A type that accepts all types.
+    Forall(Forall),
 }
 
 impl Display for Variable {
@@ -21,6 +24,7 @@ impl Display for Variable {
             Variable::Unknown(unknown) => write!(f, "{}", unknown),
             Variable::Partial(partial) => write!(f, "{}", partial),
             Variable::Projected(projected) => write!(f, "{}", projected),
+            Variable::Forall(forall) => write!(f, "{}", forall),
         }
     }
 }

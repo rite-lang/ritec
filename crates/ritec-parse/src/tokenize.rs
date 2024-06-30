@@ -1,7 +1,8 @@
-use crate::{token::Token, ParseError, TokenStream};
-use ritec_diagnostic::Diagnostic;
-use ritec_span::Span;
 use std::{cmp::Ordering, mem};
+
+use ritec_diagnostic::{Diagnostic, Span};
+
+use crate::{token::Token, ParseError, TokenStream};
 
 #[derive(Clone, Debug, Default)]
 pub struct Tokenizer {

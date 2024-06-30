@@ -26,6 +26,13 @@ pub struct Bound {
 /// A where clause.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Where {
+    /// The parent of the where clause.
+    ///
+    /// This clause will inherit the bounds of the parent.
+    pub parent: Option<WhereId>,
+
     /// The bounds of the where clause.
     pub bounds: Vec<Bound>,
 }
+
+ritec_arena::arena!(Wheres[WhereId]: Where);

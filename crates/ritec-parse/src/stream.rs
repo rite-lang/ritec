@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use ritec_diagnostic::Diagnostic;
-use ritec_span::Span;
+use ritec_diagnostic::{Diagnostic, Span};
 
 use crate::{ParseError, Token};
 
@@ -19,6 +18,10 @@ impl TokenStream {
             index: 0,
             span,
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.index >= self.tokens.len()
     }
 
     pub fn eof_span(&self) -> Span {
@@ -61,6 +64,18 @@ impl TokenStream {
             }
             None => (Token::Eof, self.eof_span()),
         }
+    }
+
+    pub fn take_spanned(&mut self, token: Token) -> Option<Span> {
+        if self.is(token) {
+            Some(self.consume().1)
+        } else {
+            None
+        }
+    }
+
+    pub fn take(&mut self, token: Token) -> bool {
+        self.take_spanned(token).is_some()
     }
 
     pub fn expect(&mut self, token: Token) -> Result<Span, ParseError> {

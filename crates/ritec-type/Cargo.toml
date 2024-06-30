@@ -1,8 +1,10 @@
 [package]
-name = "ritec-span"
+name = "ritec-type"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [dependencies]
+ritec-arena = { path = "../ritec-arena" }
+ritec-diagnostic = { path = "../ritec-diagnostic" }

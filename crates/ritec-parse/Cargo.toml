@@ -7,4 +7,3 @@ license.workspace = true
 
 [dependencies]
 ritec-diagnostic = { path = "../ritec-diagnostic", version = "0.1.0" }
-ritec-span = { path = "../ritec-span", version = "0.1.0" }
