@@ -1,6 +1,6 @@
-use std::cmp::Ordering;
-use crate::token::Token;
+use crate::{token::Token, TokenStream};
 use ritec_span::Span;
+use std::cmp::Ordering;
 
 struct Tokenizer {
     lo: usize,
@@ -8,16 +8,8 @@ struct Tokenizer {
     indents: Vec<usize>,
 }
 
-fn is_ident_start(c: char) -> bool {
-    c.is_alphabetic() || c == '_'
-}
-
-fn is_ident_continue(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
 impl Tokenizer {
-    pub fn new() -> Tokenizer {
+    fn new() -> Tokenizer {
         Tokenizer {
             lo: 0,
             tokens: Vec::new(),
@@ -41,12 +33,19 @@ impl Tokenizer {
         self.lo += len;
     }
 
+    fn is_ident_start(c: char) -> bool {
+        c.is_alphabetic() || c == '_'
+    }
+
+    fn is_ident_continue(c: char) -> bool {
+        c.is_alphanumeric() || c == '_'
+    }
 
     fn parse_ident(&self, line: &mut &str) -> (String, usize) {
         let mut len = 0;
 
         for c in line.chars() {
-            if !is_ident_continue(c) {
+            if !Self::is_ident_continue(c) {
                 break;
             }
 
@@ -103,7 +102,7 @@ impl Tokenizer {
         }
 
         // parse an identifier
-        if is_ident_start(c) {
+        if Self::is_ident_start(c) {
             let (ident, len) = self.parse_ident(line);
 
             return match Token::from_keyword(&ident) {
@@ -117,7 +116,6 @@ impl Tokenizer {
         // Err(ParseError::UnexpectedCharacter { c, span })
         Err(())
     }
-
 
     fn tokenize_line(&mut self, line: &mut &str) -> Result<(), ()> {
         if line.trim().is_empty() {
@@ -197,8 +195,23 @@ impl Tokenizer {
 
         Ok(())
     }
+
+    fn finish(self) -> Vec<(Token, Span)> {
+        self.tokens
+    }
 }
 
+impl TokenStream {
+    pub fn from_source(source: &str) -> Result<TokenStream, ()> {
+        let mut tokenizer = Tokenizer::new();
+        tokenizer.tokenize(source)?;
+
+        let tokens = tokenizer.finish();
+
+        let span = Span::new(0, source.len());
+        Ok(TokenStream::new(tokens, span))
+    }
+}
 
 #[cfg(test)]
 mod tests {
