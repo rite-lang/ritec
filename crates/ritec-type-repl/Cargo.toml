@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-ritec-diagnostic = { path = "../ritec-diagnostic", version = "0.1.0" }
-ritec-parse = { path = "../ritec-parse", version = "0.1.0" }
-ritec-type = { path = "../ritec-type", version = "0.1.0" }
+ritec-diagnostic.workspace = true
+ritec-parse.workspace = true
+ritec-type.workspace = true
+
+clap = { version = "4.5", features = ["derive"] }
+eyre = "0.6"
+thiserror = "1.0"

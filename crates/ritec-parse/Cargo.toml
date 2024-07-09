@@ -6,4 +6,4 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-ritec-diagnostic = { path = "../ritec-diagnostic", version = "0.1.0" }
+ritec-diagnostic.workspace = true

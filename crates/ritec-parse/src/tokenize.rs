@@ -2,7 +2,7 @@ use std::{cmp::Ordering, mem};
 
 use ritec_diagnostic::{Diagnostic, Span};
 
-use crate::{token::Token, ParseError, TokenStream};
+use crate::{Token, TokenStream};
 
 #[derive(Clone, Debug, Default)]
 pub struct Tokenizer {
@@ -62,7 +62,7 @@ impl Tokenizer {
         (ident, len)
     }
 
-    fn parse_indent(&self, line: &mut &str) -> Result<(usize, usize), ParseError> {
+    fn parse_indent(&self, line: &mut &str) -> Result<(usize, usize), Diagnostic> {
         let mut len = 0;
         let mut indent = 0;
 
@@ -81,7 +81,7 @@ impl Tokenizer {
         Ok((indent, len))
     }
 
-    fn parse_string(&self, line: &mut &str) -> Result<(Token, usize), ParseError> {
+    fn parse_string(&self, line: &mut &str) -> Result<(Token, usize), Diagnostic> {
         let mut len = 0;
         let mut buf = String::new();
         let mut escape = false;
@@ -119,7 +119,7 @@ impl Tokenizer {
         if !valid {
             let span = Span::new(self.lo, self.lo + len);
             let diagnostic = Diagnostic::new("unterminated string").with_span(span);
-            return Err(ParseError::from(diagnostic));
+            return Err(diagnostic);
         }
 
         *line = &line[len..];
@@ -223,7 +223,7 @@ impl Tokenizer {
         }
     }
 
-    fn parse_token(&self, line: &mut &str) -> Result<(Token, usize), ParseError> {
+    fn parse_token(&self, line: &mut &str) -> Result<(Token, usize), Diagnostic> {
         let c = line.chars().next().unwrap();
 
         if c.is_ascii_digit() {
@@ -264,10 +264,10 @@ impl Tokenizer {
         let span = Span::new(self.lo, self.lo + c.len_utf8());
 
         let diagnostic = Diagnostic::new("unexpected character").with_span(span);
-        Err(ParseError::from(diagnostic))
+        Err(diagnostic)
     }
 
-    pub fn tokenize_line(&mut self, mut line: &str) -> Result<(), ParseError> {
+    pub fn tokenize_line(&mut self, mut line: &str) -> Result<(), Diagnostic> {
         if line.trim().is_empty() {
             // Empty lines account for one newline character in the original source.
             // But it does not produce a token.
@@ -334,7 +334,7 @@ impl Tokenizer {
         TokenStream::new(mem::take(&mut self.tokens), span)
     }
 
-    pub fn tokenize(&mut self, source: &str) -> Result<TokenStream, ParseError> {
+    pub fn tokenize(&mut self, source: &str) -> Result<TokenStream, Diagnostic> {
         for line in source.lines() {
             self.tokenize_line(line)?;
         }

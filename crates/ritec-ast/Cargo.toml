@@ -1,10 +1,10 @@
 [package]
-name = "ritec-type"
+name = "ritec-ast"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [dependencies]
-ritec-arena.workspace = true
 ritec-diagnostic.workspace = true
+ritec-parse.workspace = true

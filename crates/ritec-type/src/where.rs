@@ -1,8 +1,13 @@
+use std::fmt::Display;
+
 use crate::{TraitId, Variable};
 
 /// A trait bound.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TraitBound {
+    /// The base type of this bound.
+    pub base: Variable,
+
     /// The trait in question.
     pub trait_: TraitId,
 
@@ -13,14 +18,24 @@ pub struct TraitBound {
     pub types: Vec<Option<Variable>>,
 }
 
-/// A bound in a where clause.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Bound {
-    /// The base type of this bound.
-    pub base: Variable,
+impl Display for TraitBound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}<", self.trait_)?;
 
-    /// The trait bounds of this bound.
-    pub traits: Vec<TraitBound>,
+        let generics: Vec<_> = self.generics.iter().map(ToString::to_string).collect();
+        write!(f, "{}", generics.join(", "))?;
+
+        for (i, type_) in self.types.iter().enumerate() {
+            match type_ {
+                Some(type_) => write!(f, ", {} = {}", i, type_)?,
+                None => write!(f, "")?,
+            }
+        }
+
+        write!(f, ">")?;
+
+        Ok(())
+    }
 }
 
 /// A where clause.
@@ -32,7 +47,28 @@ pub struct Where {
     pub parent: Option<WhereId>,
 
     /// The bounds of the where clause.
-    pub bounds: Vec<Bound>,
+    pub bounds: Vec<TraitBound>,
+}
+
+impl Default for Where {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Where {
+    pub fn new() -> Self {
+        Self {
+            parent: None,
+            bounds: Vec::new(),
+        }
+    }
 }
 
 ritec_arena::arena!(Wheres[WhereId]: Where);
+
+impl Display for WhereId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.index)
+    }
+}

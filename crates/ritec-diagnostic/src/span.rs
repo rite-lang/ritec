@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+use std::fmt::{Debug, Display};
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
@@ -9,18 +11,22 @@ impl Span {
         Span { lo, hi }
     }
 
-    pub fn empty() -> Span {
-        Span { lo: 0, hi: 0 }
-    }
-
-    pub fn merge(self: &Self, other: &Self) -> Span {
+    pub fn join(self, other: Self) -> Span {
         Span {
             lo: self.lo.min(other.lo),
             hi: self.hi.max(other.hi),
         }
     }
+}
 
-    pub fn len(self: &Self) -> usize {
-        self.hi - self.lo
+impl Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}..{}", self.lo, self.hi)
+    }
+}
+
+impl Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        Debug::fmt(self, f)
     }
 }

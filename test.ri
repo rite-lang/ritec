@@ -1,0 +1,2 @@
+fn bar(x: 'a) -> void
+    let x

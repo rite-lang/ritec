@@ -1,0 +1,12 @@
+trait Add<'a>
+    type Output
+
+impl Add<void> for void
+    type Output = bool
+
+fn
+    a = <void as Add<void>>::Output
+
+solve
+
+print a

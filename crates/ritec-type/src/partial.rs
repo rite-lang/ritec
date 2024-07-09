@@ -1,35 +1,6 @@
 use std::fmt::Display;
 
-use crate::Variable;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Item {
-    Void,
-    Bool,
-    Pointer { mutable: bool },
-    Tuple,
-    Slice,
-    Function,
-}
-
-impl Display for Item {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Void => write!(f, "void"),
-            Self::Bool => write!(f, "bool"),
-            Self::Pointer { mutable } => {
-                if *mutable {
-                    write!(f, "*mut")
-                } else {
-                    write!(f, "*")
-                }
-            }
-            Self::Tuple => write!(f, "tuple"),
-            Self::Slice => write!(f, "slice"),
-            Self::Function => write!(f, "fn"),
-        }
-    }
-}
+use crate::{Item, Variable};
 
 /// A partially known type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

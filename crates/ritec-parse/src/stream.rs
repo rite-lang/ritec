@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ritec_diagnostic::{Diagnostic, Span};
 
-use crate::{ParseError, Token};
+use crate::Token;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TokenStream {
@@ -78,7 +78,7 @@ impl TokenStream {
         self.take_spanned(token).is_some()
     }
 
-    pub fn expect(&mut self, token: Token) -> Result<Span, ParseError> {
+    pub fn expect(&mut self, token: Token) -> Result<Span, Diagnostic> {
         let (actual, span) = self.consume();
 
         if actual == token {
@@ -87,14 +87,61 @@ impl TokenStream {
             let message = format!("expected {}, found {}", token, actual);
             let diagnostic = Diagnostic::new(message).with_span(span);
 
-            Err(ParseError::from(diagnostic))
+            Err(diagnostic)
+        }
+    }
+
+    pub fn expect_ident_spanned(&mut self) -> Result<(String, Span), Diagnostic> {
+        let (token, span) = self.consume();
+
+        match token {
+            Token::Ident(ident) => Ok((ident, span)),
+            actual => {
+                let message = format!("expected identifier, found {}", actual);
+                let diagnostic = Diagnostic::new(message).with_span(span);
+
+                Err(diagnostic)
+            }
+        }
+    }
+
+    pub fn expect_ident(&mut self) -> Result<String, Diagnostic> {
+        let (ident, _) = self.expect_ident_spanned()?;
+        Ok(ident)
+    }
+
+    pub fn expect_string(&mut self) -> Result<String, Diagnostic> {
+        let (token, span) = self.consume();
+
+        match token {
+            Token::String(string) => Ok(string),
+            actual => {
+                let message = format!("expected string, found {}", actual);
+                let diagnostic = Diagnostic::new(message).with_span(span);
+
+                Err(diagnostic)
+            }
+        }
+    }
+
+    pub fn expect_integer(&mut self) -> Result<u64, Diagnostic> {
+        let (token, span) = self.consume();
+
+        match token {
+            Token::Integer(integer) => Ok(integer),
+            actual => {
+                let message = format!("expected integer, found {}", actual);
+                let diagnostic = Diagnostic::new(message).with_span(span);
+
+                Err(diagnostic)
+            }
         }
     }
 
     pub fn spanned<T>(
         &mut self,
-        f: impl FnOnce(&mut Self) -> Result<T, ParseError>,
-    ) -> Result<(T, Span), ParseError> {
+        f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<(T, Span), Diagnostic> {
         let start = self.peek().1.lo;
 
         let result = f(self)?;

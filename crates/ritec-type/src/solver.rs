@@ -1,15 +1,17 @@
 use std::collections::VecDeque;
 
-use crate::{TypeError, Variable, World};
+use ritec_diagnostic::Diagnostic;
+
+use crate::{Variable, WhereId, World};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Goal {
-    Unify(Variable, Variable),
+    Unify(WhereId, Variable, Variable),
 }
 
 #[derive(Debug, Default)]
 pub struct Solver {
-    pub(crate) world: World,
+    pub world: World,
     pub(crate) goals: VecDeque<Goal>,
 }
 
@@ -21,27 +23,36 @@ impl Solver {
         }
     }
 
-    pub fn world(&self) -> &World {
-        &self.world
-    }
-
     pub fn push_goal(&mut self, goal: Goal) {
         self.goals.push_back(goal);
     }
 
-    pub fn unify(&mut self, a: Variable, b: Variable) {
-        self.push_goal(Goal::Unify(a, b));
+    pub fn unify(&mut self, where_id: WhereId, a: Variable, b: Variable) {
+        self.push_goal(Goal::Unify(where_id, a, b));
     }
 
-    fn solve_goal(&mut self, goal: Goal) -> Result<(), TypeError> {
+    fn solve_goal(&mut self, goal: &Goal) -> Result<bool, Diagnostic> {
         match goal {
-            Goal::Unify(a, b) => self.unify_var_var(&a, &b),
+            Goal::Unify(_, a, b) => self.unify_var_var(a, b),
         }
     }
 
-    pub fn solve(&mut self) -> Result<(), TypeError> {
+    pub fn solve(&mut self) -> Result<(), Diagnostic> {
+        let mut fail_count = 0;
+
         while let Some(goal) = self.goals.pop_front() {
-            self.solve_goal(goal)?;
+            if self.solve_goal(&goal)? {
+                fail_count = 0;
+                continue;
+            }
+
+            fail_count += 1;
+            self.goals.push_back(goal.clone());
+
+            if fail_count > self.goals.len() + 10 {
+                let diagnostic = Diagnostic::new("failed to solve goal");
+                return Err(diagnostic);
+            }
         }
 
         Ok(())

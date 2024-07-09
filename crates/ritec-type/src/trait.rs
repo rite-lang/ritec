@@ -1,13 +1,6 @@
 use std::fmt::Display;
 
-use crate::{TraitBound, Variable, WhereId};
-
-/// An associated type.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TraitType {
-    /// The bounds of the associated type.
-    pub bounds: Vec<TraitBound>,
-}
+use crate::{Forall, Variable, WhereId};
 
 /// A trait method.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -25,11 +18,14 @@ pub struct TraitMethod {
 /// A trait.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Trait {
+    /// The generics of the trait.
+    pub generics: Vec<Forall>,
+
     /// The where clause of the trait.
     pub where_: WhereId,
 
     /// The associated types of the trait.
-    pub types: Vec<TraitType>,
+    pub types: u32,
 }
 
 ritec_arena::arena!(Traits[TraitId]: Trait);

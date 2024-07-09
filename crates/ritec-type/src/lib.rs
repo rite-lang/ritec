@@ -1,8 +1,9 @@
-mod error;
 mod forall;
-mod generic;
+mod implement;
+mod known;
 mod partial;
 mod project;
+mod projected;
 mod solver;
 mod r#trait;
 mod unify;
@@ -11,11 +12,11 @@ mod variable;
 mod r#where;
 mod world;
 
-pub use error::*;
 pub use forall::*;
-pub use generic::*;
+pub use implement::*;
+pub use known::*;
 pub use partial::*;
-pub use project::*;
+pub use projected::*;
 pub use r#trait::*;
 pub use r#where::*;
 pub use solver::*;
