@@ -1,17 +1,16 @@
 use ritec_diagnostic::{Diagnostic, Span};
+use ritec_hir::{ContractId, Generic, Item, Partial, Projected, Projection, Type, Uid, Unknown};
 use ritec_parse::{Delim, Token, TokenStream};
-use ritec_type::{Forall, Item, Partial, Projected, Projection, Uid, Unknown, Variable, WhereId};
 
 use crate::repl::{Error, Repl};
 
 impl Repl {
-    fn unknown(&mut self, name: String, span: Span, where_: WhereId) -> Unknown {
+    fn unknown(&mut self, name: String, span: Span, where_: ContractId) -> Unknown {
         if let Some(unknown) = self.unknowns.get(&name) {
             return unknown.clone();
         }
 
         let unknown = Unknown {
-            where_id: where_,
             uid: Uid::new(),
             span,
         };
@@ -26,8 +25,8 @@ impl Repl {
         stream: &mut TokenStream,
         ident: String,
         span: Span,
-        where_: WhereId,
-    ) -> Result<Variable, Error> {
+        where_: ContractId,
+    ) -> Result<Type, Error> {
         match ident.as_str() {
             "tuple" => {
                 stream.consume();
@@ -40,7 +39,7 @@ impl Repl {
             _ => {
                 stream.consume();
                 let unknown = self.unknown(ident.to_string(), span, where_);
-                Ok(Variable::Unknown(unknown))
+                Ok(Type::Unknown(unknown))
             }
         }
     }
@@ -49,8 +48,8 @@ impl Repl {
         &mut self,
         stream: &mut TokenStream,
         item: Item,
-        where_: WhereId,
-    ) -> Result<Variable, Error> {
+        where_: ContractId,
+    ) -> Result<Type, Error> {
         let mut params = Vec::new();
 
         if stream.take(Token::Bracket(Delim::Open)) {
@@ -65,14 +64,14 @@ impl Repl {
         }
 
         let partial = Partial { item, params };
-        Ok(Variable::Partial(partial))
+        Ok(Type::Partial(partial))
     }
 
     fn parse_pointer_variable(
         &mut self,
         stream: &mut TokenStream,
-        where_: WhereId,
-    ) -> Result<Variable, Error> {
+        where_: ContractId,
+    ) -> Result<Type, Error> {
         stream.expect(Token::Star)?;
 
         let mutable = stream.take(Token::Mut);
@@ -85,8 +84,8 @@ impl Repl {
     fn parse_associated_variable(
         &mut self,
         stream: &mut TokenStream,
-        where_: WhereId,
-    ) -> Result<Variable, Error> {
+        where_: ContractId,
+    ) -> Result<Type, Error> {
         stream.expect(Token::Lt)?;
 
         let base = self.parse_variable(stream, where_)?;
@@ -124,23 +123,23 @@ impl Repl {
         let _associated = stream.expect_ident()?;
 
         let projected = Projected {
-            where_,
+            contract: where_,
             base: Box::new(base),
             projection: Projection::Associated {
-                trait_,
+                trait_id: trait_,
                 generics,
                 index: 0,
             },
         };
 
-        Ok(Variable::Projected(projected))
+        Ok(Type::Projected(projected))
     }
 
     fn parse_forall_variable(
         &mut self,
         stream: &mut TokenStream,
-        where_id: WhereId,
-    ) -> Result<Variable, Error> {
+        where_id: ContractId,
+    ) -> Result<Type, Error> {
         stream.expect(Token::Quote)?;
 
         let name = stream.expect_ident()?;
@@ -151,12 +150,12 @@ impl Repl {
         };
 
         match foralls.get(&name) {
-            Some(forall) => Ok(Variable::Forall(*forall)),
+            Some(forall) => Ok(Type::Generic(*forall)),
             None => {
                 if create {
-                    let forall = Forall::new(where_id);
+                    let forall = Generic::new();
                     foralls.insert(name.clone(), forall);
-                    Ok(Variable::Forall(forall))
+                    Ok(Type::Generic(forall))
                 } else {
                     let message = format!("unknown forall {}", name);
                     let diagnostic = Diagnostic::new(message);
@@ -169,8 +168,8 @@ impl Repl {
     pub(crate) fn parse_variable(
         &mut self,
         stream: &mut TokenStream,
-        where_id: WhereId,
-    ) -> Result<Variable, Error> {
+        where_id: ContractId,
+    ) -> Result<Type, Error> {
         let (token, span) = stream.peek();
 
         let variable = match token {

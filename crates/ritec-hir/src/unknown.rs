@@ -5,8 +5,6 @@ use std::{
 
 use ritec_diagnostic::Span;
 
-use crate::WhereId;
-
 /// A unique identifier for an unknown type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Uid {
@@ -39,8 +37,6 @@ impl Uid {
 /// An unknown type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Unknown {
-    pub where_id: WhereId,
-
     /// A unique identifier for this unknown type.
     pub uid: Uid,
 
@@ -50,7 +46,7 @@ pub struct Unknown {
 
 impl Display for Unknown {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "_{} in {}", self.uid, self.where_id)?;
+        write!(f, "_{}", self.uid)?;
 
         Ok(())
     }

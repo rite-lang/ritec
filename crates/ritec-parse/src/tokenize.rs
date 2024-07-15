@@ -235,6 +235,15 @@ impl Tokenizer {
             return self.parse_string(line);
         }
 
+        // parse a three character symbol
+        if line.len() >= 3 {
+            if let Some(token) = Token::from_symbol(&line[..3]) {
+                *line = &line[3..];
+
+                return Ok((token, 3));
+            }
+        }
+
         // parse a two character symbol
         if line.len() >= 2 {
             if let Some(token) = Token::from_symbol(&line[..2]) {

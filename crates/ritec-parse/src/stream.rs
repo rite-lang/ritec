@@ -46,6 +46,10 @@ impl TokenStream {
         self.peek().0 == token
     }
 
+    pub fn nth_is(&self, n: usize, token: Token) -> bool {
+        self.peek_nth(n).0 == token
+    }
+
     pub fn consume(&mut self) -> (Token, Span) {
         match self.tokens.get(self.index) {
             Some(token) => {
@@ -56,14 +60,8 @@ impl TokenStream {
         }
     }
 
-    pub fn consume_nth(&mut self, n: usize) -> (Token, Span) {
-        match self.tokens.get(self.index + n) {
-            Some(token) => {
-                self.index += n + 1;
-                token.clone()
-            }
-            None => (Token::Eof, self.eof_span()),
-        }
+    pub fn consume_n(&mut self, n: usize) {
+        self.index += n;
     }
 
     pub fn take_spanned(&mut self, token: Token) -> Option<Span> {
@@ -110,11 +108,11 @@ impl TokenStream {
         Ok(ident)
     }
 
-    pub fn expect_string(&mut self) -> Result<String, Diagnostic> {
+    pub fn expect_string_spanned(&mut self) -> Result<(String, Span), Diagnostic> {
         let (token, span) = self.consume();
 
         match token {
-            Token::String(string) => Ok(string),
+            Token::String(string) => Ok((string, span)),
             actual => {
                 let message = format!("expected string, found {}", actual);
                 let diagnostic = Diagnostic::new(message).with_span(span);
@@ -124,11 +122,16 @@ impl TokenStream {
         }
     }
 
-    pub fn expect_integer(&mut self) -> Result<u64, Diagnostic> {
+    pub fn expect_string(&mut self) -> Result<String, Diagnostic> {
+        let (string, _) = self.expect_string_spanned()?;
+        Ok(string)
+    }
+
+    pub fn expect_integer_spanned(&mut self) -> Result<(u64, Span), Diagnostic> {
         let (token, span) = self.consume();
 
         match token {
-            Token::Integer(integer) => Ok(integer),
+            Token::Integer(integer) => Ok((integer, span)),
             actual => {
                 let message = format!("expected integer, found {}", actual);
                 let diagnostic = Diagnostic::new(message).with_span(span);
@@ -136,6 +139,30 @@ impl TokenStream {
                 Err(diagnostic)
             }
         }
+    }
+
+    pub fn expect_integer(&mut self) -> Result<u64, Diagnostic> {
+        let (integer, _) = self.expect_integer_spanned()?;
+        Ok(integer)
+    }
+
+    pub fn expect_float_spanned(&mut self) -> Result<(f64, Span), Diagnostic> {
+        let (token, span) = self.consume();
+
+        match token {
+            Token::Float(float) => Ok((float, span)),
+            actual => {
+                let message = format!("expected float, found {}", actual);
+                let diagnostic = Diagnostic::new(message).with_span(span);
+
+                Err(diagnostic)
+            }
+        }
+    }
+
+    pub fn expect_float(&mut self) -> Result<f64, Diagnostic> {
+        let (float, _) = self.expect_float_spanned()?;
+        Ok(float)
     }
 
     pub fn spanned<T>(

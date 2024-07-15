@@ -1,12 +1,12 @@
 use std::fmt::Display;
 
-use crate::{Item, Variable};
+use crate::{Item, Type};
 
 /// A partially known type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Partial {
     pub item: Item,
-    pub params: Vec<Variable>,
+    pub params: Vec<Type>,
 }
 
 impl Display for Partial {

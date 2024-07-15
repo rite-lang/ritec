@@ -13,6 +13,12 @@ macro_rules! arena {
             index: usize,
         }
 
+        impl $id {
+            pub fn index(&self) -> usize {
+                self.index
+            }
+        }
+
         #[derive(::std::default::Default)]
         pub struct $name {
             items: ::std::vec::Vec<::std::option::Option<$item>>,
@@ -41,6 +47,14 @@ macro_rules! arena {
         impl $name {
             pub fn new() -> Self {
                 Self::default()
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.items.is_empty()
+            }
+
+            pub fn len(&self) -> usize {
+                self.iter().count()
             }
 
             pub fn alloc(&mut self) -> $id {
@@ -88,6 +102,13 @@ macro_rules! arena {
                     let id = $id { index };
 
                     Some((id, item.as_mut()?))
+                })
+            }
+
+            pub fn keys(&self) -> impl Iterator<Item = $id> + '_ {
+                (self.items.iter().enumerate()).filter_map(|(index, item)| {
+                    // no one line please
+                    item.as_ref().map(|_| $id { index })
                 })
             }
         }

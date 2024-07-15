@@ -1,13 +1,19 @@
 use std::fmt::Display;
 
+use crate::{EnumId, StructId};
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Item {
     Void,
     Bool,
+    Int { signed: bool, width: Option<u16> },
+    Float { width: u16 },
     Pointer { mutable: bool },
     Tuple,
     Slice,
     Function,
+    Struct(StructId),
+    Enum(EnumId),
 }
 
 impl Display for Item {
@@ -15,6 +21,20 @@ impl Display for Item {
         match self {
             Self::Void => write!(f, "void"),
             Self::Bool => write!(f, "bool"),
+            Self::Int { signed, width } => {
+                if *signed {
+                    write!(f, "i")
+                } else {
+                    write!(f, "u")
+                }?;
+
+                if let Some(width) = width {
+                    write!(f, "{}", width)?;
+                }
+
+                Ok(())
+            }
+            Self::Float { width } => write!(f, "f{}", width),
             Self::Pointer { mutable } => {
                 if *mutable {
                     write!(f, "*mut")
@@ -25,6 +45,8 @@ impl Display for Item {
             Self::Tuple => write!(f, "tuple"),
             Self::Slice => write!(f, "slice"),
             Self::Function => write!(f, "fn"),
+            Self::Struct(id) => write!(f, "{:?}", id),
+            Self::Enum(id) => write!(f, "{:?}", id),
         }
     }
 }

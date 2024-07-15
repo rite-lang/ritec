@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{TraitId, Variable, WhereId};
+use crate::{ContractId, TraitId, Type};
 
 /// A type projection.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -8,10 +8,10 @@ pub enum Projection {
     /// An associated type.
     Associated {
         /// The trait that defines the associated type.
-        trait_: TraitId,
+        trait_id: TraitId,
 
         /// The generics that specialize the trait.
-        generics: Vec<Variable>,
+        generics: Vec<Type>,
 
         /// The index of the associated type.
         index: usize,
@@ -22,7 +22,7 @@ impl Display for Projection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Projection::Associated {
-                trait_,
+                trait_id: trait_,
                 generics,
                 index,
             } => {
@@ -38,10 +38,10 @@ impl Display for Projection {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Projected {
     /// The where clause this is attached to.
-    pub where_: WhereId,
+    pub contract: ContractId,
 
     /// The base type of this projected type.
-    pub base: Box<Variable>,
+    pub base: Box<Type>,
 
     /// The projection of this projected type.
     pub projection: Projection,

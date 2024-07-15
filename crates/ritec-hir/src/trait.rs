@@ -1,31 +1,48 @@
 use std::fmt::Display;
 
-use crate::{Forall, Variable, WhereId};
+use crate::{ContractId, Generic, Type};
 
 /// A trait method.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TraitMethod {
+    /// The name of the method.
+    pub name: String,
+
+    /// The generics of the method.
+    pub generics: Vec<Generic>,
+
     /// The arguments of the method.
-    pub arguments: Vec<Variable>,
+    pub arguments: Vec<Type>,
 
     /// The output of the method.
-    pub output: Variable,
+    pub output: Type,
 
     /// The where clause of the method.
-    pub where_: WhereId,
+    pub contract: ContractId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Assoc {
+    pub name: String,
 }
 
 /// A trait.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Trait {
+    /// The name of the trait.
+    pub name: Option<String>,
+
     /// The generics of the trait.
-    pub generics: Vec<Forall>,
+    pub generics: Vec<Generic>,
 
     /// The where clause of the trait.
-    pub where_: WhereId,
+    pub contract: ContractId,
 
     /// The associated types of the trait.
-    pub types: u32,
+    pub assocs: Vec<Assoc>,
+
+    /// The methods of the trait.
+    pub methods: Vec<TraitMethod>,
 }
 
 ritec_arena::arena!(Traits[TraitId]: Trait);

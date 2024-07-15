@@ -1,33 +1,33 @@
 use ritec_diagnostic::Diagnostic;
 
-use crate::{Projected, Projection, Specialization, TraitId, TraitImpl, Variable, WhereId, World};
+use crate::{ContractId, Projected, Projection, Specialization, TraitId, TraitImpl, Type, Types};
 
-impl World {
+impl Types {
     fn applies(
         &self,
-        implementor: &Variable,
-        candidate: &Variable,
+        implementor: &Type,
+        candidate: &Type,
         specialization: &mut Specialization,
     ) -> bool {
         match (candidate, implementor) {
-            (Variable::Unknown(implementor), candidate) => {
+            (Type::Unknown(implementor), candidate) => {
                 match self.substitutions.get(&implementor.uid) {
                     Some(implementor) => self.applies(candidate, implementor, specialization),
                     None => false,
                 }
             }
-            (_, Variable::Unknown(candidate)) => match self.substitutions.get(&candidate.uid) {
+            (_, Type::Unknown(candidate)) => match self.substitutions.get(&candidate.uid) {
                 Some(candidate) => self.applies(candidate, implementor, specialization),
                 None => false,
             },
-            (_, Variable::Forall(forall)) => match specialization.get(*forall).cloned() {
+            (_, Type::Generic(forall)) => match specialization.get(*forall).cloned() {
                 Some(implementor) => self.applies(candidate, &implementor, specialization),
                 None => {
                     specialization.insert(*forall, candidate.clone());
                     true
                 }
             },
-            (Variable::Partial(candidate), Variable::Partial(implementor)) => {
+            (Type::Partial(candidate), Type::Partial(implementor)) => {
                 let mut applies = candidate.item == implementor.item;
 
                 for (candidate, implementor) in candidate.params.iter().zip(&implementor.params) {
@@ -43,8 +43,8 @@ impl World {
     fn fetch_trait_impl(
         &self,
         trait_: TraitId,
-        generics: &[Variable],
-        for_: &Variable,
+        generics: &[Type],
+        for_: &Type,
     ) -> Result<&TraitImpl, Diagnostic> {
         for trait_impl in &self.trait_impls {
             if trait_impl.trait_ != trait_ {
@@ -68,7 +68,7 @@ impl World {
             }
 
             if self
-                .satisfy_specialized(trait_impl.where_, &specialization)
+                .satisfy_specialized(trait_impl.contract, &specialization)
                 .is_err()
             {
                 continue;
@@ -84,12 +84,12 @@ impl World {
 
     pub(crate) fn satisfy_specialized(
         &self,
-        where_id: WhereId,
+        contract: ContractId,
         specialization: &Specialization,
     ) -> Result<(), Diagnostic> {
-        let where_ = &self[where_id];
+        let contract = &self[contract];
 
-        for bound in &where_.bounds {
+        for bound in &contract.bounds {
             let base = specialization.specialize(&bound.base);
 
             let mut generics = Vec::with_capacity(bound.generics.len());
@@ -98,20 +98,20 @@ impl World {
                 generics.push(specialization.specialize(generic));
             }
 
-            self.fetch_trait_impl(bound.trait_, &generics, &base)?;
+            self.fetch_trait_impl(bound.trait_id, &generics, &base)?;
         }
 
         Ok(())
     }
 
-    pub(crate) fn satisfy(&self, where_id: WhereId) -> Result<(), Diagnostic> {
-        self.satisfy_specialized(where_id, &Specialization::new())
+    pub fn satisfy(&self, contract: ContractId) -> Result<(), Diagnostic> {
+        self.satisfy_specialized(contract, &Specialization::new())
     }
 
-    pub(crate) fn project(&self, projected: &Projected) -> Result<Variable, Diagnostic> {
+    pub(crate) fn project(&self, projected: &Projected) -> Result<Type, Diagnostic> {
         match projected.projection {
             Projection::Associated {
-                trait_,
+                trait_id: trait_,
                 ref generics,
                 index,
             } => {

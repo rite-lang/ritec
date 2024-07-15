@@ -3,32 +3,26 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::{Partial, Projected, Projection, Variable, WhereId};
+use crate::{Partial, Projected, Projection, Type};
 
 /// A unique identifier for a generic type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Forall {
-    where_id: WhereId,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Generic {
     id: usize,
 }
 
-impl Forall {
+impl Generic {
     /// Create a new unique identifier.
-    pub fn new(where_id: WhereId) -> Self {
+    pub fn new() -> Self {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 
         Self {
-            where_id,
             id: NEXT_ID.fetch_add(1, Ordering::SeqCst),
         }
     }
-
-    pub fn where_id(&self) -> WhereId {
-        self.where_id
-    }
 }
 
-impl Display for Forall {
+impl Display for Generic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "'{}", self.id)
     }
@@ -36,7 +30,7 @@ impl Display for Forall {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Specialization {
-    items: Vec<(Forall, Variable)>,
+    items: Vec<(Generic, Type)>,
 }
 
 impl Specialization {
@@ -44,35 +38,35 @@ impl Specialization {
         Self::default()
     }
 
-    pub fn insert(&mut self, generic: Forall, variable: Variable) {
+    pub fn insert(&mut self, generic: Generic, variable: Type) {
         self.items.push((generic, variable));
     }
 
-    pub fn get(&self, generic: Forall) -> Option<&Variable> {
+    pub fn get(&self, generic: Generic) -> Option<&Type> {
         (self.items.iter()).find_map(|(g, v)| (*g == generic).then_some(v))
     }
 
-    pub fn specialize(&self, variable: &Variable) -> Variable {
+    pub fn specialize(&self, variable: &Type) -> Type {
         match variable {
-            Variable::Unknown(_) => variable.clone(),
-            Variable::Partial(partial) => {
+            Type::Unknown(_) => variable.clone(),
+            Type::Partial(partial) => {
                 let mut params = Vec::with_capacity(partial.params.len());
 
                 for param in &partial.params {
                     params.push(self.specialize(param));
                 }
 
-                Variable::Partial(Partial {
+                Type::Partial(Partial {
                     item: partial.item.clone(),
                     params,
                 })
             }
-            Variable::Projected(projected) => {
+            Type::Projected(projected) => {
                 let base = self.specialize(&projected.base);
 
                 let projection = match projected.projection {
                     Projection::Associated {
-                        trait_,
+                        trait_id: trait_,
                         ref generics,
                         index,
                     } => {
@@ -83,23 +77,24 @@ impl Specialization {
                         }
 
                         Projection::Associated {
-                            trait_,
+                            trait_id: trait_,
                             generics,
                             index,
                         }
                     }
                 };
 
-                Variable::Projected(Projected {
-                    where_: projected.where_,
+                Type::Projected(Projected {
+                    contract: projected.contract,
                     base: Box::new(base),
                     projection,
                 })
             }
-            Variable::Forall(forall) => match self.get(*forall) {
+            Type::Generic(forall) => match self.get(*forall) {
                 Some(variable) => variable.clone(),
-                None => Variable::Forall(*forall),
+                None => Type::Generic(*forall),
             },
+            Type::SelfType => Type::SelfType,
         }
     }
 }

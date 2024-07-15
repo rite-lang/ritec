@@ -16,20 +16,20 @@ pub struct BoolType {
 #[derive(Clone, Debug)]
 pub struct IntType {
     pub signed: bool,
-    pub size: Option<u16>,
+    pub width: Option<u16>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct FloatType {
-    pub size: Option<u16>,
+    pub width: u16,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct PointerType {
     pub mutable: bool,
-    pub ty: Box<Type>,
+    pub pointee: Box<Type>,
     pub span: Span,
 }
 
@@ -54,8 +54,8 @@ pub struct TupleType {
 
 #[derive(Clone, Debug)]
 pub struct FunctionType {
-    pub args: Vec<Type>,
-    pub ret: Box<Type>,
+    pub arguments: Vec<Type>,
+    pub output: Box<Type>,
     pub span: Span,
 }
 
@@ -122,22 +122,26 @@ pub fn parse_int_type(stream: &mut TokenStream) -> Result<IntType, Diagnostic> {
         }
     };
 
-    Ok(IntType { signed, size, span })
+    Ok(IntType {
+        signed,
+        width: size,
+        span,
+    })
 }
 
 pub fn parse_float_type(stream: &mut TokenStream) -> Result<FloatType, Diagnostic> {
     let (token, span) = stream.consume();
 
     let size = match token {
-        Token::F32 => Some(32),
-        Token::F64 => Some(64),
+        Token::F32 => 32,
+        Token::F64 => 64,
         _ => {
             let message = format!("expected float type, found {:?}", token);
             return Err(Diagnostic::new(message).with_span(span));
         }
     };
 
-    Ok(FloatType { size, span })
+    Ok(FloatType { width: size, span })
 }
 
 pub fn parse_pointer_type(stream: &mut TokenStream) -> Result<PointerType, Diagnostic> {
@@ -147,7 +151,11 @@ pub fn parse_pointer_type(stream: &mut TokenStream) -> Result<PointerType, Diagn
     let ty = Box::new(parse_type(stream)?);
     let span = ty.span().join(stream.peek().1);
 
-    Ok(PointerType { mutable, ty, span })
+    Ok(PointerType {
+        mutable,
+        pointee: ty,
+        span,
+    })
 }
 
 pub fn parse_array_type(stream: &mut TokenStream) -> Result<Type, Diagnostic> {
@@ -200,16 +208,18 @@ pub fn parse_tuple_type(stream: &mut TokenStream) -> Result<TupleType, Diagnosti
 }
 
 pub fn parse_function_type(stream: &mut TokenStream) -> Result<FunctionType, Diagnostic> {
+    stream.expect(Token::Fn)?;
+
     let start = stream.expect(Token::Paren(Delim::Open))?;
 
-    let mut args = Vec::new();
+    let mut arguments = Vec::new();
 
     loop {
         if stream.is(Token::Paren(Delim::Close)) {
             break;
         }
 
-        args.push(parse_type(stream)?);
+        arguments.push(parse_type(stream)?);
 
         if !stream.take(Token::Comma) {
             break;
@@ -218,13 +228,17 @@ pub fn parse_function_type(stream: &mut TokenStream) -> Result<FunctionType, Dia
 
     let end = stream.expect(Token::Paren(Delim::Close))?;
 
-    stream.expect(Token::Arrow)?;
-
-    let ret = Box::new(parse_type(stream)?);
+    let output = if stream.take(Token::Arrow) {
+        parse_type(stream)?
+    } else {
+        Type::Void(VoidType {
+            span: start.join(end),
+        })
+    };
 
     Ok(FunctionType {
-        args,
-        ret,
+        arguments,
+        output: Box::new(output),
         span: start.join(end),
     })
 }
@@ -247,12 +261,18 @@ pub fn parse_type(stream: &mut TokenStream) -> Result<Type, Diagnostic> {
         | Token::I64
         | Token::I128
         | Token::Isize => Ok(Type::Int(parse_int_type(stream)?)),
+
         Token::F32 | Token::F64 => Ok(Type::Float(parse_float_type(stream)?)),
         Token::Star => Ok(Type::Pointer(parse_pointer_type(stream)?)),
         Token::Bracket(Delim::Open) => parse_array_type(stream),
         Token::Paren(Delim::Open) => Ok(Type::Tuple(parse_tuple_type(stream)?)),
         Token::Fn => Ok(Type::Function(parse_function_type(stream)?)),
-        Token::Ident(_) | Token::Quote => Ok(Type::Item(parse_item(stream)?)),
+        Token::Ident(_)
+        | Token::Quote
+        | Token::ColonColon
+        | Token::SelfLower
+        | Token::SelfUpper => Ok(Type::Item(parse_item(stream, true)?)),
+
         _ => {
             let message = format!("expected type, found {:?}", token);
             let span = stream.peek().1;

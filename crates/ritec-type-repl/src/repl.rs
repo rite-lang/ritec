@@ -1,8 +1,10 @@
 use std::{collections::HashMap, fs, path::Path};
 
 use ritec_diagnostic::{Diagnostic, Span};
+use ritec_hir::{
+    Assoc, Contract, ContractId, Generic, Trait, TraitBound, TraitId, TraitImpl, Types, Unknown,
+};
 use ritec_parse::{Token, TokenStream, Tokenizer};
-use ritec_type::{Forall, Solver, Trait, TraitBound, TraitId, TraitImpl, Unknown, Where, WhereId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -26,7 +28,7 @@ pub(crate) struct TraitDef {
 }
 
 pub(crate) struct FnDef {
-    pub(crate) where_: WhereId,
+    pub(crate) where_: ContractId,
 }
 
 pub(crate) enum State {
@@ -35,15 +37,15 @@ pub(crate) enum State {
     Fn(FnDef),
 }
 
-pub(crate) type Foralls = HashMap<String, Forall>;
+pub(crate) type Foralls = HashMap<String, Generic>;
 
 pub struct Repl {
     pub(crate) tokenizer: Tokenizer,
     pub(crate) unknowns: HashMap<String, Unknown>,
     pub(crate) global_foralls: Foralls,
-    pub(crate) foralls: HashMap<WhereId, Foralls>,
+    pub(crate) foralls: HashMap<ContractId, Foralls>,
     pub(crate) traits: HashMap<String, TraitId>,
-    pub(crate) solver: Solver,
+    pub(crate) types: Types,
     pub(crate) state: Option<State>,
     pub(crate) expects_indent: bool,
 }
@@ -56,7 +58,7 @@ impl Repl {
             global_foralls: Foralls::new(),
             foralls: HashMap::new(),
             traits: HashMap::new(),
-            solver: Solver::new(),
+            types: Types::new(),
             state: None,
             expects_indent: false,
         }
@@ -64,18 +66,18 @@ impl Repl {
 
     fn print_command(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         stream.consume();
-        let where_ = self.solver.world.wheres.push(Where::new());
+        let where_ = self.types.contracts.push(Contract::new());
         let variable = self.parse_variable(stream, where_)?;
-        println!("{}", self.solver.world.substitute(&variable));
+        println!("{}", self.types.substitute(&variable));
 
         Ok(())
     }
 
     fn complete_command(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         stream.consume();
-        let where_ = self.solver.world.wheres.push(Where::new());
+        let where_ = self.types.contracts.push(Contract::new());
         let variable = self.parse_variable(stream, where_)?;
-        let complete = self.solver.world.query(&variable)?;
+        let complete = self.types.query(&variable)?;
         println!("{}", complete);
 
         Ok(())
@@ -84,13 +86,13 @@ impl Repl {
     fn print_trait(&self, name: &str, trait_: TraitId) -> Result<(), Error> {
         println!("trait {}", name);
 
-        let trait_ = &self.solver.world[trait_];
-        let where_ = &self.solver.world[trait_.where_];
+        let trait_ = &self.types[trait_];
+        let contract = &self.types[trait_.contract];
 
-        if !where_.bounds.is_empty() {
+        if !contract.bounds.is_empty() {
             println!("where");
 
-            for bound in where_.bounds.iter() {
+            for bound in contract.bounds.iter() {
                 print!("| {}", bound);
             }
         }
@@ -128,7 +130,7 @@ impl Repl {
 
     fn solve_command(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         stream.consume();
-        self.solver.solve()?;
+        self.types.solve()?;
 
         Ok(())
     }
@@ -136,7 +138,7 @@ impl Repl {
     fn impls_command(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         stream.consume();
 
-        let where_id = self.solver.world.wheres.push(Where::new());
+        let where_id = self.types.contracts.push(Contract::new());
 
         let mut foralls = Foralls::new();
 
@@ -145,7 +147,7 @@ impl Repl {
                 stream.expect(Token::Quote)?;
                 let ident = stream.expect_ident()?;
 
-                foralls.insert(ident, Forall::new(where_id));
+                foralls.insert(ident, Generic::new());
 
                 if !stream.take(Token::Comma) {
                     break;
@@ -183,7 +185,7 @@ impl Repl {
             stream.expect(Token::Gt)?;
         }
 
-        if self.solver.world[trait_].generics.len() != generics.len() {
+        if self.types[trait_].generics.len() != generics.len() {
             let message = "generic count mismatch";
             let diagnostic = Diagnostic::new(message).with_span(stream.peek().1);
             return Err(Error::from(diagnostic));
@@ -212,7 +214,9 @@ impl Repl {
                 stream.consume();
                 let name = stream.expect_ident()?;
 
-                self.solver.world[state.trait_].types += 1;
+                self.types[state.trait_]
+                    .assocs
+                    .push(Assoc { name: name.clone() });
                 state.types.push(name);
 
                 Ok(())
@@ -226,7 +230,7 @@ impl Repl {
 
     fn trait_impl_statement(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         let where_ = match self.state {
-            Some(State::TraitImpl(ref state)) => state.where_,
+            Some(State::TraitImpl(ref state)) => state.contract,
             _ => unreachable!(),
         };
 
@@ -257,13 +261,13 @@ impl Repl {
     fn unify_statement(
         &mut self,
         stream: &mut TokenStream,
-        where_id: WhereId,
+        contract: ContractId,
     ) -> Result<(), Error> {
-        let lhs = self.parse_variable(stream, where_id)?;
+        let lhs = self.parse_variable(stream, contract)?;
         stream.expect(Token::Eq)?;
-        let rhs = self.parse_variable(stream, where_id)?;
+        let rhs = self.parse_variable(stream, contract)?;
 
-        self.solver.unify(where_id, lhs, rhs);
+        self.types.unify(lhs, rhs);
 
         Ok(())
     }
@@ -293,7 +297,7 @@ impl Repl {
 
         let name = stream.expect_ident()?;
 
-        let where_id = self.solver.world.wheres.push(Where::new());
+        let where_id = self.types.contracts.push(Contract::new());
 
         let mut foralls = Foralls::new();
         let mut generics = Vec::new();
@@ -309,7 +313,7 @@ impl Repl {
                     return Err(Error::from(diagnostic));
                 }
 
-                let forall = Forall::new(where_id);
+                let forall = Generic::new();
                 generics.push(forall);
 
                 foralls.insert(ident, forall);
@@ -322,10 +326,12 @@ impl Repl {
             stream.expect(Token::Gt)?;
         }
 
-        let trait_ = self.solver.world.traits.push(Trait {
+        let trait_ = self.types.traits.push(Trait {
+            name: Some(name.clone()),
             generics,
-            where_: where_id,
-            types: 0,
+            contract: where_id,
+            assocs: Vec::new(),
+            methods: Vec::new(),
         });
 
         self.foralls.insert(where_id, foralls);
@@ -344,7 +350,7 @@ impl Repl {
     fn trait_impl_command(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         stream.consume();
 
-        let where_id = self.solver.world.wheres.push(Where::new());
+        let where_id = self.types.contracts.push(Contract::new());
         let mut foralls = Foralls::new();
 
         if stream.take(Token::Lt) {
@@ -352,7 +358,7 @@ impl Repl {
                 stream.expect(Token::Quote)?;
                 let ident = stream.expect_ident()?;
 
-                foralls.insert(ident, Forall::new(where_id));
+                foralls.insert(ident, Generic::new());
 
                 if !stream.take(Token::Comma) {
                     break;
@@ -389,7 +395,7 @@ impl Repl {
             stream.expect(Token::Gt)?;
         }
 
-        if self.solver.world[trait_].generics.len() != generics.len() {
+        if self.types[trait_].generics.len() != generics.len() {
             let message = "generic count mismatch";
             let diagnostic = Diagnostic::new(message).with_span(stream.peek().1);
             return Err(Error::from(diagnostic));
@@ -402,7 +408,7 @@ impl Repl {
         self.state = Some(State::TraitImpl(TraitImpl {
             trait_,
             generics,
-            where_: where_id,
+            contract: where_id,
             for_,
             types: Vec::new(),
         }));
@@ -415,7 +421,7 @@ impl Repl {
     fn fn_command(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         stream.consume();
 
-        let where_ = self.solver.world.wheres.push(Where::new());
+        let where_ = self.types.contracts.push(Contract::new());
 
         self.state = Some(State::Fn(FnDef { where_ }));
 
@@ -430,7 +436,7 @@ impl Repl {
                 self.traits.insert(trait_.name, trait_.trait_);
             }
             Some(State::TraitImpl(trait_impl)) => {
-                self.solver.world.trait_impls.push(trait_impl);
+                self.types.trait_impls.push(trait_impl);
             }
             Some(State::Fn(_)) => {}
             None => {}
@@ -459,7 +465,7 @@ impl Repl {
 
     fn parse_where_bound(&mut self, stream: &mut TokenStream) -> Result<(), Error> {
         let where_ = match self.state {
-            Some(State::TraitImpl(ref state)) => state.where_,
+            Some(State::TraitImpl(ref state)) => state.contract,
             Some(State::Fn(ref state)) => state.where_,
             _ => {
                 let diagnostic = Diagnostic::new("unexpected where").with_span(stream.peek().1);
@@ -499,12 +505,12 @@ impl Repl {
 
             let bound = TraitBound {
                 base: base.clone(),
-                trait_,
+                trait_id: trait_,
                 generics,
                 types: Vec::new(),
             };
 
-            self.solver.world[where_].bounds.push(bound);
+            self.types[where_].bounds.push(bound);
 
             if !stream.take(Token::Plus) {
                 break;

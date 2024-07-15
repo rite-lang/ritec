@@ -1,4 +1,4 @@
-use crate::{TraitId, Variable, WhereId};
+use crate::{ContractId, TraitId, Type};
 
 /// A trait implementation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -7,14 +7,14 @@ pub struct TraitImpl {
     pub trait_: TraitId,
 
     /// The generics that specialize the trait.
-    pub generics: Vec<Variable>,
+    pub generics: Vec<Type>,
 
-    /// The where clause of the implementation.
-    pub where_: WhereId,
+    /// The contract of the implementation.
+    pub contract: ContractId,
 
     /// The type that the implementation is for.
-    pub for_: Variable,
+    pub for_: Type,
 
     /// The associated types of the implementation.
-    pub types: Vec<Variable>,
+    pub types: Vec<Type>,
 }

@@ -1,0 +1,123 @@
+use ritec_ast as ast;
+use ritec_diagnostic::Diagnostic;
+use ritec_hir as hir;
+
+use crate::Lowerer;
+
+impl Lowerer {
+    fn populate_enum(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::Enum,
+    ) -> Result<(), Diagnostic> {
+        let name = ast.name.clone();
+        let id = self.unit.types.enums.alloc();
+
+        module.enums.insert(name, id);
+
+        Ok(())
+    }
+
+    fn populate_struct(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::Struct,
+    ) -> Result<(), Diagnostic> {
+        let name = ast.name.clone();
+        let id = self.unit.types.structs.alloc();
+
+        module.structs.insert(name, id);
+
+        Ok(())
+    }
+
+    fn populate_function(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::Function,
+    ) -> Result<(), Diagnostic> {
+        let name = ast.name.clone();
+        let id = self.unit.bodies.alloc();
+
+        module.funcs.insert(name, id);
+
+        Ok(())
+    }
+
+    fn populate_trait(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::Trait,
+    ) -> Result<(), Diagnostic> {
+        let name = ast.name.clone();
+
+        let mut generics = Vec::new();
+
+        for _ in ast.generics.iter() {
+            generics.push(hir::Generic::new());
+        }
+
+        let mut assocs = Vec::new();
+
+        for ty in ast.types.iter() {
+            assocs.push(hir::Assoc {
+                name: ty.name.clone(),
+            });
+        }
+
+        let contract = self.unit.types.contracts.alloc();
+
+        let id = self.unit.types.traits.push(hir::Trait {
+            name: Some(ast.name.clone()),
+            generics,
+            contract,
+            assocs,
+            methods: Vec::new(),
+        });
+
+        module.traits.insert(name, id);
+
+        Ok(())
+    }
+
+    fn populate_sub_module(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::ModuleDecl,
+    ) -> Result<(), Diagnostic> {
+        match ast.module {
+            Some(ref ast_module) => {
+                let name = ast.name.clone();
+                let mut sub_module = hir::Module::default();
+                self.populate_module(&mut sub_module, ast_module)?;
+
+                let id = self.unit.modules.push(sub_module);
+                module.modules.insert(name, id);
+
+                Ok(())
+            }
+            None => todo!(),
+        }
+    }
+
+    pub fn populate_module(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::Module,
+    ) -> Result<(), Diagnostic> {
+        for decl in ast.decls.iter() {
+            match decl {
+                ast::Decl::Enum(ast) => self.populate_enum(module, ast)?,
+                ast::Decl::Struct(ast) => self.populate_struct(module, ast)?,
+                ast::Decl::Function(ast) => self.populate_function(module, ast)?,
+                ast::Decl::Trait(ast) => self.populate_trait(module, ast)?,
+                ast::Decl::TraitImpl(_) => {
+                    // there is nothing to do here
+                }
+                ast::Decl::Module(ast) => self.populate_sub_module(module, ast)?,
+            }
+        }
+
+        Ok(())
+    }
+}

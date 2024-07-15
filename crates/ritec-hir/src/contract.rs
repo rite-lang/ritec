@@ -1,26 +1,26 @@
 use std::fmt::Display;
 
-use crate::{TraitId, Variable};
+use crate::{TraitId, Type};
 
 /// A trait bound.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TraitBound {
     /// The base type of this bound.
-    pub base: Variable,
+    pub base: Type,
 
     /// The trait in question.
-    pub trait_: TraitId,
+    pub trait_id: TraitId,
 
     /// The generics that specialize the trait.
-    pub generics: Vec<Variable>,
+    pub generics: Vec<Type>,
 
     /// The optionally specified associated types.
-    pub types: Vec<Option<Variable>>,
+    pub types: Vec<Option<Type>>,
 }
 
 impl Display for TraitBound {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}<", self.trait_)?;
+        write!(f, "{}<", self.trait_id)?;
 
         let generics: Vec<_> = self.generics.iter().map(ToString::to_string).collect();
         write!(f, "{}", generics.join(", "))?;
@@ -40,34 +40,26 @@ impl Display for TraitBound {
 
 /// A where clause.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Where {
-    /// The parent of the where clause.
-    ///
-    /// This clause will inherit the bounds of the parent.
-    pub parent: Option<WhereId>,
-
+pub struct Contract {
     /// The bounds of the where clause.
     pub bounds: Vec<TraitBound>,
 }
 
-impl Default for Where {
+impl Default for Contract {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Where {
+impl Contract {
     pub fn new() -> Self {
-        Self {
-            parent: None,
-            bounds: Vec::new(),
-        }
+        Self { bounds: Vec::new() }
     }
 }
 
-ritec_arena::arena!(Wheres[WhereId]: Where);
+ritec_arena::arena!(Contracts[ContractId]: Contract);
 
-impl Display for WhereId {
+impl Display for ContractId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.index)
     }

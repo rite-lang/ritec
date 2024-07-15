@@ -1,0 +1,10 @@
+[package]
+name = "ritec-mir"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+ritec-arena.workspace = true
+ritec-diagnostic.workspace = true
