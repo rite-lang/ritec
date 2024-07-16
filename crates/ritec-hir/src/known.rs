@@ -30,6 +30,8 @@ impl Display for Item {
 
                 if let Some(width) = width {
                     write!(f, "{}", width)?;
+                } else {
+                    write!(f, "size")?;
                 }
 
                 Ok(())

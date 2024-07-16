@@ -1,6 +1,6 @@
 use ritec_diagnostic::Diagnostic;
 
-use crate::{Generic, Partial, Projected, Type, Types, Unknown};
+use crate::{Generic, Item, Partial, Projected, Type, Types, Unknown, UnknownKind};
 
 impl Types {
     pub(crate) fn unify_var_var(&mut self, a: &Type, b: &Type) -> Result<bool, Diagnostic> {
@@ -16,7 +16,39 @@ impl Types {
     }
 
     fn unify_unknown_var(&mut self, unknown: &Unknown, other: &Type) -> Result<bool, Diagnostic> {
-        self.add_substitution(unknown.uid, other.clone());
+        match unknown.kind {
+            UnknownKind::Any => {
+                self.add_substitution(unknown.uid, other.clone());
+            }
+            UnknownKind::Number { float } => match other {
+                Type::Unknown(other) => {
+                    self.add_substitution(other.uid, Type::Unknown(unknown.clone()));
+                }
+                Type::Partial(partial) => match partial.item {
+                    Item::Int { .. } if !float => {
+                        self.add_substitution(unknown.uid, other.clone());
+                    }
+                    Item::Float { .. } => {
+                        self.add_substitution(unknown.uid, other.clone());
+                    }
+                    _ => {
+                        let diagnostic = Diagnostic::new("expected number");
+                        return Err(diagnostic);
+                    }
+                },
+                Type::Projected(projected) => {
+                    if let Some(var) = self.project(projected, &Default::default())? {
+                        self.unify_unknown_var(unknown, &var)?;
+                    } else {
+                        return Ok(false);
+                    }
+                }
+                _ => {
+                    let diagnostic = Diagnostic::new("expected number");
+                    return Err(diagnostic);
+                }
+            },
+        }
 
         Ok(true)
     }

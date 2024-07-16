@@ -235,6 +235,20 @@ impl Tokenizer {
             return self.parse_string(line);
         }
 
+        // parse an identifier
+        if Self::is_ident_start(c) {
+            let (ident, len) = self.parse_ident(line);
+
+            if ident == "_" {
+                return Ok((Token::Under, len));
+            }
+
+            return match Token::from_keyword(&ident) {
+                Some(keyword) => Ok((keyword, len)),
+                None => Ok((Token::Ident(ident), len)),
+            };
+        }
+
         // parse a three character symbol
         if line.len() >= 3 {
             if let Some(token) = Token::from_symbol(&line[..3]) {
@@ -258,16 +272,6 @@ impl Tokenizer {
             *line = &line[1..];
 
             return Ok((token, 1));
-        }
-
-        // parse an identifier
-        if Self::is_ident_start(c) {
-            let (ident, len) = self.parse_ident(line);
-
-            return match Token::from_keyword(&ident) {
-                Some(keyword) => Ok((keyword, len)),
-                None => Ok((Token::Ident(ident), len)),
-            };
         }
 
         let span = Span::new(self.lo, self.lo + c.len_utf8());

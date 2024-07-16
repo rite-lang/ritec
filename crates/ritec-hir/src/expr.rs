@@ -7,6 +7,7 @@ pub enum Constant {
     Void,
     Int(u64),
     Float(f64),
+    Null,
     Func(BodyId, Vec<Type>),
     Method {
         implementor: Type,
@@ -58,6 +59,9 @@ pub enum ExprKind {
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     Struct(StructId, Vec<Type>, Vec<Expr>),
     Field(Box<Expr>, String),
+    Ref(Box<Expr>),
+    Deref(Box<Expr>),
+    Sizeof(Type),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Match(Box<Expr>, Vec<Arm>),
     Block(Vec<Expr>),

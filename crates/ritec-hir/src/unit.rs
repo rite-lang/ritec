@@ -1,10 +1,14 @@
 use crate::{
-    Assoc, BinaryOp, Bodies, Body, Contract, Expr, ExprKind, Generic, Local, Locals, Method,
-    Modules, Projected, Projection, Trait, TraitId, TraitImpl, TraitMethod, Type, Types,
+    Assoc, BinaryOp, Bodies, Body, BodyId, Contract, Expr, ExprKind, Generic, Item, Local, Locals,
+    Method, Modules, Partial, Projected, Projection, Trait, TraitId, TraitImpl, TraitMethod, Type,
+    Types,
 };
 
 #[derive(Clone, Debug)]
 pub struct Builtins {
+    pub alloc: BodyId,
+    pub dealloc: BodyId,
+    pub sizeof: BodyId,
     pub add_trait: TraitId,
     pub sub_trait: TraitId,
     pub mul_trait: TraitId,
@@ -75,6 +79,15 @@ impl Unit {
             Type::BOOL,
         ];
 
+        let alloc = Self::generate_alloc_function(types);
+        let alloc = bodies.push(alloc);
+
+        let dealloc = Self::generate_dealloc_function(types);
+        let dealloc = bodies.push(dealloc);
+
+        let sizeof = Self::generate_sizeof_function(types);
+        let sizeof = bodies.push(sizeof);
+
         let add_trait = Self::generate_binary_trait(types, "Add");
         let sub_trait = Self::generate_binary_trait(types, "Sub");
         let mul_trait = Self::generate_binary_trait(types, "Mul");
@@ -124,11 +137,117 @@ impl Unit {
         }
 
         Builtins {
+            alloc,
+            dealloc,
+            sizeof,
             add_trait,
             sub_trait,
             mul_trait,
             div_trait,
             eq_trait,
+        }
+    }
+
+    fn generate_alloc_function(types: &mut Types) -> Body {
+        let generic = Generic::new();
+
+        let contract = types.contracts.push(Contract::new());
+
+        let mut locals = Locals::new();
+
+        let size_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::USIZE,
+        });
+
+        let expr = Expr {
+            kind: ExprKind::Intrinsic(
+                "alloc",
+                vec![Expr {
+                    kind: ExprKind::Local(size_local),
+                    span: None,
+                    ty: Type::USIZE,
+                }],
+            ),
+            span: None,
+            ty: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+        };
+
+        Body {
+            name: Some(String::from("alloc")),
+            arguments: vec![size_local],
+            output: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+            generics: vec![generic],
+            contract,
+            locals,
+            expr,
+        }
+    }
+
+    fn generate_dealloc_function(types: &mut Types) -> Body {
+        let generic = Generic::new();
+
+        let contract = types.contracts.push(Contract::new());
+
+        let mut locals = Locals::new();
+
+        let ptr_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+        });
+
+        let expr = Expr {
+            kind: ExprKind::Intrinsic(
+                "dealloc",
+                vec![Expr {
+                    kind: ExprKind::Local(ptr_local),
+                    span: None,
+                    ty: locals[ptr_local].ty.clone(),
+                }],
+            ),
+            span: None,
+            ty: Type::VOID,
+        };
+
+        Body {
+            name: Some(String::from("dealloc")),
+            arguments: vec![ptr_local],
+            output: Type::VOID,
+            generics: vec![generic],
+            contract,
+            locals,
+            expr,
+        }
+    }
+
+    fn generate_sizeof_function(types: &mut Types) -> Body {
+        let generic = Generic::new();
+
+        let contract = types.contracts.push(Contract::new());
+
+        Body {
+            name: Some(String::from("size_of")),
+            arguments: Vec::new(),
+            output: Type::USIZE,
+            generics: vec![generic],
+            contract,
+            locals: Locals::new(),
+            expr: Expr {
+                kind: ExprKind::Sizeof(Type::Generic(generic)),
+                span: None,
+                ty: Type::USIZE,
+            },
         }
     }
 

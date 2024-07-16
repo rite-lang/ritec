@@ -34,9 +34,18 @@ impl Uid {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum UnknownKind {
+    Any,
+
+    Number { float: bool },
+}
+
 /// An unknown type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Unknown {
+    pub kind: UnknownKind,
+
     /// A unique identifier for this unknown type.
     pub uid: Uid,
 

@@ -130,7 +130,11 @@ impl BodyLowerer<'_, '_> {
     fn lower_int_expr(&mut self, ast: &ast::LitIntExpr) -> Result<hir::Expr, Diagnostic> {
         let kind = hir::ExprKind::Const(hir::Constant::Int(ast.value));
         let span = Some(ast.span);
-        let ty = hir::Type::I32;
+        let ty = hir::Type::Unknown(hir::Unknown {
+            kind: hir::UnknownKind::Number { float: false },
+            uid: hir::Uid::new(),
+            span: ast.span,
+        });
 
         Ok(hir::Expr { kind, span, ty })
     }
@@ -138,7 +142,22 @@ impl BodyLowerer<'_, '_> {
     fn lower_float_expr(&mut self, ast: &ast::LitFloatExpr) -> Result<hir::Expr, Diagnostic> {
         let kind = hir::ExprKind::Const(hir::Constant::Float(ast.value));
         let span = Some(ast.span);
-        let ty = hir::Type::F32;
+        let ty = hir::Type::Unknown(hir::Unknown {
+            kind: hir::UnknownKind::Number { float: true },
+            uid: hir::Uid::new(),
+            span: ast.span,
+        });
+
+        Ok(hir::Expr { kind, span, ty })
+    }
+
+    fn lower_null_expr(&mut self, ast: &ast::NullExpr) -> Result<hir::Expr, Diagnostic> {
+        let kind = hir::ExprKind::Const(hir::Constant::Null);
+        let span = Some(ast.span);
+        let ty = hir::Type::Partial(hir::Partial {
+            item: hir::Item::Pointer { mutable: true },
+            params: vec![hir::Type::unknown(ast.span)],
+        });
 
         Ok(hir::Expr { kind, span, ty })
     }
@@ -244,6 +263,40 @@ impl BodyLowerer<'_, '_> {
         let span = Some(ast.span);
 
         Ok(hir::Expr { kind, span, ty })
+    }
+
+    fn lower_unary_expr(&mut self, ast: &ast::UnaryExpr) -> Result<hir::Expr, Diagnostic> {
+        let value = self.lower_expr(&ast.expr)?;
+
+        match ast.op {
+            ast::UnaryOp::Neg => todo!(),
+            ast::UnaryOp::Not => todo!(),
+            ast::UnaryOp::Ref => {
+                let ty = hir::Type::Partial(hir::Partial {
+                    item: hir::Item::Pointer { mutable: true },
+                    params: vec![value.ty.clone()],
+                });
+
+                let kind = hir::ExprKind::Ref(Box::new(value));
+                let span = Some(ast.span);
+
+                Ok(hir::Expr { kind, span, ty })
+            }
+            ast::UnaryOp::Deref => {
+                let ty = hir::Type::unknown(ast.span);
+                let pointer_ty = hir::Type::Partial(hir::Partial {
+                    item: hir::Item::Pointer { mutable: true },
+                    params: vec![ty.clone()],
+                });
+
+                self.unit.types.unify(value.ty.clone(), pointer_ty);
+
+                let kind = hir::ExprKind::Deref(Box::new(value));
+                let span = Some(ast.span);
+
+                Ok(hir::Expr { kind, span, ty })
+            }
+        }
     }
 
     fn lower_binary_math(
@@ -495,11 +548,12 @@ impl BodyLowerer<'_, '_> {
             ast::Expr::Item(expr) => self.lower_item_expr(expr),
             ast::Expr::LitInt(expr) => self.lower_int_expr(expr),
             ast::Expr::LitFloat(expr) => self.lower_float_expr(expr),
+            ast::Expr::Null(expr) => self.lower_null_expr(expr),
             ast::Expr::Struct(expr) => self.lower_struct_expr(expr),
             ast::Expr::Paren(expr) => self.lower_expr(&expr.expr),
             ast::Expr::Field(expr) => self.lower_field_expr(expr),
             ast::Expr::Call(expr) => self.lower_call_expr(expr),
-            ast::Expr::Unary(_) => todo!(),
+            ast::Expr::Unary(expr) => self.lower_unary_expr(expr),
             ast::Expr::Binary(expr) => self.lower_binary_expr(expr),
             ast::Expr::Assign(expr) => self.lower_assign_expr(expr),
             ast::Expr::Let(expr) => self.lower_let_expr(expr),

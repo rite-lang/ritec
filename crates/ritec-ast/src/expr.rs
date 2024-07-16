@@ -27,6 +27,11 @@ pub struct LitFloatExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct NullExpr {
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct FieldInit {
     pub name: String,
     pub value: Expr,
@@ -200,6 +205,7 @@ pub enum Expr {
     Item(ItemExpr),
     LitInt(LitIntExpr),
     LitFloat(LitFloatExpr),
+    Null(NullExpr),
     Struct(StructExpr),
     Paren(ParenExpr),
     Field(FieldExpr),
@@ -221,6 +227,7 @@ impl Expr {
             Expr::Item(expr) => expr.span,
             Expr::LitInt(expr) => expr.span,
             Expr::LitFloat(expr) => expr.span,
+            Expr::Null(expr) => expr.span,
             Expr::Struct(expr) => expr.span,
             Expr::Paren(expr) => expr.span,
             Expr::Field(expr) => expr.span,
@@ -334,6 +341,10 @@ pub fn parse_term_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
         | Token::SelfUpper => parse_item_expr(stream),
         Token::Integer(_) => parse_lit_int_expr(stream),
         Token::Float(_) => parse_lit_float_expr(stream),
+        Token::Null => {
+            stream.consume();
+            Ok(Expr::Null(NullExpr { span }))
+        }
         _ => {
             let message = format!("expected term, found {}", token);
             let diagnostic = Diagnostic::new(message).with_span(span);
@@ -624,6 +635,7 @@ pub fn parse_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
         | Token::Quote
         | Token::SelfLower
         | Token::SelfUpper
+        | Token::Null
         | Token::Ident(_)
         | Token::Integer(_)
         | Token::Float(_) => parse_assign_expr(stream),

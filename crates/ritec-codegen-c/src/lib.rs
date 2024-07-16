@@ -7,7 +7,7 @@ use ritec_mir::{
 
 struct Codegen<'a> {
     unit: &'a Unit,
-    types: String,
+    define: String,
     bodies: String,
     structs: HashMap<Vec<Type>, String>,
     unions: HashMap<Vec<Type>, String>,
@@ -69,8 +69,8 @@ impl Codegen<'_> {
 
                 let name = format!("_rite_function_{}", self.functions.len());
 
-                self.types += &format!("typedef {} (*{})({});\n", output, name, args);
-                self.types += "\n";
+                self.define += &format!("typedef {} (*{})({});\n", output, name, args);
+                self.define += "\n";
 
                 self.functions.insert(types, name.clone());
 
@@ -81,18 +81,18 @@ impl Codegen<'_> {
                     return name.clone();
                 }
 
-                self.types += "typedef struct {\n";
+                self.define += "typedef struct {\n";
 
                 for (i, field) in fields.iter().enumerate() {
                     let ty = self.gen_type(field);
 
-                    self.types += &format!("    {} {};\n", ty, field_name(i));
+                    self.define += &format!("    {} {};\n", ty, field_name(i));
                 }
 
                 let name = format!("_rite_struct_{}", self.structs.len());
 
-                self.types += &format!("}} {};\n", name);
-                self.types += "\n";
+                self.define += &format!("}} {};\n", name);
+                self.define += "\n";
 
                 self.structs.insert(fields.clone(), name.clone());
 
@@ -103,18 +103,18 @@ impl Codegen<'_> {
                     return name.clone();
                 }
 
-                self.types += "typedef union {\n";
+                self.define += "typedef union {\n";
 
                 for (i, variant) in variants.iter().enumerate() {
                     let ty = self.gen_type(variant);
 
-                    self.types += &format!("    {} _{};\n", ty, i);
+                    self.define += &format!("    {} _{};\n", ty, i);
                 }
 
                 let name = format!("_rite_union_{}", self.unions.len());
 
-                self.types += &format!("}} {};\n", name);
-                self.types += "\n";
+                self.define += &format!("}} {};\n", name);
+                self.define += "\n";
 
                 self.unions.insert(variants.clone(), name.clone());
 
@@ -128,8 +128,8 @@ impl Codegen<'_> {
 
         for projection in &place.projections {
             match projection.kind {
-                ProjectionKind::Deref => todo!(),
-                ProjectionKind::Field(index) => code = format!("{}.{}", code, field_name(index)),
+                ProjectionKind::Deref => code = format!("*{}", code),
+                ProjectionKind::Field(index) => code = format!("({}).{}", code, field_name(index)),
             }
         }
 
@@ -138,7 +138,13 @@ impl Codegen<'_> {
 
     fn gen_const(&mut self, constant: &Const) -> String {
         match constant.kind {
-            ConstKind::Int(v) => format!("{}", v),
+            ConstKind::Int(v) => {
+                if matches!(constant.ty, Type::Pointer { .. }) {
+                    return format!("(void*) {}", v);
+                }
+
+                format!("{}", v)
+            }
             ConstKind::Float(v) => format!("{}", v),
             ConstKind::Struct(ref fields) => {
                 let ty = self.gen_type(&constant.ty);
@@ -183,6 +189,15 @@ impl Codegen<'_> {
 
                 format!("{} {} {}", lhs, op, rhs)
             }
+            Value::AddressOf(mutable, place) => {
+                let place = self.gen_place(place);
+
+                if *mutable {
+                    format!("&{}", place)
+                } else {
+                    format!("const &{}", place)
+                }
+            }
             Value::Struct(fields) => {
                 let ty = self.gen_type(&value.ty());
 
@@ -190,10 +205,16 @@ impl Codegen<'_> {
 
                 format!("({}) {{ {} }}", ty, fields.join(", "))
             }
+            Value::Sizeof(ty) => format!("sizeof({})", self.gen_type(ty)),
             Value::Intrinsic(name, args, _) => match *name {
-                "malloc" => {
+                "alloc" => {
                     let size = self.gen_operand(&args[0]);
                     format!("malloc({})", size)
+                }
+                "dealloc" => {
+                    let ptr = self.gen_operand(&args[0]);
+                    self.bodies += &format!("    free({});\n", ptr);
+                    self.gen_value(&Value::VOID)
                 }
                 _ => unimplemented!(),
             },
@@ -307,6 +328,7 @@ impl Codegen<'_> {
         let name = body_name(body_id);
         let output = self.gen_type(&body.output);
 
+        self.define += &format!("{} {}(", output, name);
         self.bodies += &format!("{} {}(", output, name);
 
         for (i, argument) in body.arguments.iter().enumerate() {
@@ -315,12 +337,15 @@ impl Codegen<'_> {
             let name = local_name(*argument);
 
             if i > 0 {
+                self.define += ", ";
                 self.bodies += ", ";
             }
 
+            self.define += &format!("{} {}", ty, name);
             self.bodies += &format!("{} {}", ty, name);
         }
 
+        self.define += ");\n";
         self.bodies += ") {\n";
 
         for (local, decl) in body.locals.iter() {
@@ -372,7 +397,7 @@ fn header() -> String {
 pub fn codegen(unit: &Unit) -> String {
     let mut codegen = Codegen {
         unit,
-        types: String::new(),
+        define: String::new(),
         bodies: String::new(),
         structs: HashMap::new(),
         unions: HashMap::new(),
@@ -387,7 +412,7 @@ pub fn codegen(unit: &Unit) -> String {
 
     code += "\n";
     code += "/* ---------- Types ---------- */\n";
-    code += &codegen.types;
+    code += &codegen.define;
     code += "\n";
     code += "/* ---------- Bodies --------- */\n";
     code += &codegen.bodies;

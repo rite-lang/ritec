@@ -175,6 +175,16 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 Ok((block, place))
             }
 
+            hir::ExprKind::Deref(ref base) => {
+                let mut place = unpack!(block = self.build_place(block, base)?);
+                let ty = self.build_type(&expr.ty)?;
+
+                let kind = mir::ProjectionKind::Deref;
+                place.projections.push(mir::Projection { kind, ty });
+
+                Ok((block, place))
+            }
+
             hir::ExprKind::Call(ref callee, ref args) => {
                 let callee = unpack!(block = self.build_operand(block, callee)?);
 
@@ -235,6 +245,8 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             | hir::ExprKind::Assign(_, _)
             | hir::ExprKind::Binary(_, _, _)
             | hir::ExprKind::Struct(_, _, _)
+            | hir::ExprKind::Sizeof(_)
+            | hir::ExprKind::Ref(_)
             | hir::ExprKind::If(_, _, _)
             | hir::ExprKind::Block(_)
             | hir::ExprKind::Intrinsic(_, _) => {
@@ -304,14 +316,13 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             hir::ExprKind::If(ref cond, ref then, ref otherwise) => {
                 let cond = unpack!(block = self.build_operand(block, cond)?);
 
-                let mut then_block = self.create_block();
-                let then = unpack!(then_block = self.build_value(then_block, then)?);
+                let then_start = self.create_block();
+                let (then_end, then) = self.build_value(then_start, then)?;
 
                 match otherwise {
                     Some(otherwise) => {
-                        let mut else_block = self.create_block();
-                        let otherwise =
-                            unpack!(else_block = self.build_value(else_block, otherwise)?);
+                        let else_block = self.create_block();
+                        let (else_end, otherwise) = self.build_value(else_block, otherwise)?;
 
                         let ty = self.build_type(&expr.ty)?;
                         let decl = mir::LocalDecl {
@@ -328,20 +339,20 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                         };
 
                         let statement = mir::Statement::Assign(place.clone(), then);
-                        self[then_block].statements.push(statement);
+                        self[then_end].statements.push(statement);
 
                         let statement = mir::Statement::Assign(place.clone(), otherwise);
-                        self[else_block].statements.push(statement);
+                        self[else_end].statements.push(statement);
 
                         let end_block = self.create_block();
 
-                        self[then_block].terminator = mir::Terminator::Goto(end_block);
-                        self[else_block].terminator = mir::Terminator::Goto(end_block);
+                        self[then_end].terminator = mir::Terminator::Goto(end_block);
+                        self[else_end].terminator = mir::Terminator::Goto(end_block);
 
                         self[block].terminator = mir::Terminator::Switch {
                             discriminant: cond,
-                            default: else_block,
-                            cases: vec![(0, then_block)],
+                            default: then_start,
+                            cases: vec![(0, else_block)],
                         };
 
                         Ok((end_block, mir::Operand::Move(place)))
@@ -349,11 +360,11 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                     None => {
                         let end_block = self.create_block();
 
-                        self[then_block].terminator = mir::Terminator::Goto(end_block);
+                        self[then_end].terminator = mir::Terminator::Goto(end_block);
 
                         self[block].terminator = mir::Terminator::Switch {
                             discriminant: cond,
-                            default: then_block,
+                            default: then_start,
                             cases: vec![(0, end_block)],
                         };
 
@@ -392,9 +403,21 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
+                hir::Constant::Null => {
+                    let ty = self.build_type(&expr.ty)?;
+                    let kind = mir::ConstKind::Int(0);
+                    let constant = mir::Const { kind, ty };
+
+                    Ok((block, mir::Operand::Const(constant)))
+                }
                 hir::Constant::Func(body_id, generics) => {
+                    let generics = generics
+                        .iter()
+                        .map(|ty| self.specialization.specialize(ty))
+                        .collect::<Vec<_>>();
+
                     let body = &self.bcx.hir.bodies[*body_id];
-                    let id = build_body(self.bcx, *body_id, body, generics, Default::default())?;
+                    let id = build_body(self.bcx, *body_id, body, &generics, Default::default())?;
                     let ty = self.build_type(&expr.ty)?;
 
                     let kind = mir::ConstKind::Body(id);
@@ -436,6 +459,9 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             | hir::ExprKind::Binary(_, _, _)
             | hir::ExprKind::Struct(_, _, _)
             | hir::ExprKind::Field(_, _)
+            | hir::ExprKind::Ref(_)
+            | hir::ExprKind::Deref(_)
+            | hir::ExprKind::Sizeof(_)
             | hir::ExprKind::Match(_, _)
             | hir::ExprKind::Intrinsic(_, _) => {
                 let place = unpack!(block = self.build_place(block, expr)?);
@@ -467,6 +493,11 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 Ok((block, mir::Value::Binary(op, lhs, rhs)))
             }
 
+            hir::ExprKind::Ref(ref base) => {
+                let place = unpack!(block = self.build_place(block, base)?);
+                Ok((block, mir::Value::AddressOf(true, place)))
+            }
+
             hir::ExprKind::Struct(id, ref _generics, ref fields) => {
                 let hir_struct = &self.bcx.hir.types[id];
 
@@ -480,6 +511,23 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 Ok((block, mir::Value::Struct(values)))
             }
 
+            hir::ExprKind::Sizeof(ref ty) => {
+                let ty = self.build_type(ty)?;
+                Ok((block, mir::Value::Sizeof(ty)))
+            }
+
+            hir::ExprKind::Intrinsic(name, ref args) => {
+                let mut operands = Vec::new();
+
+                for arg in args {
+                    let operand = unpack!(block = self.build_operand(block, arg)?);
+                    operands.push(operand);
+                }
+
+                let ty = self.build_type(&expr.ty)?;
+                Ok((block, mir::Value::Intrinsic(name, operands, ty)))
+            }
+
             hir::ExprKind::Const(_)
             | hir::ExprKind::Local(_)
             | hir::ExprKind::Let(_, _)
@@ -487,9 +535,9 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             | hir::ExprKind::Call(_, _)
             | hir::ExprKind::If(_, _, _)
             | hir::ExprKind::Field(_, _)
+            | hir::ExprKind::Deref(_)
             | hir::ExprKind::Match(_, _)
-            | hir::ExprKind::Block(_)
-            | hir::ExprKind::Intrinsic(_, _) => {
+            | hir::ExprKind::Block(_) => {
                 let operand = unpack!(block = self.build_operand(block, expr)?);
                 Ok((block, mir::Value::Use(operand)))
             }

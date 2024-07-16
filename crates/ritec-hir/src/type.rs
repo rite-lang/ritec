@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use ritec_diagnostic::Span;
 
-use crate::{Generic, Item, Partial, Projected, Uid, Unknown};
+use crate::{Generic, Item, Partial, Projected, Uid, Unknown, UnknownKind};
 
 /// A type variable.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -63,6 +63,7 @@ impl Type {
 
     pub fn unknown(span: Span) -> Self {
         Self::Unknown(Unknown {
+            kind: UnknownKind::Any,
             uid: Uid::new(),
             span,
         })

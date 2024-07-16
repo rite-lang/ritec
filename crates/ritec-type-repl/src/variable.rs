@@ -1,5 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
-use ritec_hir::{ContractId, Generic, Item, Partial, Projected, Projection, Type, Uid, Unknown};
+use ritec_hir::{
+    ContractId, Generic, Item, Partial, Projected, Projection, Type, Uid, Unknown, UnknownKind,
+};
 use ritec_parse::{Delim, Token, TokenStream};
 
 use crate::repl::{Error, Repl};
@@ -11,6 +13,7 @@ impl Repl {
         }
 
         let unknown = Unknown {
+            kind: UnknownKind::Any,
             uid: Uid::new(),
             span,
         };

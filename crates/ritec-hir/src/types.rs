@@ -6,8 +6,8 @@ use std::{
 use ritec_diagnostic::Diagnostic;
 
 use crate::{
-    Contract, ContractId, Contracts, Enums, Known, Specialization, Struct, StructId, Structs,
-    Trait, TraitId, TraitImpl, Traits, Type, Uid,
+    Contract, ContractId, Contracts, Enums, Item, Known, Specialization, Struct, StructId, Structs,
+    Trait, TraitId, TraitImpl, Traits, Type, Uid, UnknownKind,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -68,10 +68,31 @@ impl Types {
         }
 
         match variable {
-            Type::Unknown(_) => {
-                let diagnostic = Diagnostic::new("unknown type");
-                Err(diagnostic)
-            }
+            Type::Unknown(unknown) => match unknown.kind {
+                UnknownKind::Number { float } if float => {
+                    let known = Known {
+                        item: Item::Float { width: 32 },
+                        params: Vec::new(),
+                    };
+
+                    Ok(known)
+                }
+                UnknownKind::Number { .. } => {
+                    let known = Known {
+                        item: Item::Int {
+                            signed: true,
+                            width: Some(32),
+                        },
+                        params: Vec::new(),
+                    };
+
+                    Ok(known)
+                }
+                _ => {
+                    let diagnostic = Diagnostic::new("unknown type");
+                    Err(diagnostic)
+                }
+            },
             Type::Partial(partial) => {
                 let mut params = Vec::with_capacity(partial.params.len());
 
