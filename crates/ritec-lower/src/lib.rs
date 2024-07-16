@@ -9,5 +9,3 @@ use ritec_hir as hir;
 pub struct Lowerer {
     pub unit: hir::Unit,
 }
-
-impl Lowerer {}

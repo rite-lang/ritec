@@ -139,8 +139,7 @@ impl Types {
             let mut applies = true;
 
             for (generic, implementor) in generics.iter().zip(&trait_impl.generics) {
-                let applied = self.applies(generic, implementor, &mut specialization);
-                applies &= applied;
+                applies &= self.applies(generic, implementor, &mut specialization);
             }
 
             if !applies {

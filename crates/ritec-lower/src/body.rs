@@ -544,22 +544,18 @@ impl BodyLowerer<'_, '_> {
         };
 
         let mut exprs = Vec::new();
-        let mut type_ = hir::Type::VOID;
+        let mut ty = hir::Type::VOID;
 
         for expr in &ast.exprs {
             let expr = lowerer.lower_expr(expr)?;
-            type_ = expr.ty.clone();
+            ty = expr.ty.clone();
             exprs.push(expr);
         }
 
         let kind = hir::ExprKind::Block(exprs);
         let span = Some(ast.span);
 
-        Ok(hir::Expr {
-            kind,
-            span,
-            ty: type_,
-        })
+        Ok(hir::Expr { kind, span, ty })
     }
 
     pub fn lower_expr(&mut self, ast: &ast::Expr) -> Result<hir::Expr, Diagnostic> {
