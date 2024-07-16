@@ -6,6 +6,12 @@ pub enum Terminator {
 
     Return(Value),
 
+    Switch {
+        discriminant: Operand,
+        default: BlockId,
+        cases: Vec<(u64, BlockId)>,
+    },
+
     Call {
         callee: Operand,
         arguments: Vec<Operand>,

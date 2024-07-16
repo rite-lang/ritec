@@ -126,7 +126,7 @@ pub struct AssocImpl {
 #[derive(Clone, Debug)]
 pub struct TraitImpl {
     pub trait_: Item,
-    pub for_: Type,
+    pub implementor: Type,
     pub contract: Contract,
     pub types: Vec<AssocImpl>,
     pub methods: Vec<MethodImpl>,
@@ -587,7 +587,7 @@ fn parse_trait_impl(stream: &mut TokenStream, trait_: Item) -> Result<TraitImpl,
     let span = trait_.span.join(for_.span());
     Ok(TraitImpl {
         trait_,
-        for_,
+        implementor: for_,
         contract,
         types,
         methods,

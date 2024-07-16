@@ -268,6 +268,7 @@ pub fn parse_type(stream: &mut TokenStream) -> Result<Type, Diagnostic> {
         Token::Paren(Delim::Open) => Ok(Type::Tuple(parse_tuple_type(stream)?)),
         Token::Fn => Ok(Type::Function(parse_function_type(stream)?)),
         Token::Ident(_)
+        | Token::Lt
         | Token::Quote
         | Token::ColonColon
         | Token::SelfLower

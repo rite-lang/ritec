@@ -1,7 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_item, parse_pattern, parse_type, Item, Pattern, Type};
+use crate::{parse_item, parse_pattern, parse_type, Item, Pat, Type};
 
 #[derive(Clone, Debug)]
 pub struct VoidExpr {
@@ -28,7 +28,7 @@ pub struct LitFloatExpr {
 
 #[derive(Clone, Debug)]
 pub struct FieldInit {
-    pub field: String,
+    pub name: String,
     pub value: Expr,
     pub span: Span,
 }
@@ -49,7 +49,7 @@ pub struct ParenExpr {
 #[derive(Clone, Debug)]
 pub struct FieldExpr {
     pub base: Box<Expr>,
-    pub field: String,
+    pub name: String,
     pub span: Span,
 }
 
@@ -112,9 +112,9 @@ impl BinaryOp {
             Token::Star => Some(BinaryOp::Mul),
             Token::Slash => Some(BinaryOp::Div),
             Token::Percent => Some(BinaryOp::Mod),
-            Token::And => Some(BinaryOp::And),
-            Token::Or => Some(BinaryOp::Or),
-            Token::Eq => Some(BinaryOp::Eq),
+            Token::AndAnd => Some(BinaryOp::And),
+            Token::OrOr => Some(BinaryOp::Or),
+            Token::EqEq => Some(BinaryOp::Eq),
             Token::NotEq => Some(BinaryOp::Ne),
             Token::Lt => Some(BinaryOp::Lt),
             Token::LtEq => Some(BinaryOp::Le),
@@ -145,6 +145,13 @@ pub struct BinaryExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct AssignExpr {
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct LetExpr {
     pub mutable: bool,
     pub name: String,
@@ -160,16 +167,24 @@ pub struct LoopExpr {
 }
 
 #[derive(Clone, Debug)]
-pub struct MatchArm {
-    pub pattern: Pattern,
-    pub body: Expr,
+pub struct IfExpr {
+    pub cond: Box<Expr>,
+    pub then: Box<Expr>,
+    pub otherwise: Option<Box<Expr>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct Arm {
+    pub pat: Pat,
+    pub expr: Expr,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct MatchExpr {
     pub value: Box<Expr>,
-    pub arms: Vec<MatchArm>,
+    pub arms: Vec<Arm>,
     pub span: Span,
 }
 
@@ -191,8 +206,10 @@ pub enum Expr {
     Call(CallExpr),
     Unary(UnaryExpr),
     Binary(BinaryExpr),
+    Assign(AssignExpr),
     Let(LetExpr),
     Loop(LoopExpr),
+    If(IfExpr),
     Match(MatchExpr),
     Block(BlockExpr),
 }
@@ -210,8 +227,10 @@ impl Expr {
             Expr::Call(expr) => expr.span,
             Expr::Unary(expr) => expr.span,
             Expr::Binary(expr) => expr.span,
+            Expr::Assign(expr) => expr.span,
             Expr::Let(expr) => expr.span,
             Expr::Loop(expr) => expr.span,
+            Expr::If(expr) => expr.span,
             Expr::Match(expr) => expr.span,
             Expr::Block(expr) => expr.span,
         }
@@ -242,56 +261,47 @@ pub fn parse_field_init(stream: &mut TokenStream) -> Result<FieldInit, Diagnosti
     stream.expect(Token::Colon)?;
     let value = parse_expr(stream)?;
 
-    Ok(FieldInit { field, value, span })
+    Ok(FieldInit {
+        name: field,
+        value,
+        span,
+    })
 }
 
 pub fn parse_struct_expr(stream: &mut TokenStream, item: Item) -> Result<Expr, Diagnostic> {
-    let start = stream.expect(Token::Brace(Delim::Open))?;
+    let start = stream.expect(Token::Newline)?;
 
-    let has_newlines = stream.take(Token::Newline);
-
-    if has_newlines {
-        stream.expect(Token::Indent)?;
-    }
+    stream.expect(Token::Indent)?;
 
     let mut fields = Vec::new();
 
-    loop {
-        if has_newlines && stream.is(Token::Dedent) {
-            break;
-        }
-
-        if stream.is(Token::Brace(Delim::Close)) {
-            break;
-        }
-
+    while !stream.is(Token::Dedent) {
         let field = parse_field_init(stream)?;
         fields.push(field);
 
-        if !stream.take(Token::Comma) {
+        if !stream.take(Token::Newline) {
             break;
         }
-
-        if has_newlines {
-            stream.expect(Token::Newline)?;
-        }
     }
 
-    if has_newlines {
-        stream.take(Token::Newline);
-        stream.expect(Token::Dedent)?;
-    }
-
-    let end = stream.expect(Token::Brace(Delim::Close))?;
+    let end = stream.expect(Token::Dedent)?;
 
     let span = start.join(end);
+
     Ok(Expr::Struct(StructExpr { item, fields, span }))
+}
+
+fn is_struct_expr(stream: &mut TokenStream) -> bool {
+    stream.is(Token::Newline)
+        && stream.nth_is(1, Token::Indent)
+        && matches!(stream.peek_nth(2).0, Token::Ident(_))
+        && stream.nth_is(3, Token::Colon)
 }
 
 pub fn parse_item_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
     let item = parse_item(stream, true)?;
 
-    if stream.is(Token::Brace(Delim::Open)) {
+    if is_struct_expr(stream) {
         parse_struct_expr(stream, item)
     } else {
         let span = item.span;
@@ -342,7 +352,7 @@ pub fn parse_field_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
 
         Ok(Expr::Field(FieldExpr {
             base: Box::new(base),
-            field,
+            name: field,
             span,
         }))
     } else {
@@ -450,6 +460,23 @@ pub fn parse_binary_expr(stream: &mut TokenStream, min_precedence: u8) -> Result
     Ok(lhs)
 }
 
+pub fn parse_assign_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
+    let lhs = parse_binary_expr(stream, 0)?;
+
+    if stream.take(Token::Eq) {
+        let rhs = parse_expr(stream)?;
+        let span = lhs.span().join(rhs.span());
+
+        Ok(Expr::Assign(AssignExpr {
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            span,
+        }))
+    } else {
+        Ok(lhs)
+    }
+}
+
 pub fn parse_let_expr(stream: &mut TokenStream) -> Result<LetExpr, Diagnostic> {
     stream.expect(Token::Let)?;
 
@@ -511,20 +538,53 @@ pub fn parse_loop_expr(stream: &mut TokenStream) -> Result<LoopExpr, Diagnostic>
     })
 }
 
+pub fn parse_if_expr(stream: &mut TokenStream) -> Result<IfExpr, Diagnostic> {
+    let span = stream.expect(Token::If)?;
+
+    let cond = parse_expr(stream)?;
+    let then = parse_body(stream)?;
+
+    let has_else = if stream.take(Token::Else) {
+        true
+    } else if stream.is(Token::Newline) && stream.nth_is(1, Token::Else) {
+        stream.consume_n(2);
+        true
+    } else {
+        false
+    };
+
+    let otherwise = if has_else {
+        if stream.is(Token::If) {
+            Some(Box::new(Expr::If(parse_if_expr(stream)?)))
+        } else {
+            Some(Box::new(parse_body(stream)?))
+        }
+    } else {
+        None
+    };
+
+    Ok(IfExpr {
+        cond: Box::new(cond),
+        then: Box::new(then),
+        otherwise,
+        span,
+    })
+}
+
 fn is_match_arm(stream: &mut TokenStream) -> bool {
     stream.is(Token::Newline) && stream.nth_is(1, Token::Or)
 }
 
-fn parse_match_arm(stream: &mut TokenStream) -> Result<MatchArm, Diagnostic> {
+fn parse_match_arm(stream: &mut TokenStream) -> Result<Arm, Diagnostic> {
     stream.expect(Token::Or)?;
 
     let pattern = parse_pattern(stream)?;
     let body = parse_body(stream)?;
     let span = pattern.span().join(body.span());
 
-    Ok(MatchArm {
-        pattern,
-        body,
+    Ok(Arm {
+        pat: pattern,
+        expr: body,
         span,
     })
 }
@@ -566,9 +626,10 @@ pub fn parse_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
         | Token::SelfUpper
         | Token::Ident(_)
         | Token::Integer(_)
-        | Token::Float(_) => parse_binary_expr(stream, 0),
+        | Token::Float(_) => parse_assign_expr(stream),
         Token::Let => Ok(Expr::Let(parse_let_expr(stream)?)),
         Token::Loop => Ok(Expr::Loop(parse_loop_expr(stream)?)),
+        Token::If => Ok(Expr::If(parse_if_expr(stream)?)),
         Token::Match => Ok(Expr::Match(parse_match_expr(stream)?)),
         Token::Newline => {
             stream.consume();

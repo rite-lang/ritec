@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use ritec_mir::{
-    Block, BlockId, Body, BodyId, Const, ConstKind, Local, Operand, Place, Statement, Terminator,
-    Type, Unit, Value,
+    Block, BlockId, Body, BodyId, Const, ConstKind, Local, Operand, Place, ProjectionKind,
+    Statement, Terminator, Type, Unit, Value,
 };
 
 struct Codegen<'a> {
@@ -17,7 +17,7 @@ struct Codegen<'a> {
 impl Codegen<'_> {
     fn gen_type(&mut self, ty: &Type) -> String {
         match ty {
-            Type::Bool => String::from("bool"),
+            Type::Bool => String::from("uint8_t"),
             Type::Int { signed, width } => match width {
                 Some(width) => {
                     if *signed {
@@ -86,7 +86,7 @@ impl Codegen<'_> {
                 for (i, field) in fields.iter().enumerate() {
                     let ty = self.gen_type(field);
 
-                    self.types += &format!("    {} _{};\n", ty, i);
+                    self.types += &format!("    {} {};\n", ty, field_name(i));
                 }
 
                 let name = format!("_rite_struct_{}", self.structs.len());
@@ -124,9 +124,14 @@ impl Codegen<'_> {
     }
 
     fn gen_place(&mut self, place: &Place) -> String {
-        let code = local_name(place.base);
+        let mut code = local_name(place.base);
 
-        for _projection in &place.projections {}
+        for projection in &place.projections {
+            match projection.kind {
+                ProjectionKind::Deref => todo!(),
+                ProjectionKind::Field(index) => code = format!("{}.{}", code, field_name(index)),
+            }
+        }
 
         code
     }
@@ -165,18 +170,25 @@ impl Codegen<'_> {
             Value::Use(operand) => self.gen_operand(operand),
             Value::Binary(op, lhs, rhs) => {
                 let op = match op {
-                    ritec_mir::BinOp::Add => "+",
-                    ritec_mir::BinOp::Sub => "-",
-                    ritec_mir::BinOp::Mul => "*",
-                    ritec_mir::BinOp::Div => "/",
-                    ritec_mir::BinOp::Rem => "%",
-                    ritec_mir::BinOp::Eq => "==",
+                    ritec_mir::BinaryOp::Add => "+",
+                    ritec_mir::BinaryOp::Sub => "-",
+                    ritec_mir::BinaryOp::Mul => "*",
+                    ritec_mir::BinaryOp::Div => "/",
+                    ritec_mir::BinaryOp::Rem => "%",
+                    ritec_mir::BinaryOp::Eq => "==",
                 };
 
                 let lhs = self.gen_operand(lhs);
                 let rhs = self.gen_operand(rhs);
 
                 format!("{} {} {}", lhs, op, rhs)
+            }
+            Value::Struct(fields) => {
+                let ty = self.gen_type(&value.ty());
+
+                let fields: Vec<_> = fields.iter().map(|field| self.gen_operand(field)).collect();
+
+                format!("({}) {{ {} }}", ty, fields.join(", "))
             }
             Value::Intrinsic(name, args, _) => match *name {
                 "malloc" => {
@@ -207,6 +219,35 @@ impl Codegen<'_> {
 
                 format!("return {};", value)
             }
+            Terminator::Switch {
+                discriminant: operand,
+                default,
+                cases,
+            } => {
+                let operand = self.gen_operand(operand);
+
+                let mut code = String::new();
+
+                code += "switch (";
+                code += &operand;
+                code += ") {\n";
+
+                for (value, target) in cases {
+                    code += "      case ";
+                    code += &format!("{}", value);
+                    code += ": goto ";
+                    code += &block_name(*target);
+                    code += ";\n";
+                }
+
+                code += "      default: goto ";
+                code += &block_name(*default);
+                code += ";\n";
+                code += "    }";
+
+                code
+            }
+
             Terminator::Call {
                 callee,
                 arguments,
@@ -243,6 +284,7 @@ impl Codegen<'_> {
     }
 
     fn gen_block(&mut self, block_id: BlockId, block: &Block) {
+        self.bodies += "  ";
         self.bodies += &block_name(block_id);
         self.bodies += ":\n";
 
@@ -305,8 +347,12 @@ fn local_name(local: Local) -> String {
     format!("_{}", local.index)
 }
 
+fn field_name(index: usize) -> String {
+    format!("_{}", index)
+}
+
 fn block_name(block_id: BlockId) -> String {
-    format!("_basic_block{}", block_id.index())
+    format!("basic_block{}", block_id.index())
 }
 
 fn body_name(body_id: BodyId) -> String {
@@ -317,6 +363,7 @@ fn header() -> String {
     let mut code = String::new();
 
     code += "#include <stdint.h>\n";
+    code += "#include <stddef.h>\n";
     code += "#include <stdlib.h>\n";
 
     code
@@ -344,6 +391,15 @@ pub fn codegen(unit: &Unit) -> String {
     code += "\n";
     code += "/* ---------- Bodies --------- */\n";
     code += &codegen.bodies;
+
+    if let Some(entry) = unit.entry {
+        code += "\n";
+        code += "int main(int argc, char** argv) {\n";
+        code += "  return ";
+        code += &body_name(entry);
+        code += "((size_t) argc, (const uint8_t**) argv);\n";
+        code += "}\n";
+    }
 
     code
 }

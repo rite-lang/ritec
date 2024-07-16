@@ -68,6 +68,7 @@ impl Lowerer {
         let contract = self.unit.types.contracts.alloc();
 
         let id = self.unit.types.traits.push(hir::Trait {
+            self_generic: hir::Generic::new(),
             name: Some(ast.name.clone()),
             generics,
             contract,
@@ -105,6 +106,8 @@ impl Lowerer {
         module: &mut hir::Module,
         ast: &ast::Module,
     ) -> Result<(), Diagnostic> {
+        module.use_builtins(&self.unit.builtins);
+
         for decl in ast.decls.iter() {
             match decl {
                 ast::Decl::Enum(ast) => self.populate_enum(module, ast)?,

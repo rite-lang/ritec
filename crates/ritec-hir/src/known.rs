@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{EnumId, StructId};
+use crate::{EnumId, Partial, StructId, Type};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Item {
@@ -59,6 +59,15 @@ pub struct Known {
 
     /// The parameters of this known type.
     pub params: Vec<Known>,
+}
+
+impl Known {
+    pub fn to_type(&self) -> Type {
+        Type::Partial(Partial {
+            item: self.item.clone(),
+            params: self.params.iter().map(Known::to_type).collect(),
+        })
+    }
 }
 
 impl Display for Known {

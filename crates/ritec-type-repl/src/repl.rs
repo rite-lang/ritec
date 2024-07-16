@@ -77,7 +77,7 @@ impl Repl {
         stream.consume();
         let where_ = self.types.contracts.push(Contract::new());
         let variable = self.parse_variable(stream, where_)?;
-        let complete = self.types.query(&variable)?;
+        let complete = self.types.query(&variable, &Default::default())?;
         println!("{}", complete);
 
         Ok(())
@@ -327,6 +327,7 @@ impl Repl {
         }
 
         let trait_ = self.types.traits.push(Trait {
+            self_generic: Generic::new(),
             name: Some(name.clone()),
             generics,
             contract: where_id,
@@ -406,11 +407,12 @@ impl Repl {
         let for_ = self.parse_variable(stream, where_id)?;
 
         self.state = Some(State::TraitImpl(TraitImpl {
-            trait_,
+            trait_id: trait_,
             generics,
             contract: where_id,
-            for_,
+            implementor: for_,
             types: Vec::new(),
+            methods: Vec::new(),
         }));
 
         self.expects_indent = true;

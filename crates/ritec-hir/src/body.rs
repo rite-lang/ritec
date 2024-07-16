@@ -7,7 +7,7 @@ ritec_arena::arena!(Bodies[BodyId]: Body);
 pub struct Local {
     pub mutable: bool,
     pub name: Option<String>,
-    pub type_: Type,
+    pub ty: Type,
 }
 
 #[derive(Clone, Debug)]

@@ -16,6 +16,9 @@ pub enum Projection {
         /// The index of the associated type.
         index: usize,
     },
+
+    /// A field projection.
+    Field { name: String },
 }
 
 impl Display for Projection {
@@ -30,6 +33,7 @@ impl Display for Projection {
 
                 write!(f, "{}<{}> assoc {}", trait_, generics.join(", "), index)
             }
+            Projection::Field { name } => write!(f, "{}", name),
         }
     }
 }

@@ -8,6 +8,7 @@ pub struct Variant {
 
 #[derive(Clone, Debug)]
 pub struct Enum {
+    pub name: Option<String>,
     pub contract: ContractId,
     pub generics: Vec<Generic>,
     pub variants: Vec<Variant>,
@@ -16,14 +17,21 @@ pub struct Enum {
 #[derive(Clone, Debug)]
 pub struct Field {
     pub name: String,
-    pub type_: Type,
+    pub ty: Type,
 }
 
 #[derive(Clone, Debug)]
 pub struct Struct {
+    pub name: Option<String>,
     pub contract: ContractId,
     pub generics: Vec<Generic>,
     pub fields: Vec<Field>,
+}
+
+impl Struct {
+    pub fn field_index(&self, name: &str) -> Option<usize> {
+        self.fields.iter().position(|field| field.name == name)
+    }
 }
 
 ritec_arena::arena!(Enums[EnumId]: Enum);

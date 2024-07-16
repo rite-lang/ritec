@@ -29,6 +29,11 @@ pub struct Assoc {
 /// A trait.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Trait {
+    /// The self type of the trait.
+    ///
+    /// This is implemented as a generic, that will be specialized.
+    pub self_generic: Generic,
+
     /// The name of the trait.
     pub name: Option<String>,
 
@@ -43,6 +48,20 @@ pub struct Trait {
 
     /// The methods of the trait.
     pub methods: Vec<TraitMethod>,
+}
+
+impl Trait {
+    pub fn self_type(&self) -> Type {
+        Type::Generic(self.self_generic)
+    }
+
+    pub fn assoc_index(&self, name: &str) -> Option<usize> {
+        self.assocs.iter().position(|assoc| assoc.name == name)
+    }
+
+    pub fn method_index(&self, name: &str) -> Option<usize> {
+        self.methods.iter().position(|method| method.name == name)
+    }
 }
 
 ritec_arena::arena!(Traits[TraitId]: Trait);

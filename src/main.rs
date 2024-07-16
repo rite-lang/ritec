@@ -42,7 +42,6 @@ impl HirOptions {
         lowerer.populate_module(&mut module, &ast).unwrap();
         let root = lowerer.unit.modules.push(module);
         lowerer.lower_module(root, &ast).unwrap();
-        lowerer.unit.types.solve().unwrap();
 
         println!("{:#?}", lowerer.unit);
 

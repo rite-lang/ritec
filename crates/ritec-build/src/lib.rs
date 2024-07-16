@@ -58,7 +58,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
     }
 
     fn build_type(&mut self, hir: &hir::Type) -> Result<mir::Type, Diagnostic> {
-        let known = self.bcx.hir.types.query(hir)?;
+        let known = self.bcx.hir.types.query(hir, &self.specialization)?;
 
         self.build_known(known)
     }
@@ -111,11 +111,26 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             hir::Item::Struct(id) => {
                 let hir_struct = &self.bcx.hir.types[id];
 
-                let fields = hir_struct
-                    .fields
-                    .iter()
-                    .map(|field| self.build_type(&field.type_))
-                    .collect::<Result<_, _>>()?;
+                let mut specialization = hir::Specialization::new();
+
+                for (&generic, ty) in hir_struct.generics.iter().zip(&known.params) {
+                    specialization.insert(generic, ty.to_type());
+                }
+
+                let mut builder = Builder {
+                    bcx: self.bcx,
+                    locals: self.locals,
+                    blocks: self.blocks,
+                    body: self.body,
+                    specialization,
+                };
+
+                let mut fields = Vec::new();
+
+                for field in &hir_struct.fields {
+                    let ty = builder.build_type(&field.ty)?;
+                    fields.push(ty);
+                }
 
                 mir::Type::Struct { fields }
             }
@@ -131,7 +146,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
         match expr.kind {
             hir::ExprKind::Local(local_id) => {
                 let local = &self.body.locals[local_id];
-                let ty = self.build_type(&local.type_)?;
+                let ty = self.build_type(&local.ty)?;
 
                 let base = mir::Local {
                     index: local_id.index(),
@@ -142,6 +157,20 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                     ty,
                     projections: Vec::new(),
                 };
+
+                Ok((block, place))
+            }
+
+            hir::ExprKind::Field(ref base, ref name) => {
+                let (_, _, index) =
+                    (self.bcx.hir.types).fetch_field_index(&base.ty, name, &self.specialization)?;
+
+                let mut place = unpack!(block = self.build_place(block, base)?);
+                let ty = self.build_type(&expr.ty)?;
+
+                let kind = mir::ProjectionKind::Field(index);
+
+                place.projections.push(mir::Projection { kind, ty });
 
                 Ok((block, place))
             }
@@ -181,12 +210,54 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 Ok((new_block, place))
             }
 
+            hir::ExprKind::Match(ref discriminant, ref arms) => {
+                let value = unpack!(block = self.build_operand(block, discriminant)?);
+                let ty = self.build_type(&expr.ty)?;
+
+                let local = mir::LocalDecl {
+                    mutable: true,
+                    ty: ty.clone(),
+                };
+
+                let base = self.locals.push(local);
+
+                let place = mir::Place {
+                    base,
+                    ty,
+                    projections: Vec::new(),
+                };
+
+                todo!()
+            }
+
             hir::ExprKind::Const(_)
             | hir::ExprKind::Let(_, _)
             | hir::ExprKind::Assign(_, _)
+            | hir::ExprKind::Binary(_, _, _)
+            | hir::ExprKind::Struct(_, _, _)
+            | hir::ExprKind::If(_, _, _)
             | hir::ExprKind::Block(_)
             | hir::ExprKind::Intrinsic(_, _) => {
-                todo!()
+                let value = unpack!(block = self.build_value(block, expr)?);
+                let ty = self.build_type(&expr.ty)?;
+
+                let decl = mir::LocalDecl {
+                    mutable: true,
+                    ty: ty.clone(),
+                };
+
+                let base = self.locals.push(decl);
+
+                let place = mir::Place {
+                    base,
+                    ty,
+                    projections: Vec::new(),
+                };
+
+                let statement = mir::Statement::Assign(place.clone(), value);
+                self[block].statements.push(statement);
+
+                Ok((block, place))
             }
         }
     }
@@ -197,9 +268,20 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
         expr: &hir::Expr,
     ) -> Result<BlockAnd<mir::Operand>, Diagnostic> {
         match expr.kind {
+            hir::ExprKind::Assign(ref lhs, ref rhs) => {
+                let place = unpack!(block = self.build_place(block, lhs)?);
+                let value = unpack!(block = self.build_value(block, rhs)?);
+
+                let statement = mir::Statement::Assign(place, value);
+
+                self[block].statements.push(statement);
+
+                Ok((block, mir::Operand::VOID))
+            }
+
             hir::ExprKind::Let(local_id, ref value) => {
                 let local = &self.body.locals[local_id];
-                let ty = self.build_type(&local.type_)?;
+                let ty = self.build_type(&local.ty)?;
 
                 let base = mir::Local {
                     index: local_id.index(),
@@ -217,6 +299,67 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 self[block].statements.push(statement);
 
                 Ok((block, mir::Operand::VOID))
+            }
+
+            hir::ExprKind::If(ref cond, ref then, ref otherwise) => {
+                let cond = unpack!(block = self.build_operand(block, cond)?);
+
+                let mut then_block = self.create_block();
+                let then = unpack!(then_block = self.build_value(then_block, then)?);
+
+                match otherwise {
+                    Some(otherwise) => {
+                        let mut else_block = self.create_block();
+                        let otherwise =
+                            unpack!(else_block = self.build_value(else_block, otherwise)?);
+
+                        let ty = self.build_type(&expr.ty)?;
+                        let decl = mir::LocalDecl {
+                            mutable: false,
+                            ty: ty.clone(),
+                        };
+
+                        let base = self.locals.push(decl);
+
+                        let place = mir::Place {
+                            base,
+                            ty,
+                            projections: Vec::new(),
+                        };
+
+                        let statement = mir::Statement::Assign(place.clone(), then);
+                        self[then_block].statements.push(statement);
+
+                        let statement = mir::Statement::Assign(place.clone(), otherwise);
+                        self[else_block].statements.push(statement);
+
+                        let end_block = self.create_block();
+
+                        self[then_block].terminator = mir::Terminator::Goto(end_block);
+                        self[else_block].terminator = mir::Terminator::Goto(end_block);
+
+                        self[block].terminator = mir::Terminator::Switch {
+                            discriminant: cond,
+                            default: else_block,
+                            cases: vec![(0, then_block)],
+                        };
+
+                        Ok((end_block, mir::Operand::Move(place)))
+                    }
+                    None => {
+                        let end_block = self.create_block();
+
+                        self[then_block].terminator = mir::Terminator::Goto(end_block);
+
+                        self[block].terminator = mir::Terminator::Switch {
+                            discriminant: cond,
+                            default: then_block,
+                            cases: vec![(0, end_block)],
+                        };
+
+                        Ok((end_block, mir::Operand::VOID))
+                    }
+                }
             }
 
             hir::ExprKind::Block(ref exprs) => {
@@ -251,7 +394,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 }
                 hir::Constant::Func(body_id, generics) => {
                     let body = &self.bcx.hir.bodies[*body_id];
-                    let id = build_body(self.bcx, *body_id, body, generics)?;
+                    let id = build_body(self.bcx, *body_id, body, generics, Default::default())?;
                     let ty = self.build_type(&expr.ty)?;
 
                     let kind = mir::ConstKind::Body(id);
@@ -259,12 +402,41 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
-                hir::Constant::Method { .. } => todo!(),
+                hir::Constant::Method {
+                    implementor,
+                    trait_id,
+                    trait_generics,
+                    method_generics,
+                    index,
+                } => {
+                    let (trait_impl, specialization) = self.bcx.hir.types.fetch_trait_impl(
+                        *trait_id,
+                        trait_generics,
+                        implementor,
+                        &self.specialization,
+                    )?;
+
+                    let body_id = trait_impl.methods[*index].body;
+                    let body = &self.bcx.hir.bodies[body_id];
+
+                    let body =
+                        build_body(self.bcx, body_id, body, method_generics, specialization)?;
+
+                    let ty = self.build_type(&expr.ty)?;
+
+                    let kind = mir::ConstKind::Body(body);
+                    let constant = mir::Const { kind, ty };
+
+                    Ok((block, mir::Operand::Const(constant)))
+                }
             },
 
             hir::ExprKind::Local(_)
-            | hir::ExprKind::Assign(_, _)
             | hir::ExprKind::Call(_, _)
+            | hir::ExprKind::Binary(_, _, _)
+            | hir::ExprKind::Struct(_, _, _)
+            | hir::ExprKind::Field(_, _)
+            | hir::ExprKind::Match(_, _)
             | hir::ExprKind::Intrinsic(_, _) => {
                 let place = unpack!(block = self.build_place(block, expr)?);
                 Ok((block, mir::Operand::Copy(place)))
@@ -278,11 +450,44 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
         expr: &hir::Expr,
     ) -> Result<BlockAnd<mir::Value>, Diagnostic> {
         match expr.kind {
+            hir::ExprKind::Binary(op, ref lhs, ref rhs) => {
+                let lhs = unpack!(block = self.build_operand(block, lhs)?);
+                let rhs = unpack!(block = self.build_operand(block, rhs)?);
+
+                let op = match op {
+                    hir::BinaryOp::Add => mir::BinaryOp::Add,
+                    hir::BinaryOp::Sub => mir::BinaryOp::Sub,
+                    hir::BinaryOp::Mul => mir::BinaryOp::Mul,
+                    hir::BinaryOp::Div => mir::BinaryOp::Div,
+                    hir::BinaryOp::Rem => mir::BinaryOp::Rem,
+                    hir::BinaryOp::Eq => mir::BinaryOp::Eq,
+                    _ => todo!(),
+                };
+
+                Ok((block, mir::Value::Binary(op, lhs, rhs)))
+            }
+
+            hir::ExprKind::Struct(id, ref _generics, ref fields) => {
+                let hir_struct = &self.bcx.hir.types[id];
+
+                let mut values = Vec::new();
+
+                for (_field, value) in hir_struct.fields.iter().zip(fields) {
+                    let value = unpack!(block = self.build_operand(block, value)?);
+                    values.push(value);
+                }
+
+                Ok((block, mir::Value::Struct(values)))
+            }
+
             hir::ExprKind::Const(_)
             | hir::ExprKind::Local(_)
             | hir::ExprKind::Let(_, _)
             | hir::ExprKind::Assign(_, _)
             | hir::ExprKind::Call(_, _)
+            | hir::ExprKind::If(_, _, _)
+            | hir::ExprKind::Field(_, _)
+            | hir::ExprKind::Match(_, _)
             | hir::ExprKind::Block(_)
             | hir::ExprKind::Intrinsic(_, _) => {
                 let operand = unpack!(block = self.build_operand(block, expr)?);
@@ -297,9 +502,8 @@ fn build_body(
     body_id: hir::BodyId,
     hir_body: &hir::Body,
     generics: &[hir::Type],
+    mut specialization: hir::Specialization,
 ) -> Result<mir::BodyId, Diagnostic> {
-    let mut specialization = hir::Specialization::new();
-
     for (&generic, ty) in hir_body.generics.iter().zip(generics.iter()) {
         specialization.insert(generic, ty.clone());
     }
@@ -329,8 +533,11 @@ fn build_body(
         return Ok(id);
     }
 
+    let id = builder.bcx.mir.bodies.alloc();
+    builder.bcx.bodies.insert(key, id);
+
     for (local_id, local) in hir_body.locals.iter() {
-        let ty = builder.build_type(&local.type_)?;
+        let ty = builder.build_type(&local.ty)?;
 
         let decl = mir::LocalDecl {
             mutable: local.mutable,
@@ -368,8 +575,7 @@ fn build_body(
         entry,
     };
 
-    let id = bcx.mir.bodies.push(mir_body);
-    bcx.bodies.insert(key, id);
+    bcx.mir.bodies.insert(id, mir_body);
 
     Ok(id)
 }
@@ -386,7 +592,11 @@ pub fn build(unit: &hir::Unit) -> Result<mir::Unit, Diagnostic> {
             continue;
         }
 
-        build_body(&mut bcx, id, body, &[])?;
+        let body_id = build_body(&mut bcx, id, body, &[], Default::default())?;
+
+        if body.name.as_deref() == Some("main") {
+            bcx.mir.entry = Some(body_id);
+        }
     }
 
     Ok(bcx.mir)

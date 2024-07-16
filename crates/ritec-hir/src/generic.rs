@@ -82,6 +82,7 @@ impl Specialization {
                             index,
                         }
                     }
+                    _ => projected.projection.clone(),
                 };
 
                 Type::Projected(Projected {
@@ -91,10 +92,9 @@ impl Specialization {
                 })
             }
             Type::Generic(forall) => match self.get(*forall) {
-                Some(variable) => variable.clone(),
+                Some(variable) => self.specialize(variable),
                 None => Type::Generic(*forall),
             },
-            Type::SelfType => Type::SelfType,
         }
     }
 }

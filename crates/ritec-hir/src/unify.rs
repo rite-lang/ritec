@@ -12,7 +12,6 @@ impl Types {
             (Type::Partial(a), Type::Partial(b)) => self.unify_partial_partial(&a, &b),
             (Type::Projected(a), b) | (b, Type::Projected(a)) => self.unify_projected_var(&a, &b),
             (Type::Generic(a), b) | (b, Type::Generic(a)) => self.unify_generic_var(&a, &b),
-            (Type::SelfType, _) | (_, Type::SelfType) => unreachable!(),
         }
     }
 
@@ -45,8 +44,9 @@ impl Types {
         projected: &Projected,
         other: &Type,
     ) -> Result<bool, Diagnostic> {
-        match self.project(projected) {
-            Ok(var) => self.unify_var_var(&var, other),
+        match self.project(projected, &Default::default()) {
+            Ok(Some(var)) => self.unify_var_var(&var, other),
+            Ok(None) => Ok(true),
             Err(_) => Ok(false),
         }
     }

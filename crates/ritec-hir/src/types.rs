@@ -6,13 +6,14 @@ use std::{
 use ritec_diagnostic::Diagnostic;
 
 use crate::{
-    Contract, ContractId, Contracts, Enums, Known, Struct, StructId, Structs, Trait, TraitId,
-    TraitImpl, Traits, Type, Uid,
+    Contract, ContractId, Contracts, Enums, Known, Specialization, Struct, StructId, Structs,
+    Trait, TraitId, TraitImpl, Traits, Type, Uid,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Goal {
     Unify(Type, Type),
+    Satisfy(ContractId, Specialization),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -57,9 +58,13 @@ impl Types {
         }
     }
 
-    pub fn query(&self, variable: &Type) -> Result<Known, Diagnostic> {
+    pub fn query(
+        &self,
+        variable: &Type,
+        specialization: &Specialization,
+    ) -> Result<Known, Diagnostic> {
         if let Some(substitute) = self.try_substitute(variable) {
-            return self.query(substitute);
+            return self.query(substitute, specialization);
         }
 
         match variable {
@@ -71,7 +76,7 @@ impl Types {
                 let mut params = Vec::with_capacity(partial.params.len());
 
                 for param in &partial.params {
-                    params.push(self.query(param)?);
+                    params.push(self.query(param, specialization)?);
                 }
 
                 Ok(Known {
@@ -79,9 +84,20 @@ impl Types {
                     params,
                 })
             }
-            Type::Projected(projected) => self.query(&self.project(projected)?),
-            Type::Generic(_) => todo!(),
-            Type::SelfType => todo!(),
+            Type::Projected(projected) => match self.project(projected, specialization)? {
+                Some(projected) => self.query(&projected, specialization),
+                None => {
+                    let diagnostic = Diagnostic::new("projection failed");
+                    Err(diagnostic)
+                }
+            },
+            Type::Generic(generic) => match specialization.get(*generic) {
+                Some(variable) => self.query(variable, specialization),
+                None => {
+                    let diagnostic = Diagnostic::new("generic not specialized");
+                    Err(diagnostic)
+                }
+            },
         }
     }
 
@@ -93,9 +109,17 @@ impl Types {
         self.push_goal(Goal::Unify(a, b));
     }
 
+    pub fn satisfy(&mut self, contract: ContractId, specialization: &Specialization) {
+        self.push_goal(Goal::Satisfy(contract, specialization.clone()));
+    }
+
     fn solve_goal(&mut self, goal: &Goal) -> Result<bool, Diagnostic> {
         match goal {
             Goal::Unify(a, b) => self.unify_var_var(a, b),
+            Goal::Satisfy(contract, specialization) => {
+                self.satisfy_contract(*contract, specialization)?;
+                Ok(true)
+            }
         }
     }
 
