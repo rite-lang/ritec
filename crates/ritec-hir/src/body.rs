@@ -25,4 +25,7 @@ impl Body {
     pub fn is_generic(&self) -> bool {
         !self.generics.is_empty()
     }
+    pub fn get_args(&self) -> Vec<Type> {
+        self.arguments.iter().map(|id| self.locals[*id].ty.clone()).collect()
+    }
 }

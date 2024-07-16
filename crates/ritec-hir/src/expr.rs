@@ -3,7 +3,7 @@ use ritec_diagnostic::Span;
 use crate::{BodyId, LocalId, StructId, TraitId, Type};
 
 #[derive(Clone, Debug)]
-pub enum Constant {
+pub enum Const {
     Void,
     Int(u64),
     Float(f64),
@@ -16,6 +16,11 @@ pub enum Constant {
         method_generics: Vec<Type>,
         index: usize,
     },
+    AssocMethod {
+        implementor: Type,
+        name: String,
+        generics: Vec<Type>,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,7 +56,7 @@ pub struct Arm {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
-    Const(Constant),
+    Const(Const),
     Local(LocalId),
     Let(LocalId, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
@@ -78,7 +83,7 @@ pub struct Expr {
 impl Expr {
     pub fn void(span: Span) -> Self {
         Self {
-            kind: ExprKind::Const(Constant::Void),
+            kind: ExprKind::Const(Const::Void),
             span: Some(span),
             ty: Type::VOID,
         }

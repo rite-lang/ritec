@@ -6,7 +6,7 @@ use crate::{ContractId, TraitId, Type};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Projection {
     /// An associated type.
-    Associated {
+    AssocType {
         /// The trait that defines the associated type.
         trait_id: TraitId,
 
@@ -17,6 +17,11 @@ pub enum Projection {
         index: usize,
     },
 
+    AssocMethod {
+        name: String,
+        generics: Vec<Type>,
+    },
+
     /// A field projection.
     Field { name: String },
 }
@@ -24,7 +29,7 @@ pub enum Projection {
 impl Display for Projection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Projection::Associated {
+            Projection::AssocType {
                 trait_id: trait_,
                 generics,
                 index,
@@ -32,6 +37,11 @@ impl Display for Projection {
                 let generics: Vec<_> = generics.iter().map(ToString::to_string).collect();
 
                 write!(f, "{}<{}> assoc {}", trait_, generics.join(", "), index)
+            }
+            Projection::AssocMethod { name, generics } => {
+                let generics: Vec<_> = generics.iter().map(ToString::to_string).collect();
+
+                write!(f, "method {}<{}>", generics.join(", "), name)
             }
             Projection::Field { name } => write!(f, "{}", name),
         }

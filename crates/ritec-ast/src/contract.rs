@@ -1,7 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Token, TokenStream};
 
-use crate::{parse_item, parse_type, Item, Type};
+use crate::{parse_path, parse_type, Path, Type};
 
 #[derive(Clone, Debug)]
 pub struct AssocBound {
@@ -11,7 +11,7 @@ pub struct AssocBound {
 
 #[derive(Clone, Debug)]
 pub struct TraitBound {
-    pub item: Item,
+    pub item: Path,
     pub generics: Vec<Type>,
     pub types: Vec<AssocBound>,
     pub span: Span,
@@ -44,7 +44,7 @@ pub fn parse_assoc_bound(stream: &mut TokenStream) -> Result<AssocBound, Diagnos
 }
 
 pub fn parse_trait_bound(stream: &mut TokenStream) -> Result<TraitBound, Diagnostic> {
-    let item = parse_item(stream, false)?;
+    let item = parse_path(stream, false)?;
 
     let mut generics = Vec::new();
     let mut types = Vec::new();

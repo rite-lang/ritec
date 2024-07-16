@@ -3,6 +3,7 @@ use ritec_parse::{Token, TokenStream};
 
 use crate::{parse_generic, parse_type, Generic, Type};
 
+/// name::name<'a, 'b>::name <- Three named segments, middle has generics
 #[derive(Clone, Debug)]
 pub struct NamedSegment {
     pub name: String,
@@ -10,59 +11,65 @@ pub struct NamedSegment {
     pub span: Span,
 }
 
+/// <Type as Trait>::name <- AssocSegment
 #[derive(Clone, Debug)]
 pub struct AssocSegment {
     pub implementor: Type,
-    pub trait_item: Item,
+    pub trait_path: Path,
     pub name: String,
     pub span: Span,
 }
 
+/// self
 #[derive(Clone, Debug)]
 pub struct SelfLowerSegment {
     pub span: Span,
 }
 
+/// Self
+/// fn func(self) -> Self <-- Type in other contexts
 #[derive(Clone, Debug)]
 pub struct SelfUpperSegment {
     pub span: Span,
 }
 
+/// Any segment
 #[derive(Clone, Debug)]
-pub enum ItemSegment {
-    Named(NamedSegment),
+pub enum PathSegment {
     Assoc(AssocSegment),
+    Named(NamedSegment),
     Generic(Generic),
     SelfLower(SelfLowerSegment),
     SelfUpper(SelfUpperSegment),
 }
 
-impl ItemSegment {
+impl PathSegment {
     pub fn span(&self) -> Span {
         match self {
-            ItemSegment::Named(segment) => segment.span,
-            ItemSegment::Assoc(segment) => segment.span,
-            ItemSegment::Generic(generic) => generic.span,
-            ItemSegment::SelfLower(segment) => segment.span,
-            ItemSegment::SelfUpper(segment) => segment.span,
+            PathSegment::Named(segment) => segment.span,
+            PathSegment::Assoc(segment) => segment.span,
+            PathSegment::Generic(generic) => generic.span,
+            PathSegment::SelfLower(segment) => segment.span,
+            PathSegment::SelfUpper(segment) => segment.span,
         }
     }
 }
 
+/// A list of paths
 #[derive(Clone, Debug)]
-pub struct Item {
-    pub segments: Vec<ItemSegment>,
+pub struct Path {
+    pub segments: Vec<PathSegment>,
     pub span: Span,
 }
 
-impl Item {
+impl Path {
     pub fn ident(&self) -> Option<&str> {
         if self.segments.len() != 1 {
             return None;
         }
 
         match self.segments.first() {
-            Some(ItemSegment::Named(segment)) if segment.generics.is_empty() => Some(&segment.name),
+            Some(PathSegment::Named(segment)) if segment.generics.is_empty() => Some(&segment.name),
             _ => None,
         }
     }
@@ -107,7 +114,7 @@ pub fn parse_assoc_segment(stream: &mut TokenStream) -> Result<AssocSegment, Dia
 
     stream.expect(Token::As)?;
 
-    let trait_item = parse_item(stream, true)?;
+    let trait_path = parse_path(stream, true)?;
 
     stream.expect(Token::Gt)?;
 
@@ -117,48 +124,48 @@ pub fn parse_assoc_segment(stream: &mut TokenStream) -> Result<AssocSegment, Dia
 
     Ok(AssocSegment {
         implementor,
-        trait_item,
+        trait_path,
         name,
         span: start.join(span),
     })
 }
 
-pub fn parse_item_segment(
+pub fn parse_path_segment(
     stream: &mut TokenStream,
     allow_generics: bool,
-) -> Result<ItemSegment, Diagnostic> {
+) -> Result<PathSegment, Diagnostic> {
     let (name, span) = stream.peek();
 
     match name {
-        Token::Ident(_) => Ok(ItemSegment::Named(parse_named_segment(
+        Token::Ident(_) => Ok(PathSegment::Named(parse_named_segment(
             stream,
             allow_generics,
         )?)),
-        Token::Lt => Ok(ItemSegment::Assoc(parse_assoc_segment(stream)?)),
-        Token::Quote => Ok(ItemSegment::Generic(parse_generic(stream)?)),
+        Token::Lt => Ok(PathSegment::Assoc(parse_assoc_segment(stream)?)),
+        Token::Quote => Ok(PathSegment::Generic(parse_generic(stream)?)),
         Token::SelfLower => {
             stream.consume();
-            Ok(ItemSegment::SelfLower(SelfLowerSegment { span }))
+            Ok(PathSegment::SelfLower(SelfLowerSegment { span }))
         }
         Token::SelfUpper => {
             stream.consume();
-            Ok(ItemSegment::SelfUpper(SelfUpperSegment { span }))
+            Ok(PathSegment::SelfUpper(SelfUpperSegment { span }))
         }
         _ => Err(Diagnostic::new("expected identifier").with_span(span)),
     }
 }
 
-pub fn parse_item(stream: &mut TokenStream, allow_generics: bool) -> Result<Item, Diagnostic> {
+pub fn parse_path(stream: &mut TokenStream, allow_generics: bool) -> Result<Path, Diagnostic> {
     let mut segments = Vec::new();
 
-    let first_segment = parse_item_segment(stream, allow_generics)?;
+    let first_segment = parse_path_segment(stream, allow_generics)?;
     let mut span = first_segment.span();
 
     segments.push(first_segment);
 
     loop {
         if stream.take(Token::ColonColon) {
-            let segment = parse_item_segment(stream, allow_generics)?;
+            let segment = parse_path_segment(stream, allow_generics)?;
             span = span.join(segment.span());
             segments.push(segment);
         } else {
@@ -166,5 +173,5 @@ pub fn parse_item(stream: &mut TokenStream, allow_generics: bool) -> Result<Item
         }
     }
 
-    Ok(Item { segments, span })
+    Ok(Path { segments, span })
 }

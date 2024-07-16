@@ -114,7 +114,7 @@ impl Lowerer {
                 ast::Decl::Struct(ast) => self.populate_struct(module, ast)?,
                 ast::Decl::Function(ast) => self.populate_function(module, ast)?,
                 ast::Decl::Trait(ast) => self.populate_trait(module, ast)?,
-                ast::Decl::TraitImpl(_) => {
+                ast::Decl::TraitImpl(_) | ast::Decl::Impl(_) => {
                     // there is nothing to do here
                 }
                 ast::Decl::Module(ast) => self.populate_sub_module(module, ast)?,

@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
-    Contract, ContractId, Contracts, Enums, Item, Known, Specialization, Struct, StructId, Structs,
-    Trait, TraitId, TraitImpl, Traits, Type, Uid, UnknownKind,
+    Contract, ContractId, Contracts, Enums, Impl, Item, Known, Specialization, Struct, StructId,
+    Structs, Trait, TraitId, TraitImpl, Traits, Type, Uid, UnknownKind,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -33,6 +33,7 @@ pub struct Types {
     pub traits: Traits,
     pub enums: Enums,
     pub trait_impls: Vec<TraitImpl>,
+    pub impls: Vec<Impl>,
     pub contracts: Contracts,
     pub substitutions: HashMap<Uid, Type>,
     pub goals: VecDeque<Goal>,
@@ -45,6 +46,7 @@ impl Types {
             traits: Traits::new(),
             enums: Enums::new(),
             trait_impls: Vec::new(),
+            impls: Vec::new(),
             contracts: Contracts::new(),
             substitutions: HashMap::new(),
             goals: VecDeque::new(),

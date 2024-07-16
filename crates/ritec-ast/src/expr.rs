@@ -1,7 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_item, parse_pattern, parse_type, Item, Pat, Type};
+use crate::{parse_path, parse_pattern, parse_type, Pat, Path, Type};
 
 #[derive(Clone, Debug)]
 pub struct VoidExpr {
@@ -10,7 +10,7 @@ pub struct VoidExpr {
 
 #[derive(Clone, Debug)]
 pub struct ItemExpr {
-    pub item: Item,
+    pub path: Path,
     pub span: Span,
 }
 
@@ -40,7 +40,7 @@ pub struct FieldInit {
 
 #[derive(Clone, Debug)]
 pub struct StructExpr {
-    pub item: Item,
+    pub item: Path,
     pub fields: Vec<FieldInit>,
     pub span: Span,
 }
@@ -275,7 +275,7 @@ pub fn parse_field_init(stream: &mut TokenStream) -> Result<FieldInit, Diagnosti
     })
 }
 
-pub fn parse_struct_expr(stream: &mut TokenStream, item: Item) -> Result<Expr, Diagnostic> {
+pub fn parse_struct_expr(stream: &mut TokenStream, item: Path) -> Result<Expr, Diagnostic> {
     let start = stream.expect(Token::Newline)?;
 
     stream.expect(Token::Indent)?;
@@ -306,13 +306,13 @@ fn is_struct_expr(stream: &mut TokenStream) -> bool {
 }
 
 pub fn parse_item_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
-    let item = parse_item(stream, true)?;
+    let item = parse_path(stream, true)?;
 
     if is_struct_expr(stream) {
         parse_struct_expr(stream, item)
     } else {
         let span = item.span;
-        Ok(Expr::Item(ItemExpr { item, span }))
+        Ok(Expr::Item(ItemExpr { path: item, span }))
     }
 }
 

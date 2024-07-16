@@ -1,9 +1,6 @@
 use ritec_diagnostic::Diagnostic;
 
-use crate::{
-    ContractId, Item, Projected, Projection, Specialization, StructId, TraitId, TraitImpl, Type,
-    Types,
-};
+use crate::{BodyId, ContractId, Impl, Item, Method, Partial, Projected, Projection, Specialization, StructId, TraitId, TraitImpl, Type, Types};
 
 impl Types {
     fn applies(
@@ -299,13 +296,47 @@ impl Types {
         }
     }
 
+    pub fn fetch_assoc_method(
+        &self,
+        implementor: &Type,
+        name: &str,
+        generics: &[Type],
+        specialization: &Specialization,
+    ) -> Result<(&Method, Specialization), Diagnostic> {
+        for impl_ in self.impls.iter() {
+            let mut specialization = specialization.clone();
+
+            if !self.applies(implementor, &impl_.implementor, &mut specialization) {
+                continue;
+            }
+
+            for method in impl_.methods.iter() {
+                if method.name != name {
+                    continue;
+                }
+
+                // TODO: Check that we fulfill all generic parameters
+                for (generic, ty) in method.generics.iter().zip(generics) {
+                    specialization.insert(*generic, ty.clone());
+                }
+
+                return Ok((method, specialization));
+            }
+        }
+
+
+        // TODO: Add a span
+        let message = format!("method {} not found in {}", name, implementor);
+        Err(Diagnostic::new(message))
+    }
+
     pub(crate) fn project(
         &self,
         projected: &Projected,
         specialization: &Specialization,
     ) -> Result<Option<Type>, Diagnostic> {
         match projected.projection {
-            Projection::Associated {
+            Projection::AssocType {
                 trait_id,
                 ref generics,
                 index,
@@ -317,6 +348,27 @@ impl Types {
                 index,
                 specialization,
             ),
+            Projection::AssocMethod { ref name, ref generics } => {
+                let (method, specialization) = self.fetch_assoc_method(
+                    &projected.base,
+                    name,
+                    generics,
+                    specialization,
+                )?;
+
+                let mut params = Vec::new();
+
+                params.push(method.output.clone());
+                params.extend(method.arguments.clone());
+
+                let ty = Type::Partial(Partial {
+                    item: Item::Function,
+                    params,
+                });
+
+
+                Ok(Some(specialization.specialize(&ty)))
+            }
             Projection::Field { ref name } => {
                 let (struct_id, params, index, _) =
                     self.fetch_field_index(&projected.base, name, specialization)?;

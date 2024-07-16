@@ -274,7 +274,7 @@ impl Unit {
                 output: Type::Projected(Projected {
                     contract,
                     base: Box::new(Type::Generic(self_generic)),
-                    projection: Projection::Associated {
+                    projection: Projection::AssocType {
                         trait_id,
                         generics: vec![Type::Generic(rhs)],
                         index: 0,
@@ -378,6 +378,9 @@ impl Unit {
             types: vec![ty.clone()],
             methods: vec![Method {
                 name: name.to_lowercase(),
+                generics: vec![],
+                arguments: vec![ty.clone(), ty.clone()],
+                output: ty,
                 body: body_id,
             }],
         };
@@ -439,6 +442,9 @@ impl Unit {
             types: vec![ty.clone()],
             methods: vec![Method {
                 name: String::from("eq"),
+                generics: vec![],
+                arguments: vec![ty.clone(), ty],
+                output: Type::BOOL,
                 body: body_id,
             }],
         };

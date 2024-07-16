@@ -1,12 +1,15 @@
 struct A
     a: usize
-    b: usize
+
+impl A
+    fn new() -> A
+        A
+          a: 42
+
+    fn get_a(&mut self) -> usize
+        self.a
 
 fn main(argc: usize, argv: **u8) -> usize
-    let x = A
-        a: 1
-        b: 2
-
-    let y = & & & & &x
-
-    x.a + y.b
+    let a = A::new()
+    let x = A::get_a(&a)
+    x

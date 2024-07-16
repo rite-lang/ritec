@@ -5,7 +5,7 @@ use ritec_diagnostic::{Diagnostic, Span};
 use ritec_hir as hir;
 
 use crate::{
-    r#type::{ItemQuery, TypeContext},
+    r#type::{Resolved, TypeContext},
     Lowerer,
 };
 
@@ -38,8 +38,8 @@ impl BodyLowerer<'_, '_> {
         self.tcx.lower_type(&self.lowerer.unit, ast)
     }
 
-    fn query_item(&mut self, ast: &ast::Item) -> Result<ItemQuery, Diagnostic> {
-        self.tcx.query_item(&self.lowerer.unit, ast)
+    fn resolve_path(&mut self, ast: &ast::Path) -> Result<Resolved, Diagnostic> {
+        self.tcx.resolve_path(&self.lowerer.unit, ast)
     }
 
     fn get_local(&self, name: &str) -> Option<hir::LocalId> {
@@ -83,7 +83,7 @@ impl BodyLowerer<'_, '_> {
             params.push(specialization.specialize(&local.ty));
         }
 
-        let kind = hir::ExprKind::Const(hir::Constant::Func(id, generics));
+        let kind = hir::ExprKind::Const(hir::Const::Func(id, generics));
         let span = Some(span);
         let ty = hir::Type::Partial(hir::Partial {
             item: hir::Item::Function,
@@ -97,7 +97,7 @@ impl BodyLowerer<'_, '_> {
     }
 
     fn lower_item_expr(&mut self, ast: &ast::ItemExpr) -> Result<hir::Expr, Diagnostic> {
-        if let Some(ident) = ast.item.ident() {
+        if let Some(ident) = ast.path.ident() {
             if let Some(local) = self.get_local(ident) {
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Local(local),
@@ -107,9 +107,9 @@ impl BodyLowerer<'_, '_> {
             }
         }
 
-        match self.query_item(&ast.item)? {
-            ItemQuery::Func(id, generics) => self.lower_func_expr(id, generics, ast.span),
-            ItemQuery::SelfArgument => match self.self_argument {
+        match self.resolve_path(&ast.path)? {
+            Resolved::Func(id, generics) => self.lower_func_expr(id, generics, ast.span),
+            Resolved::SelfArgument => match self.self_argument {
                 Some(local) => Ok(hir::Expr {
                     kind: hir::ExprKind::Local(local),
                     span: Some(ast.span),
@@ -120,15 +120,35 @@ impl BodyLowerer<'_, '_> {
                     Err(Diagnostic::new(message).with_span(ast.span))
                 }
             },
-            _ => {
-                let message = format!("expected function, found {:?}", ast.item);
+            Resolved::Assoc(implementor, name, ref generics) => {
+                let ty = hir::Type::Projected(hir::Projected {
+                    contract: self.contract,
+                    base: Box::new(implementor.clone()),
+                    projection: hir::Projection::AssocMethod {
+                        name: name.clone(),
+                        generics: generics.clone(),
+                    },
+                });
+
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Const(hir::Const::AssocMethod {
+                        implementor,
+                        name,
+                        generics: generics.clone(),
+                    }),
+                    span: Some(ast.span),
+                    ty,
+                })
+            }
+            resolved => {
+                let message = format!("expected function, found {:?} with path {:?}", resolved, ast.path);
                 Err(Diagnostic::new(message).with_span(ast.span))
             }
         }
     }
 
     fn lower_int_expr(&mut self, ast: &ast::LitIntExpr) -> Result<hir::Expr, Diagnostic> {
-        let kind = hir::ExprKind::Const(hir::Constant::Int(ast.value));
+        let kind = hir::ExprKind::Const(hir::Const::Int(ast.value));
         let span = Some(ast.span);
         let ty = hir::Type::Unknown(hir::Unknown {
             kind: hir::UnknownKind::Number { float: false },
@@ -140,7 +160,7 @@ impl BodyLowerer<'_, '_> {
     }
 
     fn lower_float_expr(&mut self, ast: &ast::LitFloatExpr) -> Result<hir::Expr, Diagnostic> {
-        let kind = hir::ExprKind::Const(hir::Constant::Float(ast.value));
+        let kind = hir::ExprKind::Const(hir::Const::Float(ast.value));
         let span = Some(ast.span);
         let ty = hir::Type::Unknown(hir::Unknown {
             kind: hir::UnknownKind::Number { float: true },
@@ -152,7 +172,7 @@ impl BodyLowerer<'_, '_> {
     }
 
     fn lower_null_expr(&mut self, ast: &ast::NullExpr) -> Result<hir::Expr, Diagnostic> {
-        let kind = hir::ExprKind::Const(hir::Constant::Null);
+        let kind = hir::ExprKind::Const(hir::Const::Null);
         let span = Some(ast.span);
         let ty = hir::Type::Partial(hir::Partial {
             item: hir::Item::Pointer { mutable: true },
@@ -163,7 +183,7 @@ impl BodyLowerer<'_, '_> {
     }
 
     fn lower_struct_expr(&mut self, ast: &ast::StructExpr) -> Result<hir::Expr, Diagnostic> {
-        let ItemQuery::Struct(id, mut generics) = self.query_item(&ast.item)? else {
+        let Resolved::Struct(id, mut generics) = self.resolve_path(&ast.item)? else {
             let message = format!("expected struct, found {:?}", ast.item);
             return Err(Diagnostic::new(message).with_span(ast.span));
         };
@@ -305,7 +325,7 @@ impl BodyLowerer<'_, '_> {
         rhs: hir::Expr,
         trait_id: hir::TraitId,
     ) -> hir::Expr {
-        let constant = hir::Constant::Method {
+        let constant = hir::Const::Method {
             implementor: lhs.ty.clone(),
             trait_id,
             trait_generics: vec![rhs.ty.clone()],
@@ -326,7 +346,7 @@ impl BodyLowerer<'_, '_> {
         let ty = hir::Type::Projected(hir::Projected {
             contract: self.contract,
             base: Box::new(lhs.ty.clone()),
-            projection: hir::Projection::Associated {
+            projection: hir::Projection::AssocType {
                 trait_id,
                 generics: vec![rhs.ty.clone()],
                 index: 0,
@@ -342,7 +362,7 @@ impl BodyLowerer<'_, '_> {
     fn lower_binary_eq(&mut self, lhs: hir::Expr, rhs: hir::Expr) -> hir::Expr {
         let trait_id = self.unit.builtins.eq_trait;
 
-        let constant = hir::Constant::Method {
+        let constant = hir::Const::Method {
             implementor: lhs.ty.clone(),
             trait_id,
             trait_generics: vec![rhs.ty.clone()],

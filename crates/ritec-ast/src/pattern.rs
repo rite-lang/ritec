@@ -1,17 +1,17 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_item, Item};
+use crate::{parse_path, Path};
 
 #[derive(Clone, Debug)]
 pub struct ItemPat {
-    pub item: Item,
+    pub item: Path,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct TuplePat {
-    pub item: Option<Item>,
+    pub item: Option<Path>,
     pub patterns: Vec<Pat>,
     pub span: Span,
 }
@@ -33,7 +33,7 @@ impl Pat {
 
 fn parse_tuple_pattern(
     stream: &mut TokenStream,
-    item: Option<Item>,
+    item: Option<Path>,
 ) -> Result<TuplePat, Diagnostic> {
     let start = stream.expect(Token::Paren(Delim::Open))?;
 
@@ -67,7 +67,7 @@ pub fn parse_pattern(stream: &mut TokenStream) -> Result<Pat, Diagnostic> {
         return Ok(Pat::Tuple(parse_tuple_pattern(stream, None)?));
     }
 
-    let item = parse_item(stream, true)?;
+    let item = parse_path(stream, true)?;
 
     if stream.is(Token::Paren(Delim::Open)) {
         return Ok(Pat::Tuple(parse_tuple_pattern(stream, Some(item))?));

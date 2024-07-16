@@ -391,8 +391,8 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             }
 
             hir::ExprKind::Const(ref constant) => match constant {
-                hir::Constant::Void => Ok((block, mir::Operand::VOID)),
-                hir::Constant::Int(v) => {
+                hir::Const::Void => Ok((block, mir::Operand::VOID)),
+                hir::Const::Int(v) => {
                     let kind = mir::ConstKind::Int(*v as i64);
                     let constant = mir::Const {
                         kind,
@@ -401,7 +401,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
-                hir::Constant::Float(v) => {
+                hir::Const::Float(v) => {
                     let kind = mir::ConstKind::Float(*v);
                     let constant = mir::Const {
                         kind,
@@ -410,14 +410,14 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
-                hir::Constant::Null => {
+                hir::Const::Null => {
                     let ty = self.build_type(&expr.ty)?;
                     let kind = mir::ConstKind::Int(0);
                     let constant = mir::Const { kind, ty };
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
-                hir::Constant::Func(body_id, generics) => {
+                hir::Const::Func(body_id, generics) => {
                     let generics = generics
                         .iter()
                         .map(|ty| self.specialization.specialize(ty))
@@ -432,7 +432,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
-                hir::Constant::Method {
+                hir::Const::Method {
                     implementor,
                     trait_id,
                     trait_generics,
@@ -451,6 +451,22 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     let body =
                         build_body(self.bcx, body_id, body, method_generics, specialization)?;
+
+                    let ty = self.build_type(&expr.ty)?;
+
+                    let kind = mir::ConstKind::Body(body);
+                    let constant = mir::Const { kind, ty };
+
+                    Ok((block, mir::Operand::Const(constant)))
+                }
+                hir::Const::AssocMethod { ref implementor, ref name, ref generics } => {
+                    let (method, specialization) = self.bcx.hir.types.fetch_assoc_method(implementor, name, generics, &self.specialization)?;
+
+                    let body_id = method.body;
+                    let body = &self.bcx.hir.bodies[body_id];
+
+                    let body =
+                        build_body(self.bcx, body_id, body, generics, specialization)?;
 
                     let ty = self.build_type(&expr.ty)?;
 

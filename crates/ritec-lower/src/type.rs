@@ -1,4 +1,5 @@
 use ritec_ast as ast;
+use ritec_ast::PathSegment;
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
 use ritec_hir::ModuleId;
@@ -12,14 +13,18 @@ pub struct TypeContext<'a> {
     pub specialization: Option<&'a hir::Specialization>,
 }
 
-pub enum ItemQuery {
+#[derive(Debug)]
+pub enum Resolved {
     Struct(hir::StructId, Vec<hir::Type>),
     Trait(hir::TraitId, Vec<hir::Type>),
     Enum(hir::EnumId, Vec<hir::Type>),
     Func(hir::BodyId, Vec<hir::Type>),
-    Assoc(hir::Type, hir::TraitId, Vec<hir::Type>, usize),
+    AssocType(hir::Type, hir::TraitId, Vec<hir::Type>, usize),
+    Assoc(hir::Type, String, Vec<hir::Type>),
     Generic(hir::Generic),
+    Module(ModuleId),
     SelfArgument,
+    SelfType,
 }
 
 impl<'a> TypeContext<'a> {
@@ -40,14 +45,21 @@ impl<'a> TypeContext<'a> {
         Ok(generic)
     }
 
-    pub fn query_item(
+    pub fn resolve_path(
         &mut self,
         unit: &hir::Unit,
-        ast: &ast::Item,
-    ) -> Result<ItemQuery, Diagnostic> {
-        if let Some(ident) = ast.ident() {
-            if let Some(trait_id) = self.trait_id {
-                let trait_ = &unit.types[trait_id];
+        ast: &ast::Path,
+    ) -> Result<Resolved, Diagnostic> {
+        // If the ast entry is just an identifier
+        // And the type context has a trait_id
+        // We are looking for an associated type from the trait
+        if let (Some(ident), Some(trait_id)) = (ast.ident(), self.trait_id) {
+            let trait_ = &unit.types[trait_id];
+
+            for (index, assoc) in trait_.assocs.iter().enumerate() {
+                if assoc.name != ident {
+                    continue;
+                }
 
                 let generics: Vec<_> = trait_
                     .generics
@@ -56,103 +68,180 @@ impl<'a> TypeContext<'a> {
                     .map(hir::Type::Generic)
                     .collect();
 
-                for (index, assoc) in trait_.assocs.iter().enumerate() {
-                    if assoc.name == ident {
-                        return Ok(ItemQuery::Assoc(
-                            trait_.self_type(),
-                            trait_id,
-                            generics.clone(),
-                            index,
-                        ));
+                return Ok(Resolved::AssocType(
+                    trait_.self_type(),
+                    trait_id,
+                    generics.clone(),
+                    index,
+                ));
+            }
+        }
+
+        let mut resolved = Resolved::Module(self.module);
+
+        for (i, segment) in ast.segments.iter().enumerate() {
+            match resolved {
+                Resolved::Module(module) => match segment {
+                    PathSegment::Named(named) => {
+                        let name = &named.name;
+                        let module = &unit.modules[module];
+                        let generics = named
+                            .generics
+                            .iter()
+                            .map(|g| self.lower_type(unit, g))
+                            .collect::<Result<_, _>>()?;
+
+                        if let Some(struct_id) = module.structs.get(name) {
+                            resolved = Resolved::Struct(*struct_id, generics);
+                            continue;
+                        }
+
+                        if let Some(enum_id) = module.enums.get(name) {
+                            resolved = Resolved::Enum(*enum_id, generics);
+                            continue;
+                        }
+
+                        if let Some(trait_id) = module.traits.get(name) {
+                            resolved = Resolved::Trait(*trait_id, generics);
+                            continue;
+                        }
+
+                        if let Some(func_id) = module.funcs.get(name) {
+                            resolved = Resolved::Func(*func_id, generics);
+                            continue;
+                        }
+
+                        if !generics.is_empty() {
+                            return Err(Diagnostic::new("modules do not have generics")
+                                .with_span(named.span));
+                        }
+
+                        if let Some(module_id) = module.modules.get(name) {
+                            resolved = Resolved::Module(*module_id);
+                            continue;
+                        }
+
+                        let message = format!("no item found for {:?}", segment);
+                        return Err(Diagnostic::new(message).with_span(named.span));
                     }
+
+                    PathSegment::Assoc(assoc) if i == 0 => {
+                        let implementor = self.lower_type(unit, &assoc.implementor)?;
+                        let trait_ = self.resolve_path(unit, &assoc.trait_path)?;
+
+                        let Resolved::Trait(trait_id, generics) = trait_ else {
+                            let message = "expected trait path";
+                            return Err(Diagnostic::new(message).with_span(assoc.trait_path.span));
+                        };
+
+                        let Some(index) = unit.types[trait_id].assoc_index(&assoc.name) else {
+                            let message = format!("no associated type found for `{}`", assoc.name);
+                            return Err(Diagnostic::new(message).with_span(assoc.span));
+                        };
+
+                        resolved = Resolved::AssocType(implementor, trait_id, generics, index);
+                    }
+                    PathSegment::Generic(generic) if i == 0 => {
+                        resolved = Resolved::Generic(self.get_generic(&generic)?);
+                    }
+                    PathSegment::SelfLower(_) if i == 0 => {
+                        resolved = Resolved::SelfArgument;
+                    }
+                    PathSegment::SelfUpper(_) if i == 0 => {
+                        resolved = Resolved::SelfType;
+                    }
+                    _ => {
+                        return Err(Diagnostic::new("unexpected path segment (1)")
+                            .with_span(segment.span()))
+                    }
+                },
+
+                Resolved::Struct(struct_id, ref generics) => match segment {
+                    PathSegment::Named(named) => {
+                        let ty = hir::Type::Partial(hir::Partial {
+                            item: hir::Item::Struct(struct_id),
+                            params: generics.clone(),
+                        });
+
+                        let generics = named
+                            .generics
+                            .iter()
+                            .map(|g| self.lower_type(unit, g))
+                            .collect::<Result<_, _>>()?;
+
+                        resolved = Resolved::Assoc(ty, named.name.clone(), generics);
+                    }
+                    _ => {
+                        let message = "unexpected path segment (2)";
+                        return Err(Diagnostic::new(message).with_span(segment.span()));
+                    }
+                },
+                Resolved::Enum(enum_id, ref generics) => match segment {
+                    PathSegment::Named(named) => {
+                        let ty = hir::Type::Partial(hir::Partial {
+                            item: hir::Item::Enum(enum_id),
+                            params: generics.clone(),
+                        });
+
+                        let generics = named
+                            .generics
+                            .iter()
+                            .map(|g| self.lower_type(unit, g))
+                            .collect::<Result<_, _>>()?;
+
+                        resolved = Resolved::Assoc(ty, named.name.clone(), generics);
+                    }
+                    _ => {
+                        let message = "unexpected path segment (3)";
+                        return Err(Diagnostic::new(message).with_span(segment.span()));
+                    }
+                },
+                Resolved::Generic(generic) => match segment {
+                    PathSegment::Named(named) => {
+                        let ty = hir::Type::Generic(generic);
+
+                        let generics = named
+                            .generics
+                            .iter()
+                            .map(|g| self.lower_type(unit, g))
+                            .collect::<Result<_, _>>()?;
+
+                        resolved = Resolved::Assoc(ty, named.name.clone(), generics);
+                    }
+                    _ => {
+                        let message = "unexpected path segment (4)";
+                        return Err(Diagnostic::new(message).with_span(segment.span()));
+                    }
+                },
+                Resolved::SelfType => match segment {
+                    PathSegment::Named(named) => {
+                        let Some(ty) = self.self_type.clone() else {
+                            let message = "no self type found";
+                            return Err(Diagnostic::new(message).with_span(named.span));
+                        };
+
+                        let generics = named
+                            .generics
+                            .iter()
+                            .map(|g| self.lower_type(unit, g))
+                            .collect::<Result<_, _>>()?;
+
+                        resolved = Resolved::Assoc(ty, named.name.clone(), generics);
+                    }
+                    _ => {
+                        let message = "unexpected path segment (5)";
+                        return Err(Diagnostic::new(message).with_span(segment.span()));
+                    }
+                },
+                Resolved::Trait(_, _) => todo!(),
+                _ => {
+                    let message = "unexpected path segment (6)";
+                    return Err(Diagnostic::new(message).with_span(segment.span()));
                 }
             }
         }
 
-        let mut module = self.module;
-
-        let mut segments = ast.segments.iter();
-
-        loop {
-            let Some(segment) = segments.next() else {
-                break;
-            };
-
-            match segment {
-                ast::ItemSegment::Named(ast) => {
-                    let mut generics = Vec::new();
-
-                    for generic in &ast.generics {
-                        let generic = self.lower_type(unit, generic)?;
-                        generics.push(generic);
-                    }
-
-                    if let Some(id) = unit.modules[module].enums.get(&ast.name) {
-                        return Ok(ItemQuery::Enum(*id, generics));
-                    }
-
-                    if let Some(id) = unit.modules[module].structs.get(&ast.name) {
-                        return Ok(ItemQuery::Struct(*id, generics));
-                    }
-
-                    if let Some(id) = unit.modules[module].traits.get(&ast.name) {
-                        return Ok(ItemQuery::Trait(*id, generics));
-                    }
-
-                    if let Some(id) = unit.modules[module].funcs.get(&ast.name) {
-                        return Ok(ItemQuery::Func(*id, generics));
-                    }
-
-                    if !generics.is_empty() {
-                        let message = format!("item `{}` not found", ast.name);
-                        return Err(Diagnostic::new(message).with_span(ast.span));
-                    }
-
-                    if let Some(id) = unit.modules[module].modules.get(&ast.name) {
-                        module = *id;
-                        continue;
-                    }
-
-                    let message = format!("item `{}` not found", ast.name);
-                    return Err(Diagnostic::new(message).with_span(ast.span));
-                }
-
-                ast::ItemSegment::Assoc(ast) => {
-                    let implementor = self.lower_type(unit, &ast.implementor)?;
-
-                    let query = self.query_item(unit, &ast.trait_item)?;
-                    let ItemQuery::Trait(trait_id, generics) = query else {
-                        let message = "expected trait";
-                        return Err(Diagnostic::new(message).with_span(ast.trait_item.span));
-                    };
-
-                    let Some(index) = unit.types[trait_id].assoc_index(&ast.name) else {
-                        let message = format!("assoc `{}` not found", ast.name);
-                        return Err(Diagnostic::new(message).with_span(ast.span));
-                    };
-
-                    return Ok(ItemQuery::Assoc(implementor, trait_id, generics, index));
-                }
-
-                ast::ItemSegment::Generic(ast) => {
-                    if segments.next().is_some() {
-                        let message = "unexpected generic segment";
-                        return Err(Diagnostic::new(message).with_span(ast.span));
-                    }
-
-                    let generic = self.get_generic(ast)?;
-                    return Ok(ItemQuery::Generic(generic));
-                }
-
-                ast::ItemSegment::SelfLower(_) => {
-                    return Ok(ItemQuery::SelfArgument);
-                }
-
-                ast::ItemSegment::SelfUpper(_) => todo!(),
-            }
-        }
-
-        todo!()
+        Ok(resolved)
     }
 
     pub fn lower_type(
@@ -199,21 +288,21 @@ impl<'a> TypeContext<'a> {
             ast::Type::Slice(_) => todo!(),
             ast::Type::Tuple(_) => todo!(),
             ast::Type::Function(_) => todo!(),
-            ast::Type::Item(item) => match self.query_item(unit, item)? {
-                ItemQuery::Struct(id, generics) => hir::Type::Partial(hir::Partial {
+            ast::Type::Item(item) => match self.resolve_path(unit, item)? {
+                Resolved::Struct(id, generics) => hir::Type::Partial(hir::Partial {
                     item: hir::Item::Struct(id),
                     params: generics,
                 }),
-                ItemQuery::Enum(id, generics) => hir::Type::Partial(hir::Partial {
+                Resolved::Enum(id, generics) => hir::Type::Partial(hir::Partial {
                     item: hir::Item::Enum(id),
                     params: generics,
                 }),
-                ItemQuery::Generic(generic) => hir::Type::Generic(generic),
-                ItemQuery::Assoc(implementor, trait_id, generics, index) => {
+                Resolved::Generic(generic) => hir::Type::Generic(generic),
+                Resolved::AssocType(implementor, trait_id, generics, index) => {
                     hir::Type::Projected(hir::Projected {
                         contract: unit.types[trait_id].contract,
                         base: Box::new(implementor),
-                        projection: hir::Projection::Associated {
+                        projection: hir::Projection::AssocType {
                             trait_id,
                             generics,
                             index,

@@ -1,6 +1,8 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Token, TokenStream};
 
+/// 'a
+/// 'a::name
 #[derive(Clone, Debug)]
 pub struct Generic {
     pub name: String,

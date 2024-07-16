@@ -1,7 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_item, Item};
+use crate::{parse_path, Path};
 
 #[derive(Clone, Debug)]
 pub struct VoidType {
@@ -70,7 +70,7 @@ pub enum Type {
     Slice(SliceType),
     Tuple(TupleType),
     Function(FunctionType),
-    Item(Item),
+    Item(Path),
 }
 
 impl Type {
@@ -272,7 +272,7 @@ pub fn parse_type(stream: &mut TokenStream) -> Result<Type, Diagnostic> {
         | Token::Quote
         | Token::ColonColon
         | Token::SelfLower
-        | Token::SelfUpper => Ok(Type::Item(parse_item(stream, true)?)),
+        | Token::SelfUpper => Ok(Type::Item(parse_path(stream, true)?)),
 
         _ => {
             let message = format!("expected type, found {:?}", token);

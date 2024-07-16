@@ -3,7 +3,7 @@ use ritec_parse::{Delim, Token, TokenStream};
 
 use crate::{
     parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type,
-    Contract, Expr, Generic, Item, TraitBound, Type, VoidExpr,
+    Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,10 +125,18 @@ pub struct AssocImpl {
 
 #[derive(Clone, Debug)]
 pub struct TraitImpl {
-    pub trait_: Item,
+    pub trait_: Path,
     pub implementor: Type,
     pub contract: Contract,
     pub types: Vec<AssocImpl>,
+    pub methods: Vec<MethodImpl>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct Impl {
+    pub implementor: Type,
+    pub contract: Contract,
     pub methods: Vec<MethodImpl>,
     pub span: Span,
 }
@@ -147,6 +155,7 @@ pub enum Decl {
     Function(Function),
     Trait(Trait),
     TraitImpl(TraitImpl),
+    Impl(Impl),
     Module(ModuleDecl),
 }
 
@@ -559,7 +568,7 @@ pub fn parse_assoc_impl(stream: &mut TokenStream) -> Result<AssocImpl, Diagnosti
     Ok(AssocImpl { name, type_, span })
 }
 
-fn parse_trait_impl(stream: &mut TokenStream, trait_: Item) -> Result<TraitImpl, Diagnostic> {
+fn parse_trait_impl(stream: &mut TokenStream, trait_: Path) -> Result<TraitImpl, Diagnostic> {
     let for_ = parse_type(stream)?;
     let contract = parse_contract(stream)?;
 
@@ -601,17 +610,41 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     let first = parse_type(stream)?;
 
     if stream.take(Token::For) {
-        match first {
+        return match first {
             Type::Item(item) => Ok(Decl::TraitImpl(parse_trait_impl(stream, item)?)),
             _ => {
                 let message = format!("expected trait, found {:?}", first);
                 let diagnostic = Diagnostic::new(message).with_span(start.join(first.span()));
                 Err(diagnostic)
             }
-        }
-    } else {
-        todo!()
+        };
     }
+
+    let implementor = first;
+    let contract = parse_contract(stream)?;
+    let mut methods = Vec::new();
+
+    if stream.take(Token::Indent) {
+        while !stream.is(Token::Dedent) {
+            if stream.is(Token::Newline) {
+                stream.consume();
+                continue;
+            }
+
+            methods.push(parse_method_impl(stream)?);
+        }
+
+        stream.expect(Token::Dedent)?;
+    }
+
+    let span = start.join(implementor.span());
+
+    Ok(Decl::Impl(Impl {
+        implementor,
+        contract,
+        methods,
+        span,
+    }))
 }
 
 pub fn parse_module_decl(stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {

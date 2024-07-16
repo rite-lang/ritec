@@ -65,7 +65,7 @@ impl Specialization {
                 let base = self.specialize(&projected.base);
 
                 let projection = match projected.projection {
-                    Projection::Associated {
+                    Projection::AssocType {
                         trait_id: trait_,
                         ref generics,
                         index,
@@ -76,7 +76,7 @@ impl Specialization {
                             *generic = self.specialize(generic);
                         }
 
-                        Projection::Associated {
+                        Projection::AssocType {
                             trait_id: trait_,
                             generics,
                             index,
