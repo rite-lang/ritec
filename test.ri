@@ -1,32 +1,12 @@
-struct Vec<'a>
-    ptr: *mut 'a
-    len: usize
-    cap: usize
-
-fn vec_new() -> Vec<'a>
-    Vec
-        ptr: null
-        len: 0
-        cap: 0
-
-fn vec_grow(v: *mut Vec<'a>)
-    let zero: usize = 0
-    let new_cap = if (*v).cap == zero => 1
-    else => (*v).cap + (*v).cap
-
-    let new_ptr = alloc<i32>(new_cap)
-
-    if (*v).cap == zero
-        (*v).ptr = new_ptr
-        (*v).cap = new_cap
-    else
-        dealloc<i32>((*v).ptr)
-        (*v).ptr = new_ptr
-        (*v).cap = new_cap
+struct A
+    a: usize
+    b: usize
 
 fn main(argc: usize, argv: **u8) -> usize
-    let v = vec_new<i32>()
-    vec_grow(&v)
-    vec_grow(&v)
+    let x = A
+        a: 1
+        b: 2
 
-    v.cap
+    let y = & & & & &x
+
+    x.a + y.b

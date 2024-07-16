@@ -1,9 +1,9 @@
+use ritec_diagnostic::Diagnostic;
+use std::fmt::{Display, Formatter};
 use std::{
     collections::{HashMap, VecDeque},
     ops::{Index, IndexMut},
 };
-
-use ritec_diagnostic::Diagnostic;
 
 use crate::{
     Contract, ContractId, Contracts, Enums, Item, Known, Specialization, Struct, StructId, Structs,
@@ -14,6 +14,17 @@ use crate::{
 pub enum Goal {
     Unify(Type, Type),
     Satisfy(ContractId, Specialization),
+}
+
+impl Display for Goal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Goal::Unify(a, b) => write!(f, "unify {} with {}", a, b),
+            Goal::Satisfy(contract, specialization) => {
+                write!(f, "satisfy contract {} with {}", contract, specialization)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -157,6 +168,10 @@ impl Types {
             self.goals.push_back(goal.clone());
 
             if fail_count > self.goals.len() + 10 {
+                for goal in self.goals.iter() {
+                    println!("{}", goal);
+                }
+
                 let diagnostic = Diagnostic::new("failed to solve goal");
                 return Err(diagnostic);
             }

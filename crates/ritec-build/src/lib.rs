@@ -162,13 +162,20 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             }
 
             hir::ExprKind::Field(ref base, ref name) => {
-                let (_, _, index) =
+                let (_, _, index, deref_count) =
                     (self.bcx.hir.types).fetch_field_index(&base.ty, name, &self.specialization)?;
 
                 let mut place = unpack!(block = self.build_place(block, base)?);
                 let ty = self.build_type(&expr.ty)?;
 
                 let kind = mir::ProjectionKind::Field(index);
+
+                for _ in 0..deref_count {
+                    place.projections.push(mir::Projection {
+                        kind: mir::ProjectionKind::Deref,
+                        ty: mir::Type::VOID,
+                    });
+                }
 
                 place.projections.push(mir::Projection { kind, ty });
 

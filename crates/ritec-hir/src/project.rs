@@ -248,7 +248,7 @@ impl Types {
         base: &Type,
         name: &str,
         specialization: &Specialization,
-    ) -> Result<(StructId, Vec<Type>, usize), Diagnostic> {
+    ) -> Result<(StructId, Vec<Type>, usize, usize), Diagnostic> {
         let partial = match base {
             Type::Unknown(unknown) => match self.substitutions.get(&unknown.uid) {
                 Some(substitute) => {
@@ -279,13 +279,19 @@ impl Types {
             Type::Partial(partial) => partial,
         };
 
+        if let Item::Pointer { .. } = partial.item {
+            let (a, b, c, d) = self.fetch_field_index(&partial.params[0], name, specialization)?;
+
+            return Ok((a, b, c, d + 1));
+        }
+
         let Item::Struct(struct_id) = partial.item else {
             let message = format!("expected struct, found {}", base);
             return Err(Diagnostic::new(message));
         };
 
         match self[struct_id].field_index(name) {
-            Some(index) => Ok((struct_id, partial.params.clone(), index)),
+            Some(index) => Ok((struct_id, partial.params.clone(), index, 0)),
             None => {
                 let message = format!("field {} not found in struct {}", name, base);
                 Err(Diagnostic::new(message))
@@ -312,7 +318,7 @@ impl Types {
                 specialization,
             ),
             Projection::Field { ref name } => {
-                let (struct_id, params, index) =
+                let (struct_id, params, index, _) =
                     self.fetch_field_index(&projected.base, name, specialization)?;
 
                 let mut specialization = specialization.clone();
