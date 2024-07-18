@@ -20,4 +20,4 @@ fn main(argc: usize, argv: **u8) -> usize
     let vtable = VTable
         func: foo
 
-    vtable.func(4) as usize
+    (vtable.func)(4) as usize

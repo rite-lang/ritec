@@ -370,8 +370,9 @@ pub fn parse_field_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
 
 pub fn parse_call_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
     let callee = parse_field_expr(stream)?;
+    let is_struct = matches!(callee, Expr::Struct(_));
 
-    if stream.take(Token::Paren(Delim::Open)) {
+    if !is_struct && stream.take(Token::Paren(Delim::Open)) {
         let mut arguments = Vec::new();
 
         loop {
