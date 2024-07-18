@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 ritec-diagnostic.workspace = true
 ritec-parse.workspace = true
+ritec-source.workspace = true

@@ -1,0 +1,10 @@
+mod test
+    fn cool() -> usize => 2
+
+mod ext
+mod ops
+mod mul
+
+fn main(argc: usize, argv: **u8) -> usize
+    test::cool()
+

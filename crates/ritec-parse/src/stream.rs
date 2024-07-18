@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ritec_diagnostic::{Diagnostic, Span};
-
+use ritec_source::SourceId;
 use crate::Token;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -9,14 +9,16 @@ pub struct TokenStream {
     tokens: Arc<[(Token, Span)]>,
     index: usize,
     span: Span,
+    source_id: SourceId,
 }
 
 impl TokenStream {
-    pub fn new(tokens: impl Into<Arc<[(Token, Span)]>>, span: Span) -> Self {
+    pub fn new(tokens: impl Into<Arc<[(Token, Span)]>>, span: Span, source_id: SourceId) -> Self {
         Self {
             tokens: tokens.into(),
             index: 0,
             span,
+            source_id,
         }
     }
 
@@ -179,5 +181,9 @@ impl TokenStream {
         };
 
         Ok((result, Span::new(start, end)))
+    }
+
+    pub fn source_id(&self) -> SourceId {
+        self.source_id
     }
 }

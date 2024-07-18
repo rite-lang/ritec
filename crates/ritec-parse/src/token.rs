@@ -32,6 +32,7 @@ pub enum Token {
     Match,
     Mut,
     Mod,
+    Use,
     Null,
     Loop,
     Where,
@@ -113,6 +114,7 @@ impl Token {
             "match" => Some(Token::Match),
             "mut" => Some(Token::Mut),
             "mod" => Some(Token::Mod),
+            "use" => Some(Token::Use),
             "null" => Some(Token::Null),
             "loop" => Some(Token::Loop),
             "where" => Some(Token::Where),
@@ -198,7 +200,6 @@ impl Display for Token {
             Token::Integer(int) => write!(f, "{}", int),
             Token::Float(float) => write!(f, "{}", float),
             Token::String(string) => write!(f, "\"{}\"", string),
-
             /* control tokens */
             Token::Newline => write!(f, "newline"),
             Token::Indent => write!(f, "indent"),
@@ -217,6 +218,7 @@ impl Display for Token {
             Token::Match => write!(f, "match"),
             Token::Mut => write!(f, "mut"),
             Token::Mod => write!(f, "mod"),
+            Token::Use => write!(f, "use"),
             Token::Null => write!(f, "null"),
             Token::Loop => write!(f, "loop"),
             Token::Where => write!(f, "where"),

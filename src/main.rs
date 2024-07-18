@@ -1,6 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
+use ritec_source::Sources;
 use ritec_type_repl::TypeReplOptions;
 
 #[derive(Debug, Parser)]
@@ -11,11 +12,13 @@ struct AstOptions {
 
 impl AstOptions {
     pub fn run(&self) -> eyre::Result<()> {
-        let source = fs::read_to_string(&self.path)?;
-        let mut tokenizer = ritec_parse::Tokenizer::new();
-        let mut stream = tokenizer.tokenize(&source).unwrap();
+        let mut sources = Sources::new();
 
-        let ast = ritec_ast::parse_module(&mut stream).unwrap();
+        let source = sources.add_path(self.path.clone());
+        let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
+        let mut stream = tokenizer.tokenize(&source.source).unwrap();
+
+        let ast = ritec_ast::parse_module(&mut sources, &mut stream).unwrap();
 
         println!("{:#?}", ast);
 
@@ -31,11 +34,13 @@ struct HirOptions {
 
 impl HirOptions {
     pub fn run(&self) -> eyre::Result<()> {
-        let source = fs::read_to_string(&self.path)?;
-        let mut tokenizer = ritec_parse::Tokenizer::new();
-        let mut stream = tokenizer.tokenize(&source).unwrap();
+        let mut sources = Sources::new();
 
-        let ast = ritec_ast::parse_module(&mut stream).unwrap();
+        let source = sources.add_path(self.path.clone());
+        let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
+        let mut stream = tokenizer.tokenize(&source.source).unwrap();
+
+        let ast = ritec_ast::parse_module(&mut sources, &mut stream).unwrap();
 
         let mut lowerer = ritec_lower::Lowerer::default();
         let mut module = ritec_hir::Module::default();
@@ -57,11 +62,13 @@ struct MirOptions {
 
 impl MirOptions {
     pub fn run(&self) -> eyre::Result<()> {
-        let source = fs::read_to_string(&self.path)?;
-        let mut tokenizer = ritec_parse::Tokenizer::new();
-        let mut stream = tokenizer.tokenize(&source).unwrap();
+        let mut sources = Sources::new();
 
-        let ast = ritec_ast::parse_module(&mut stream).unwrap();
+        let source = sources.add_path(self.path.clone());
+        let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
+        let mut stream = tokenizer.tokenize(&source.source).unwrap();
+
+        let ast = ritec_ast::parse_module(&mut sources, &mut stream).unwrap();
 
         let mut lowerer = ritec_lower::Lowerer::default();
         let mut module = ritec_hir::Module::default();
@@ -86,11 +93,13 @@ struct COptions {
 
 impl COptions {
     pub fn run(&self) -> eyre::Result<()> {
-        let source = fs::read_to_string(&self.path)?;
-        let mut tokenizer = ritec_parse::Tokenizer::new();
-        let mut stream = tokenizer.tokenize(&source).unwrap();
+        let mut sources = Sources::new();
 
-        let ast = ritec_ast::parse_module(&mut stream).unwrap();
+        let source = sources.add_path(self.path.clone());
+        let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
+        let mut stream = tokenizer.tokenize(&source.source).unwrap();
+
+        let ast = ritec_ast::parse_module(&mut sources, &mut stream).unwrap();
 
         let mut lowerer = ritec_lower::Lowerer::default();
         let mut module = ritec_hir::Module::default();

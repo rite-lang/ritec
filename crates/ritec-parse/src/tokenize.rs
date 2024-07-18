@@ -1,22 +1,31 @@
 use std::{cmp::Ordering, mem};
 
 use ritec_diagnostic::{Diagnostic, Span};
+use ritec_source::SourceId;
 
 use crate::{Token, TokenStream};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Tokenizer {
     lo: usize,
     tokens: Vec<(Token, Span)>,
     indents: Vec<usize>,
+    source_id: SourceId,
+}
+
+impl Default for Tokenizer {
+    fn default() -> Self {
+        Self::new(SourceId::default())
+    }
 }
 
 impl Tokenizer {
-    pub fn new() -> Tokenizer {
+    pub fn new(source_id: SourceId) -> Tokenizer {
         Tokenizer {
             lo: 0,
             tokens: Vec::new(),
             indents: vec![0],
+            source_id,
         }
     }
 
@@ -344,7 +353,7 @@ impl Tokenizer {
 
     pub fn take_stream(&mut self) -> TokenStream {
         let span = Span::new(0, self.lo);
-        TokenStream::new(mem::take(&mut self.tokens), span)
+        TokenStream::new(mem::take(&mut self.tokens), span, self.source_id)
     }
 
     pub fn tokenize(&mut self, source: &str) -> Result<TokenStream, Diagnostic> {
@@ -371,7 +380,7 @@ mod tests {
     #[test]
     fn test_tokenize() {
         let source = r#"10.10 "WOW SO COOL" "#;
-        let mut tokenizer = Tokenizer::new();
+        let mut tokenizer = Tokenizer::new(SourceId::new(0));
 
         match tokenizer.tokenize(source) {
             Ok(tokens) => println!("{:?}", tokens),

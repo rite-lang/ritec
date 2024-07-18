@@ -5,6 +5,7 @@ use ritec_hir::{
     Assoc, Contract, ContractId, Generic, Trait, TraitBound, TraitId, TraitImpl, Types, Unknown,
 };
 use ritec_parse::{Token, TokenStream, Tokenizer};
+use ritec_source::SourceId;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -53,7 +54,7 @@ pub struct Repl {
 impl Repl {
     pub fn new() -> Repl {
         Repl {
-            tokenizer: Tokenizer::new(),
+            tokenizer: Tokenizer::new(SourceId::default()),
             unknowns: HashMap::new(),
             global_foralls: Foralls::new(),
             foralls: HashMap::new(),

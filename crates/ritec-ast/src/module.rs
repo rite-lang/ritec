@@ -1,6 +1,6 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
-
+use ritec_source::Sources;
 use crate::{
     parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type,
     Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr,
@@ -163,6 +163,7 @@ pub enum Decl {
 pub struct Module {
     pub decls: Vec<Decl>,
 }
+
 
 pub fn parse_visibility(stream: &mut TokenStream) -> Result<Vis, Diagnostic> {
     let (token, _) = stream.peek();
@@ -647,22 +648,69 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     }))
 }
 
-pub fn parse_module_decl(stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
+pub fn parse_module_decl(sources: &mut Sources, stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
     stream.expect(Token::Mod)?;
 
     let (name, span) = stream.expect_ident_spanned()?;
 
-    stream.expect(Token::Newline)?;
-    stream.expect(Token::Indent)?;
+
+    // Parse external module declaration
+    // if we do not define a new block.
+    if !stream.nth_is(1, Token::Indent) {
+        let mut path = sources.get(stream.source_id()).path.clone();
+
+        // Get parent directory
+        if !path.is_dir() {
+            path.pop();
+        }
+
+        path.push(&name);
+
+        if !path.exists() {
+            path = path.with_extension("ri");
+        }
+
+        if !path.exists() {
+            let message = format!("module {} not found in {}", name, path.to_str().unwrap());
+            return Err(Diagnostic::new(message).with_span(span));
+        }
+
+        if path.is_dir() {
+            path.push("mod.ri");
+
+            if !path.exists() {
+                let message = format!("mod.ri not found in module directory {}", name);
+                return Err(Diagnostic::new(message).with_span(span));
+            }
+        }
+
+        let source = sources.add_path(path);
+
+        let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
+        let mut stream = tokenizer.tokenize(&source.source).unwrap();
+        let module = parse_module(sources, &mut stream)?;
+
+        return Ok(ModuleDecl {
+            name,
+            module: Some(module),
+            span,
+        });
+    }
 
     let mut decls = Vec::new();
 
+    // Parse inline module declaration
+    stream.expect(Token::Newline)?;
+    stream.expect(Token::Indent)?;
+
+
     while !stream.is(Token::Dedent) {
-        decls.push(parse_decl(stream)?);
+        decls.push(parse_decl(sources, stream)?);
         stream.take(Token::Newline);
     }
 
     stream.expect(Token::Dedent)?;
+
 
     Ok(ModuleDecl {
         name,
@@ -671,7 +719,7 @@ pub fn parse_module_decl(stream: &mut TokenStream) -> Result<ModuleDecl, Diagnos
     })
 }
 
-pub fn parse_decl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
+pub fn parse_decl(sources: &mut Sources, stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     let (token, span) = stream.peek();
 
     match token {
@@ -680,7 +728,7 @@ pub fn parse_decl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
         Token::Fn => Ok(Decl::Function(parse_function_decl(stream)?)),
         Token::Trait => Ok(Decl::Trait(parse_trait_decl(stream)?)),
         Token::Impl => parse_impl(stream),
-        Token::Mod => Ok(Decl::Module(parse_module_decl(stream)?)),
+        Token::Mod => Ok(Decl::Module(parse_module_decl(sources, stream)?)),
         _ => {
             let message = format!("expected declaration, found {}", token);
             let diagnostic = Diagnostic::new(message).with_span(span);
@@ -689,11 +737,11 @@ pub fn parse_decl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     }
 }
 
-pub fn parse_module(stream: &mut TokenStream) -> Result<Module, Diagnostic> {
+pub fn parse_module(sources: &mut Sources, stream: &mut TokenStream) -> Result<Module, Diagnostic> {
     let mut decls = Vec::new();
 
     while !stream.is_empty() {
-        decls.push(parse_decl(stream)?);
+        decls.push(parse_decl(sources, stream)?);
         stream.take(Token::Newline);
     }
 
