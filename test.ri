@@ -10,5 +10,14 @@ impl Vec<'a>
             len: 0
             cap: 0 
 
+struct VTable
+    func: fn(i32) -> i32
+
+fn foo(x: i32) -> i32
+    x + 3
+
 fn main(argc: usize, argv: **u8) -> usize
-    0
+    let vtable = VTable
+        func: foo
+
+    vtable.func(4) as usize

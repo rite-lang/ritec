@@ -339,10 +339,24 @@ impl<'a> TypeContext<'a> {
                 })
             }
 
+            ast::Type::Function(ty) => {
+                let mut params = Vec::new();
+                params.push(self.lower_type(unit, &ty.output)?);
+
+                for argument in &ty.arguments {
+                    params.push(self.lower_type(unit, argument)?);
+                }
+
+                hir::Type::Partial(hir::Partial {
+                    item: hir::Item::Function,
+                    params,
+                })
+            }
+
             ast::Type::Array(_) => todo!(),
             ast::Type::Slice(_) => todo!(),
             ast::Type::Tuple(_) => todo!(),
-            ast::Type::Function(_) => todo!(),
+
             ast::Type::Path(item) => match self.resolve_path(unit, item)? {
                 Resolved::Struct(id, generics) => hir::Type::Partial(hir::Partial {
                     item: hir::Item::Struct(id),
