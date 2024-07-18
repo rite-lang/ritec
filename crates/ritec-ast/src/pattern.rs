@@ -11,8 +11,8 @@ pub struct ItemPat {
 
 #[derive(Clone, Debug)]
 pub struct TuplePat {
-    pub item: Option<Path>,
-    pub patterns: Vec<Pat>,
+    pub path: Option<Path>,
+    pub pats: Vec<Pat>,
     pub span: Span,
 }
 
@@ -56,8 +56,8 @@ fn parse_tuple_pattern(
     let end = stream.expect(Token::Paren(Delim::Close))?;
 
     Ok(TuplePat {
-        item,
-        patterns,
+        path: item,
+        pats: patterns,
         span: start.join(end),
     })
 }

@@ -32,6 +32,13 @@ pub struct NullExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct AsExpr {
+    pub expr: Box<Expr>,
+    pub type_: Type,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct FieldInit {
     pub name: String,
     pub value: Expr,
@@ -69,20 +76,8 @@ pub struct CallExpr {
 pub enum UnaryOp {
     Neg,
     Not,
-    Ref,
+    Ref { mutable: bool },
     Deref,
-}
-
-impl UnaryOp {
-    pub fn from_token(token: Token) -> Option<Self> {
-        match token {
-            Token::Minus => Some(UnaryOp::Neg),
-            Token::Not => Some(UnaryOp::Not),
-            Token::And => Some(UnaryOp::Ref),
-            Token::Star => Some(UnaryOp::Deref),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -182,7 +177,7 @@ pub struct IfExpr {
 #[derive(Clone, Debug)]
 pub struct Arm {
     pub pat: Pat,
-    pub expr: Expr,
+    pub body: Expr,
     pub span: Span,
 }
 
@@ -206,6 +201,7 @@ pub enum Expr {
     LitInt(LitIntExpr),
     LitFloat(LitFloatExpr),
     Null(NullExpr),
+    As(AsExpr),
     Struct(StructExpr),
     Paren(ParenExpr),
     Field(FieldExpr),
@@ -228,6 +224,7 @@ impl Expr {
             Expr::LitInt(expr) => expr.span,
             Expr::LitFloat(expr) => expr.span,
             Expr::Null(expr) => expr.span,
+            Expr::As(expr) => expr.span,
             Expr::Struct(expr) => expr.span,
             Expr::Paren(expr) => expr.span,
             Expr::Field(expr) => expr.span,
@@ -403,12 +400,35 @@ pub fn parse_call_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
     }
 }
 
+fn parse_unary_op(stream: &mut TokenStream) -> Option<UnaryOp> {
+    let (token, _) = stream.peek();
+
+    match token {
+        Token::Minus => {
+            stream.consume();
+            Some(UnaryOp::Neg)
+        }
+        Token::Not => {
+            stream.consume();
+            Some(UnaryOp::Not)
+        }
+        Token::And => {
+            stream.consume();
+            let mutable = stream.take(Token::Mut);
+            Some(UnaryOp::Ref { mutable })
+        }
+        Token::Star => {
+            stream.consume();
+            Some(UnaryOp::Deref)
+        }
+        _ => None,
+    }
+}
+
 pub fn parse_unary_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
-    let (token, span) = stream.peek();
+    let (_, span) = stream.peek();
 
-    if let Some(op) = UnaryOp::from_token(token) {
-        stream.consume();
-
+    if let Some(op) = parse_unary_op(stream) {
         let expr = parse_unary_expr(stream)?;
 
         Ok(Expr::Unary(UnaryExpr {
@@ -421,10 +441,27 @@ pub fn parse_unary_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
     }
 }
 
+pub fn parse_as_expr(stream: &mut TokenStream) -> Result<Expr, Diagnostic> {
+    let expr = parse_unary_expr(stream)?;
+
+    if stream.take(Token::As) {
+        let type_ = parse_type(stream)?;
+        let span = expr.span().join(type_.span());
+
+        Ok(Expr::As(AsExpr {
+            expr: Box::new(expr),
+            type_,
+            span,
+        }))
+    } else {
+        Ok(expr)
+    }
+}
+
 pub fn parse_binary_expr(stream: &mut TokenStream, min_precedence: u8) -> Result<Expr, Diagnostic> {
     // NOTE: Copilot wrote whole function this thing in it's entirety
 
-    let mut lhs = parse_unary_expr(stream)?;
+    let mut lhs = parse_as_expr(stream)?;
 
     loop {
         let (token, _) = stream.peek();
@@ -589,15 +626,11 @@ fn is_match_arm(stream: &mut TokenStream) -> bool {
 fn parse_match_arm(stream: &mut TokenStream) -> Result<Arm, Diagnostic> {
     stream.expect(Token::Or)?;
 
-    let pattern = parse_pattern(stream)?;
+    let pat = parse_pattern(stream)?;
     let body = parse_body(stream)?;
-    let span = pattern.span().join(body.span());
+    let span = pat.span().join(body.span());
 
-    Ok(Arm {
-        pat: pattern,
-        expr: body,
-        span,
-    })
+    Ok(Arm { pat, body, span })
 }
 
 pub fn parse_match_expr(stream: &mut TokenStream) -> Result<MatchExpr, Diagnostic> {
@@ -608,10 +641,14 @@ pub fn parse_match_expr(stream: &mut TokenStream) -> Result<MatchExpr, Diagnosti
 
     let mut arms = Vec::new();
 
-    while is_match_arm(stream) {
+    if is_match_arm(stream) {
         stream.expect(Token::Newline)?;
-        let arm = parse_match_arm(stream)?;
-        arms.push(arm);
+
+        while stream.is(Token::Or) {
+            let arm = parse_match_arm(stream)?;
+            arms.push(arm);
+            stream.take(Token::Newline);
+        }
     }
 
     Ok(MatchExpr {

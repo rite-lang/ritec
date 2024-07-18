@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::{TraitId, Type};
 
 /// A trait bound.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraitBound {
     /// The base type of this bound.
     pub base: Type,
@@ -39,7 +39,7 @@ impl Display for TraitBound {
 }
 
 /// A where clause.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Contract {
     /// The bounds of the where clause.
     pub bounds: Vec<TraitBound>,

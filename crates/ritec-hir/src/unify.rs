@@ -56,8 +56,7 @@ impl Types {
     fn unify_partial_partial(&mut self, a: &Partial, b: &Partial) -> Result<bool, Diagnostic> {
         if a.item != b.item {
             let message = format!("type mismatch expected `{}`, found `{}`", a, b);
-            let diagnostic = Diagnostic::new(message);
-            return Err(diagnostic);
+            return Err(Diagnostic::new(message));
         }
 
         if a.params.len() != b.params.len() {

@@ -19,9 +19,11 @@ pub struct Module {
 
 impl Module {
     pub fn use_builtins(&mut self, builtins: &Builtins) {
-        self.funcs.insert(String::from("sizeof"), builtins.sizeof);
         self.funcs.insert(String::from("alloc"), builtins.alloc);
+        self.funcs.insert(String::from("realloc"), builtins.realloc);
         self.funcs.insert(String::from("dealloc"), builtins.dealloc);
+        self.funcs.insert(String::from("memcopy"), builtins.memcopy);
+        self.funcs.insert(String::from("sizeof"), builtins.sizeof);
 
         self.traits.insert(String::from("Add"), builtins.add_trait);
         self.traits.insert(String::from("Sub"), builtins.sub_trait);

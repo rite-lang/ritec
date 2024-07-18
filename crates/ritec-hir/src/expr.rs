@@ -1,6 +1,6 @@
 use ritec_diagnostic::Span;
 
-use crate::{BodyId, LocalId, StructId, TraitId, Type};
+use crate::{BodyId, EnumId, LocalId, StructId, TraitId, Type};
 
 #[derive(Clone, Debug)]
 pub enum Const {
@@ -20,7 +20,8 @@ pub enum Const {
         implementor: Type,
         name: String,
         generics: Vec<Type>,
-    }
+        arguments: Option<Vec<Type>>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +46,7 @@ pub enum BinaryOp {
 
 #[derive(Clone, Debug)]
 pub enum Pat {
+    Variant(EnumId, usize, Vec<Pat>),
     Binding(LocalId),
 }
 
@@ -59,10 +61,12 @@ pub enum ExprKind {
     Const(Const),
     Local(LocalId),
     Let(LocalId, Box<Expr>),
+    Cast(Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     Struct(StructId, Vec<Type>, Vec<Expr>),
+    Variant(EnumId, Vec<Type>, usize, Vec<Expr>),
     Field(Box<Expr>, String),
     Ref(Box<Expr>),
     Deref(Box<Expr>),

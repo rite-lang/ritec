@@ -18,11 +18,17 @@ pub enum Value {
     /// Perform a binary operation on two operands.
     Binary(BinaryOp, Operand, Operand),
 
+    /// Cast an operand to a type.
+    Cast(Operand, Type),
+
     /// Get the address of a place.
     AddressOf(bool, Place),
 
     /// Create a struct from a list of operands.
     Struct(Vec<Operand>),
+
+    /// Create a union with the given variants, and value.
+    Union(Operand, Vec<Type>),
 
     /// Get the size of a type.
     Sizeof(Type),
@@ -38,6 +44,7 @@ impl Value {
         match self {
             Self::Use(op) => op.ty().clone(),
             Self::Binary(_, lhs, _) => lhs.ty().clone(),
+            Self::Cast(_, ty) => ty.clone(),
             Self::AddressOf(mutable, place) => Type::Pointer {
                 mutable: *mutable,
                 pointee: Box::new(place.ty().clone()),
@@ -46,6 +53,9 @@ impl Value {
                 let fields = ops.iter().map(|op| op.ty().clone()).collect();
                 Type::Struct { fields }
             }
+            Self::Union(_, variants) => Type::Union {
+                variants: variants.clone(),
+            },
             Self::Sizeof(_) => Type::Int {
                 signed: false,
                 width: None,

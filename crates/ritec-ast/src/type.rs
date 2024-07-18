@@ -70,7 +70,7 @@ pub enum Type {
     Slice(SliceType),
     Tuple(TupleType),
     Function(FunctionType),
-    Item(Path),
+    Path(Path),
 }
 
 impl Type {
@@ -85,7 +85,7 @@ impl Type {
             Type::Slice(ty) => ty.span,
             Type::Tuple(ty) => ty.span,
             Type::Function(ty) => ty.span,
-            Type::Item(ty) => ty.span,
+            Type::Path(ty) => ty.span,
         }
     }
 }
@@ -272,7 +272,7 @@ pub fn parse_type(stream: &mut TokenStream) -> Result<Type, Diagnostic> {
         | Token::Quote
         | Token::ColonColon
         | Token::SelfLower
-        | Token::SelfUpper => Ok(Type::Item(parse_path(stream, true)?)),
+        | Token::SelfUpper => Ok(Type::Path(parse_path(stream, true)?)),
 
         _ => {
             let message = format!("expected type, found {:?}", token);

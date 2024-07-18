@@ -1,57 +1,73 @@
-use ritec_diagnostic::Diagnostic;
+use ritec_diagnostic::{Diagnostic, Span};
 
-use crate::{BodyId, ContractId, Impl, Item, Method, Partial, Projected, Projection, Specialization, StructId, TraitId, TraitImpl, Type, Types};
+use crate::{
+    ContractId, Item, Method, Partial, Projected, Projection, Spec, StructId, TraitId, TraitImpl,
+    Type, Types,
+};
 
 impl Types {
     fn applies(
         &self,
         candidate: &Type,
         implementor: &Type,
-        specialization: &mut Specialization,
+        specialization: &mut Spec,
+        infer: bool,
     ) -> bool {
         match (candidate, implementor) {
             (Type::Unknown(candidate), implementor) => {
                 match self.substitutions.get(&candidate.uid) {
-                    Some(candidate) => self.applies(candidate, implementor, specialization),
-                    None => false,
+                    None => infer,
+                    Some(candidate) => self.applies(candidate, implementor, specialization, infer),
                 }
             }
 
             (candidate, Type::Unknown(implementor)) => {
                 match self.substitutions.get(&implementor.uid) {
-                    Some(implementor) => self.applies(candidate, implementor, specialization),
+                    Some(implementor) => {
+                        self.applies(candidate, implementor, specialization, infer)
+                    }
                     None => false,
                 }
             }
 
-            (Type::Projected(candidate), _) => match self.project(candidate, specialization) {
-                Ok(Some(candidate)) => self.applies(&candidate, implementor, specialization),
-                Ok(None) => false,
-                Err(_) => false,
-            },
-
-            (Type::Generic(candidate), implementor) => {
-                match specialization.get(*candidate).cloned() {
-                    Some(candidate) => self.applies(&candidate, implementor, specialization),
-                    None => true,
+            (candidate, Type::Generic(generic)) => {
+                if candidate == implementor {
+                    return true;
                 }
-            }
 
-            (candidate, Type::Generic(implementor)) => {
-                match specialization.get(*implementor).cloned() {
-                    Some(implementor) => self.applies(candidate, &implementor, specialization),
+                match specialization.get(*generic).cloned() {
+                    Some(implementor) => {
+                        self.applies(candidate, &implementor, specialization, infer)
+                    }
                     None => {
-                        specialization.insert(*implementor, candidate.clone());
+                        specialization.insert(*generic, candidate.clone());
                         true
                     }
                 }
             }
 
+            (Type::Generic(generic), implementor) => {
+                if candidate == implementor {
+                    return true;
+                }
+
+                match specialization.get(*generic).cloned() {
+                    Some(candidate) => self.applies(&candidate, implementor, specialization, infer),
+                    None => false,
+                }
+            }
+
+            (Type::Projected(candidate), _) => match self.project(candidate, specialization) {
+                Ok(Some(candidate)) => self.applies(&candidate, implementor, specialization, infer),
+                Ok(None) => false,
+                Err(_) => false,
+            },
+
             (Type::Partial(candidate), Type::Partial(implementor)) => {
                 let mut applies = candidate.item == implementor.item;
 
                 for (candidate, implementor) in candidate.params.iter().zip(&implementor.params) {
-                    applies &= self.applies(candidate, implementor, specialization);
+                    applies &= self.applies(candidate, implementor, specialization, infer);
                 }
 
                 applies
@@ -61,7 +77,7 @@ impl Types {
         }
     }
 
-    fn equal(&self, candidate: &Type, implementor: &Type, specialization: &Specialization) -> bool {
+    fn equal(&self, candidate: &Type, implementor: &Type, specialization: &Spec) -> bool {
         match (candidate, implementor) {
             (Type::Unknown(candidate), implementor) => {
                 match self.substitutions.get(&candidate.uid) {
@@ -123,8 +139,8 @@ impl Types {
         trait_id: TraitId,
         generics: &[Type],
         implementor: &Type,
-        specialization: &Specialization,
-    ) -> Result<(&TraitImpl, Specialization), Diagnostic> {
+        specialization: &Spec,
+    ) -> Result<(&TraitImpl, Spec), Diagnostic> {
         for trait_impl in &self.trait_impls {
             if trait_impl.trait_id != trait_id {
                 continue;
@@ -132,14 +148,19 @@ impl Types {
 
             let mut specialization = specialization.clone();
 
-            if !self.applies(implementor, &trait_impl.implementor, &mut specialization) {
+            if !self.applies(
+                implementor,
+                &trait_impl.implementor,
+                &mut specialization,
+                false,
+            ) {
                 continue;
             }
 
             let mut applies = true;
 
             for (generic, implementor) in generics.iter().zip(&trait_impl.generics) {
-                applies &= self.applies(generic, implementor, &mut specialization);
+                applies &= self.applies(generic, implementor, &mut specialization, false);
             }
 
             if !applies {
@@ -159,7 +180,7 @@ impl Types {
         let trait_ = &self.traits[trait_id];
         let generics: Vec<_> = generics
             .iter()
-            .map(|ty| match self.query(ty, specialization) {
+            .map(|ty| match self.know(ty, specialization) {
                 Ok(k) => format!("{}", k),
                 Err(_) => String::from("_"),
             })
@@ -169,20 +190,19 @@ impl Types {
             "trait {}<{}> not implemented for {}",
             trait_.name.as_deref().unwrap_or("unnamed"),
             generics.join(", "),
-            match self.query(implementor, specialization) {
+            match self.know(implementor, specialization) {
                 Ok(k) => format!("{}", k),
                 Err(_) => String::from("_"),
             }
         );
 
-        let diagnostic = Diagnostic::new(message);
-        Err(diagnostic)
+        Err(Diagnostic::new(message))
     }
 
     pub fn satisfy_contract(
         &self,
         contract: ContractId,
-        specialization: &Specialization,
+        specialization: &Spec,
     ) -> Result<(), Diagnostic> {
         let contract = &self[contract];
 
@@ -201,14 +221,14 @@ impl Types {
         Ok(())
     }
 
-    fn associated(
+    fn project_associated(
         &self,
         implementor: &Type,
         trait_id: TraitId,
         generics: &[Type],
         contract_id: ContractId,
         index: usize,
-        specialization: &Specialization,
+        specialization: &Spec,
     ) -> Result<Option<Type>, Diagnostic> {
         let contract = &self[contract_id];
 
@@ -243,7 +263,7 @@ impl Types {
         &self,
         base: &Type,
         name: &str,
-        specialization: &Specialization,
+        specialization: &Spec,
     ) -> Result<(StructId, Vec<Type>, usize, usize), Diagnostic> {
         let partial = match base {
             Type::Unknown(unknown) => match self.substitutions.get(&unknown.uid) {
@@ -300,21 +320,48 @@ impl Types {
         implementor: &Type,
         name: &str,
         generics: &[Type],
-        specialization: &Specialization,
-    ) -> Result<(&Method, Specialization), Diagnostic> {
+        arguments: Option<&[Type]>,
+        specialization: &Spec,
+    ) -> Result<(&Method, Spec), Diagnostic> {
         for impl_ in self.impls.iter() {
-            let mut specialization = specialization.clone();
-
-            if !self.applies(implementor, &impl_.implementor, &mut specialization) {
-                continue;
-            }
-
             for method in impl_.methods.iter() {
                 if method.name != name {
                     continue;
                 }
 
-                // TODO: Check that we fulfill all generic parameters
+                let mut specialization = specialization.clone();
+
+                if let Some(arguments) = arguments {
+                    let mut arguments = arguments.iter();
+
+                    let mut applies = self.applies(
+                        arguments.next().unwrap(),
+                        &method.output,
+                        &mut specialization,
+                        true,
+                    );
+
+                    for (ty, argument) in arguments.zip(&method.arguments) {
+                        applies &= self.applies(ty, argument, &mut specialization, true);
+                    }
+
+                    if !applies {
+                        continue;
+                    }
+                }
+
+                if !self.applies(implementor, &impl_.implementor, &mut specialization, true) {
+                    continue;
+                }
+
+                if (self.satisfy_contract(impl_.contract, &specialization)).is_err() {
+                    continue;
+                }
+
+                for generic in &impl_.generics {
+                    specialization.insert(*generic, Type::unknown(Span { lo: 0, hi: 0 }));
+                }
+
                 for (generic, ty) in method.generics.iter().zip(generics) {
                     specialization.insert(*generic, ty.clone());
                 }
@@ -322,7 +369,6 @@ impl Types {
                 return Ok((method, specialization));
             }
         }
-
 
         // TODO: Add a span
         let message = format!("method {} not found in {}", name, implementor);
@@ -332,14 +378,14 @@ impl Types {
     pub(crate) fn project(
         &self,
         projected: &Projected,
-        specialization: &Specialization,
+        specialization: &Spec,
     ) -> Result<Option<Type>, Diagnostic> {
         match projected.projection {
-            Projection::AssocType {
+            Projection::TraitType {
                 trait_id,
                 ref generics,
                 index,
-            } => self.associated(
+            } => self.project_associated(
                 &projected.base,
                 trait_id,
                 generics,
@@ -347,11 +393,16 @@ impl Types {
                 index,
                 specialization,
             ),
-            Projection::AssocMethod { ref name, ref generics } => {
+            Projection::AssocMethod {
+                ref name,
+                ref generics,
+                ref arguments,
+            } => {
                 let (method, specialization) = self.fetch_assoc_method(
                     &projected.base,
                     name,
                     generics,
+                    arguments.as_deref(),
                     specialization,
                 )?;
 
@@ -364,7 +415,6 @@ impl Types {
                     item: Item::Function,
                     params,
                 });
-
 
                 Ok(Some(specialization.specialize(&ty)))
             }

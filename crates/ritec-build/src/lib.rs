@@ -35,7 +35,7 @@ struct Builder<'a, 'bcx> {
     locals: &'a mut Locals,
     blocks: &'a mut Blocks,
     body: &'a hir::Body,
-    specialization: hir::Specialization,
+    specialization: hir::Spec,
 }
 
 impl Index<mir::BlockId> for Builder<'_, '_> {
@@ -58,7 +58,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
     }
 
     fn build_type(&mut self, hir: &hir::Type) -> Result<mir::Type, Diagnostic> {
-        let known = self.bcx.hir.types.query(hir, &self.specialization)?;
+        let known = self.bcx.hir.types.know(hir, &self.specialization)?;
 
         self.build_known(known)
     }
@@ -111,7 +111,7 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             hir::Item::Struct(id) => {
                 let hir_struct = &self.bcx.hir.types[id];
 
-                let mut specialization = hir::Specialization::new();
+                let mut specialization = hir::Spec::new();
 
                 for (&generic, ty) in hir_struct.generics.iter().zip(&known.params) {
                     specialization.insert(generic, ty.to_type());
@@ -134,8 +134,161 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                 mir::Type::Struct { fields }
             }
-            hir::Item::Enum(_) => todo!(),
+            hir::Item::Enum(id) => {
+                let hir_enum = &self.bcx.hir.types[id];
+
+                let mut specialization = hir::Spec::new();
+
+                for (&generic, ty) in hir_enum.generics.iter().zip(&known.params) {
+                    specialization.insert(generic, ty.to_type());
+                }
+
+                let mut builder = Builder {
+                    bcx: self.bcx,
+                    locals: self.locals,
+                    blocks: self.blocks,
+                    body: self.body,
+                    specialization,
+                };
+
+                let mut variants = Vec::new();
+
+                for variant in &hir_enum.variants {
+                    let mut fields = Vec::new();
+
+                    for field in &variant.fields {
+                        let ty = builder.build_type(field)?;
+                        fields.push(ty);
+                    }
+
+                    let variant = mir::Type::Struct { fields };
+                    variants.push(variant);
+                }
+
+                let discriminant = mir::Type::Int {
+                    signed: false,
+                    width: Some(32),
+                };
+
+                let union = mir::Type::Union { variants };
+
+                mir::Type::Struct {
+                    fields: vec![discriminant, union],
+                }
+            }
         })
+    }
+
+    fn build_temp_local(&mut self, block: mir::BlockId, value: mir::Value) -> mir::Place {
+        let ty = value.ty();
+        let decl = mir::LocalDecl {
+            mutable: true,
+            ty: ty.clone(),
+        };
+
+        let base = self.locals.push(decl);
+
+        let place = mir::Place {
+            base,
+            ty,
+            projections: Vec::new(),
+        };
+
+        let statement = mir::Statement::Assign(place.clone(), value);
+        self[block].statements.push(statement);
+
+        place
+    }
+
+    fn build_pat(
+        &mut self,
+        block: mir::BlockId,
+        pat: &hir::Pat,
+        matched: mir::Place,
+    ) -> (mir::BlockId, mir::BlockId) {
+        match pat {
+            hir::Pat::Variant(id, index, fields) => {
+                let hir_enum = &self.bcx.hir.types[*id];
+                let discriminant = hir_enum.variants[*index].discriminant;
+
+                let mir::Type::Struct {
+                    fields: ref enum_fields,
+                } = matched.ty
+                else {
+                    unreachable!("expected struct type {:?}", matched.ty)
+                };
+
+                let mut dicriminant_value = matched.clone();
+                dicriminant_value.projections.push(mir::Projection {
+                    kind: mir::ProjectionKind::Field(0),
+                    ty: enum_fields[0].clone(),
+                });
+
+                let mut union_value = matched.clone();
+                union_value.projections.push(mir::Projection {
+                    kind: mir::ProjectionKind::Field(1),
+                    ty: enum_fields[1].clone(),
+                });
+
+                let mut success = self.create_block();
+                let failure = self.create_block();
+
+                self[block].terminator = mir::Terminator::Switch {
+                    discriminant: mir::Operand::Copy(dicriminant_value),
+                    default: failure,
+                    cases: vec![(discriminant, success)],
+                };
+
+                let mir::Type::Union { ref variants } = enum_fields[1] else {
+                    unreachable!()
+                };
+
+                let mut variant_value = union_value.clone();
+                variant_value.projections.push(mir::Projection {
+                    kind: mir::ProjectionKind::Field(*index),
+                    ty: variants[*index].clone(),
+                });
+
+                let mir::Type::Struct {
+                    fields: ref field_types,
+                } = variants[*index]
+                else {
+                    unreachable!()
+                };
+
+                for (i, field) in fields.iter().enumerate() {
+                    let mut field_value = variant_value.clone();
+
+                    field_value.projections.push(mir::Projection {
+                        kind: mir::ProjectionKind::Field(i),
+                        ty: field_types[i].clone(),
+                    });
+
+                    let (s, f) = self.build_pat(success, field, field_value);
+                    self[f].terminator = mir::Terminator::Goto(failure);
+                    success = s;
+                }
+
+                (success, failure)
+            }
+            hir::Pat::Binding(local_id) => {
+                let base = mir::Local {
+                    index: local_id.index(),
+                };
+
+                let place = mir::Place {
+                    base,
+                    ty: self.locals[base].ty.clone(),
+                    projections: Vec::new(),
+                };
+
+                let value = mir::Value::Use(mir::Operand::Copy(matched));
+                let statement = mir::Statement::Assign(place.clone(), value);
+                self[block].statements.push(statement);
+
+                (block, block)
+            }
+        }
     }
 
     fn build_place(
@@ -228,7 +381,8 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             }
 
             hir::ExprKind::Match(ref discriminant, ref arms) => {
-                let value = unpack!(block = self.build_operand(block, discriminant)?);
+                let value = unpack!(block = self.build_value(block, discriminant)?);
+                let value = self.build_temp_local(block, value);
                 let ty = self.build_type(&expr.ty)?;
 
                 let local = mir::LocalDecl {
@@ -244,38 +398,38 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                     projections: Vec::new(),
                 };
 
-                todo!()
+                let end_block = self.create_block();
+
+                for arm in arms {
+                    let (mut success, failure) = self.build_pat(block, &arm.pat, value.clone());
+                    block = failure;
+
+                    let value = unpack!(success = self.build_value(success, &arm.expr)?);
+
+                    let statemtent = mir::Statement::Assign(place.clone(), value);
+                    self[success].statements.push(statemtent);
+                    self[success].terminator = mir::Terminator::Goto(end_block);
+                }
+
+                self[block].terminator = mir::Terminator::Goto(end_block);
+
+                Ok((end_block, place))
             }
 
             hir::ExprKind::Const(_)
             | hir::ExprKind::Let(_, _)
+            | hir::ExprKind::Cast(_)
             | hir::ExprKind::Assign(_, _)
             | hir::ExprKind::Binary(_, _, _)
             | hir::ExprKind::Struct(_, _, _)
+            | hir::ExprKind::Variant(_, _, _, _)
             | hir::ExprKind::Sizeof(_)
             | hir::ExprKind::Ref(_)
             | hir::ExprKind::If(_, _, _)
             | hir::ExprKind::Block(_)
             | hir::ExprKind::Intrinsic(_, _) => {
                 let value = unpack!(block = self.build_value(block, expr)?);
-                let ty = self.build_type(&expr.ty)?;
-
-                let decl = mir::LocalDecl {
-                    mutable: true,
-                    ty: ty.clone(),
-                };
-
-                let base = self.locals.push(decl);
-
-                let place = mir::Place {
-                    base,
-                    ty,
-                    projections: Vec::new(),
-                };
-
-                let statement = mir::Statement::Assign(place.clone(), value);
-                self[block].statements.push(statement);
-
+                let place = self.build_temp_local(block, value);
                 Ok((block, place))
             }
         }
@@ -424,7 +578,13 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                         .collect::<Vec<_>>();
 
                     let body = &self.bcx.hir.bodies[*body_id];
-                    let id = build_body(self.bcx, *body_id, body, &generics, Default::default())?;
+                    let id = build_body(
+                        self.bcx,
+                        *body_id,
+                        body,
+                        &generics,
+                        self.specialization.clone(),
+                    )?;
                     let ty = self.build_type(&expr.ty)?;
 
                     let kind = mir::ConstKind::Body(id);
@@ -459,14 +619,24 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
 
                     Ok((block, mir::Operand::Const(constant)))
                 }
-                hir::Const::AssocMethod { ref implementor, ref name, ref generics } => {
-                    let (method, specialization) = self.bcx.hir.types.fetch_assoc_method(implementor, name, generics, &self.specialization)?;
+                hir::Const::AssocMethod {
+                    ref implementor,
+                    ref name,
+                    ref generics,
+                    ref arguments,
+                } => {
+                    let (method, specialization) = self.bcx.hir.types.fetch_assoc_method(
+                        implementor,
+                        name,
+                        generics,
+                        arguments.as_deref(),
+                        &self.specialization,
+                    )?;
 
                     let body_id = method.body;
                     let body = &self.bcx.hir.bodies[body_id];
 
-                    let body =
-                        build_body(self.bcx, body_id, body, generics, specialization)?;
+                    let body = build_body(self.bcx, body_id, body, generics, specialization)?;
 
                     let ty = self.build_type(&expr.ty)?;
 
@@ -478,9 +648,11 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
             },
 
             hir::ExprKind::Local(_)
+            | hir::ExprKind::Cast(_)
             | hir::ExprKind::Call(_, _)
             | hir::ExprKind::Binary(_, _, _)
             | hir::ExprKind::Struct(_, _, _)
+            | hir::ExprKind::Variant(_, _, _, _)
             | hir::ExprKind::Field(_, _)
             | hir::ExprKind::Ref(_)
             | hir::ExprKind::Deref(_)
@@ -499,6 +671,13 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
         expr: &hir::Expr,
     ) -> Result<BlockAnd<mir::Value>, Diagnostic> {
         match expr.kind {
+            hir::ExprKind::Cast(ref base) => {
+                let base = unpack!(block = self.build_operand(block, base)?);
+                let ty = self.build_type(&expr.ty)?;
+
+                Ok((block, mir::Value::Cast(base, ty)))
+            }
+
             hir::ExprKind::Binary(op, ref lhs, ref rhs) => {
                 let lhs = unpack!(block = self.build_operand(block, lhs)?);
                 let rhs = unpack!(block = self.build_operand(block, rhs)?);
@@ -532,6 +711,46 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
                 }
 
                 Ok((block, mir::Value::Struct(values)))
+            }
+
+            hir::ExprKind::Variant(id, ref _generics, index, ref fields) => {
+                let hir_enum = &self.bcx.hir.types[id];
+
+                let mut values = Vec::new();
+
+                for field in fields {
+                    let field = unpack!(block = self.build_operand(block, field)?);
+                    values.push(field);
+                }
+
+                let variant = mir::Value::Struct(values);
+                let variant = self.build_temp_local(block, variant);
+
+                let ty = self.build_type(&expr.ty)?;
+
+                let mir::Type::Struct { fields } = ty else {
+                    unreachable!()
+                };
+
+                let mir::Type::Union { variants } = fields[1].clone() else {
+                    unreachable!()
+                };
+
+                let union = mir::Value::Union(mir::Operand::Move(variant), variants);
+                let union = self.build_temp_local(block, union);
+
+                let discriminant = hir_enum.variants[index].discriminant;
+                let discriminant = mir::Operand::Const(mir::Const {
+                    kind: mir::ConstKind::Int(discriminant as i64),
+                    ty: mir::Type::Int {
+                        signed: false,
+                        width: Some(32),
+                    },
+                });
+
+                let fields = vec![discriminant, mir::Operand::Move(union)];
+
+                Ok((block, mir::Value::Struct(fields)))
             }
 
             hir::ExprKind::Sizeof(ref ty) => {
@@ -573,7 +792,7 @@ fn build_body(
     body_id: hir::BodyId,
     hir_body: &hir::Body,
     generics: &[hir::Type],
-    mut specialization: hir::Specialization,
+    mut specialization: hir::Spec,
 ) -> Result<mir::BodyId, Diagnostic> {
     for (&generic, ty) in hir_body.generics.iter().zip(generics.iter()) {
         specialization.insert(generic, ty.clone());

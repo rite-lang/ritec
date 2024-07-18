@@ -5,7 +5,7 @@ use ritec_diagnostic::Span;
 use crate::{Generic, Item, Partial, Projected, Uid, Unknown, UnknownKind};
 
 /// A type variable.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
     /// An unknown type.
     Unknown(Unknown),

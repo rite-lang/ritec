@@ -3,6 +3,8 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use ritec_diagnostic::{Diagnostic, Span};
+
 use crate::{Partial, Projected, Projection, Type};
 
 /// A unique identifier for a generic type.
@@ -28,18 +30,40 @@ impl Display for Generic {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Specialization {
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Spec {
     items: Vec<(Generic, Type)>,
 }
 
-impl Specialization {
+impl Spec {
     pub fn new() -> Self {
         Self::default()
     }
 
+    pub fn specify(generics: &[Generic], types: &[Type], span: Span) -> Result<Self, Diagnostic> {
+        let mut spec = Self::new();
+        let mut generics = generics.iter();
+
+        for ty in types {
+            match generics.next() {
+                Some(generic) => spec.insert(*generic, ty.clone()),
+                None => return Err(Diagnostic::new("too many types specified").with_span(span)),
+            }
+        }
+
+        for generic in generics {
+            spec.insert(*generic, Type::unknown(span));
+        }
+
+        Ok(spec)
+    }
+
     pub fn insert(&mut self, generic: Generic, variable: Type) {
         self.items.push((generic, variable));
+    }
+
+    pub fn extend(&mut self, other: &Self) {
+        self.items.extend(other.items.iter().cloned());
     }
 
     pub fn get(&self, generic: Generic) -> Option<&Type> {
@@ -65,7 +89,7 @@ impl Specialization {
                 let base = self.specialize(&projected.base);
 
                 let projection = match projected.projection {
-                    Projection::AssocType {
+                    Projection::TraitType {
                         trait_id: trait_,
                         ref generics,
                         index,
@@ -76,7 +100,7 @@ impl Specialization {
                             *generic = self.specialize(generic);
                         }
 
-                        Projection::AssocType {
+                        Projection::TraitType {
                             trait_id: trait_,
                             generics,
                             index,
@@ -99,7 +123,7 @@ impl Specialization {
     }
 }
 
-impl Display for Specialization {
+impl Display for Spec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let items: Vec<_> = self
             .items

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::{Item, Type};
 
 /// A partially known type.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Partial {
     pub item: Item,
     pub params: Vec<Type>,

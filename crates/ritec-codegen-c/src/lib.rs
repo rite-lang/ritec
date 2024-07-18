@@ -81,11 +81,12 @@ impl Codegen<'_> {
                     return name.clone();
                 }
 
+                let types: Vec<_> = fields.iter().map(|ty| self.gen_type(ty)).collect();
+
+                self.define += &format!("// struct {:?}\n", types);
                 self.define += "typedef struct {\n";
 
-                for (i, field) in fields.iter().enumerate() {
-                    let ty = self.gen_type(field);
-
+                for (i, ty) in types.iter().enumerate() {
                     self.define += &format!("    {} {};\n", ty, field_name(i));
                 }
 
@@ -103,12 +104,13 @@ impl Codegen<'_> {
                     return name.clone();
                 }
 
+                let types: Vec<_> = variants.iter().map(|ty| self.gen_type(ty)).collect();
+
+                self.define += &format!("// union {:?}\n", types);
                 self.define += "typedef union {\n";
 
-                for (i, variant) in variants.iter().enumerate() {
-                    let ty = self.gen_type(variant);
-
-                    self.define += &format!("    {} _{};\n", ty, i);
+                for (i, ty) in types.iter().enumerate() {
+                    self.define += &format!("    {} {};\n", ty, variant_name(i));
                 }
 
                 let name = format!("_rite_union_{}", self.unions.len());
@@ -189,6 +191,12 @@ impl Codegen<'_> {
 
                 format!("{} {} {}", lhs, op, rhs)
             }
+            Value::Cast(operand, ty) => {
+                let operand = self.gen_operand(operand);
+                let ty = self.gen_type(ty);
+
+                format!("({}) {}", ty, operand)
+            }
             Value::AddressOf(mutable, place) => {
                 let place = self.gen_place(place);
 
@@ -205,15 +213,36 @@ impl Codegen<'_> {
 
                 format!("({}) {{ {} }}", ty, fields.join(", "))
             }
+            Value::Union(variant, variants) => {
+                let variant_ty = variant.ty();
+                let index = variants.iter().position(|ty| ty == variant_ty).unwrap();
+
+                let variant = self.gen_operand(variant);
+                let ty = self.gen_type(&value.ty());
+
+                format!("({}) {{ .{} = {} }}", ty, variant_name(index), variant)
+            }
             Value::Sizeof(ty) => format!("sizeof({})", self.gen_type(ty)),
             Value::Intrinsic(name, args, _) => match *name {
                 "alloc" => {
                     let size = self.gen_operand(&args[0]);
                     format!("malloc({})", size)
                 }
+                "realloc" => {
+                    let ptr = self.gen_operand(&args[0]);
+                    let size = self.gen_operand(&args[1]);
+                    format!("realloc({}, {})", ptr, size)
+                }
                 "dealloc" => {
                     let ptr = self.gen_operand(&args[0]);
                     self.bodies += &format!("    free({});\n", ptr);
+                    self.gen_value(&Value::VOID)
+                }
+                "memcopy" => {
+                    let dst = self.gen_operand(&args[0]);
+                    let src = self.gen_operand(&args[1]);
+                    let size = self.gen_operand(&args[2]);
+                    self.bodies += &format!("    memcpy({}, {}, {});\n", dst, src, size);
                     self.gen_value(&Value::VOID)
                 }
                 _ => unimplemented!(),
@@ -300,7 +329,7 @@ impl Codegen<'_> {
                     None => format!("{}({});", callee, args),
                 }
             }
-            Terminator::Unreachable => unimplemented!(),
+            Terminator::Unreachable => String::from("/* unreachable */"),
         }
     }
 
@@ -376,6 +405,10 @@ fn field_name(index: usize) -> String {
     format!("_{}", index)
 }
 
+fn variant_name(index: usize) -> String {
+    format!("_{}", index)
+}
+
 fn block_name(block_id: BlockId) -> String {
     format!("basic_block{}", block_id.index())
 }
@@ -390,6 +423,7 @@ fn header() -> String {
     code += "#include <stdint.h>\n";
     code += "#include <stddef.h>\n";
     code += "#include <stdlib.h>\n";
+    code += "#include <string.h>\n";
 
     code
 }

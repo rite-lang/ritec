@@ -7,7 +7,9 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct Builtins {
     pub alloc: BodyId,
+    pub realloc: BodyId,
     pub dealloc: BodyId,
+    pub memcopy: BodyId,
     pub sizeof: BodyId,
     pub add_trait: TraitId,
     pub sub_trait: TraitId,
@@ -82,8 +84,14 @@ impl Unit {
         let alloc = Self::generate_alloc_function(types);
         let alloc = bodies.push(alloc);
 
+        let realloc = Self::generate_realloc_function(types);
+        let realloc = bodies.push(realloc);
+
         let dealloc = Self::generate_dealloc_function(types);
         let dealloc = bodies.push(dealloc);
+
+        let memcopy = Self::generate_memcopy_function(types);
+        let memcopy = bodies.push(memcopy);
 
         let sizeof = Self::generate_sizeof_function(types);
         let sizeof = bodies.push(sizeof);
@@ -138,7 +146,9 @@ impl Unit {
 
         Builtins {
             alloc,
+            realloc,
             dealloc,
+            memcopy,
             sizeof,
             add_trait,
             sub_trait,
@@ -191,6 +201,65 @@ impl Unit {
         }
     }
 
+    fn generate_realloc_function(types: &mut Types) -> Body {
+        let generic = Generic::new();
+
+        let contract = types.contracts.push(Contract::new());
+
+        let mut locals = Locals::new();
+
+        let ptr_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+        });
+
+        let size_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::USIZE,
+        });
+
+        let expr = Expr {
+            kind: ExprKind::Intrinsic(
+                "realloc",
+                vec![
+                    Expr {
+                        kind: ExprKind::Local(ptr_local),
+                        span: None,
+                        ty: locals[ptr_local].ty.clone(),
+                    },
+                    Expr {
+                        kind: ExprKind::Local(size_local),
+                        span: None,
+                        ty: Type::USIZE,
+                    },
+                ],
+            ),
+            span: None,
+            ty: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+        };
+
+        Body {
+            name: Some(String::from("realloc")),
+            arguments: vec![ptr_local, size_local],
+            output: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+            generics: vec![generic],
+            contract,
+            locals,
+            expr,
+        }
+    }
+
     fn generate_dealloc_function(types: &mut Types) -> Body {
         let generic = Generic::new();
 
@@ -231,13 +300,80 @@ impl Unit {
         }
     }
 
+    fn generate_memcopy_function(types: &mut Types) -> Body {
+        let generic = Generic::new();
+
+        let contract = types.contracts.push(Contract::new());
+
+        let mut locals = Locals::new();
+
+        let dst_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::Partial(Partial {
+                item: Item::Pointer { mutable: true },
+                params: vec![Type::Generic(generic)],
+            }),
+        });
+
+        let src_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::Partial(Partial {
+                item: Item::Pointer { mutable: false },
+                params: vec![Type::Generic(generic)],
+            }),
+        });
+
+        let size_local = locals.push(Local {
+            mutable: false,
+            name: None,
+            ty: Type::USIZE,
+        });
+
+        let expr = Expr {
+            kind: ExprKind::Intrinsic(
+                "memcopy",
+                vec![
+                    Expr {
+                        kind: ExprKind::Local(dst_local),
+                        span: None,
+                        ty: locals[dst_local].ty.clone(),
+                    },
+                    Expr {
+                        kind: ExprKind::Local(src_local),
+                        span: None,
+                        ty: locals[src_local].ty.clone(),
+                    },
+                    Expr {
+                        kind: ExprKind::Local(size_local),
+                        span: None,
+                        ty: Type::USIZE,
+                    },
+                ],
+            ),
+            span: None,
+            ty: Type::VOID,
+        };
+
+        Body {
+            name: Some(String::from("memcopy")),
+            arguments: vec![dst_local, src_local, size_local],
+            output: Type::VOID,
+            generics: vec![generic],
+            contract,
+            locals,
+            expr,
+        }
+    }
+
     fn generate_sizeof_function(types: &mut Types) -> Body {
         let generic = Generic::new();
 
         let contract = types.contracts.push(Contract::new());
 
         Body {
-            name: Some(String::from("size_of")),
+            name: Some(String::from("sizeof")),
             arguments: Vec::new(),
             output: Type::USIZE,
             generics: vec![generic],
@@ -274,7 +410,7 @@ impl Unit {
                 output: Type::Projected(Projected {
                     contract,
                     base: Box::new(Type::Generic(self_generic)),
-                    projection: Projection::AssocType {
+                    projection: Projection::TraitType {
                         trait_id,
                         generics: vec![Type::Generic(rhs)],
                         index: 0,

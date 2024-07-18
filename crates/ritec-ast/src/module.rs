@@ -611,7 +611,7 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
 
     if stream.take(Token::For) {
         return match first {
-            Type::Item(item) => Ok(Decl::TraitImpl(parse_trait_impl(stream, item)?)),
+            Type::Path(item) => Ok(Decl::TraitImpl(parse_trait_impl(stream, item)?)),
             _ => {
                 let message = format!("expected trait, found {:?}", first);
                 let diagnostic = Diagnostic::new(message).with_span(start.join(first.span()));

@@ -57,18 +57,12 @@ impl BodyLowerer<'_, '_> {
     fn lower_func_expr(
         &mut self,
         id: hir::BodyId,
-        mut generics: Vec<hir::Type>,
+        generics: Vec<hir::Type>,
         span: Span,
     ) -> Result<hir::Expr, Diagnostic> {
         let body = &self.unit.bodies[id];
 
-        if generics.is_empty() {
-            generics = (0..body.generics.len())
-                .map(|_| hir::Type::unknown(span))
-                .collect();
-        }
-
-        let mut specialization = hir::Specialization::new();
+        let mut specialization = hir::Spec::new();
 
         for (&generic, type_) in body.generics.iter().zip(&generics) {
             specialization.insert(generic, type_.clone());
@@ -120,6 +114,21 @@ impl BodyLowerer<'_, '_> {
                     Err(Diagnostic::new(message).with_span(ast.span))
                 }
             },
+            Resolved::EnumVariant(id, ref generics, index) => {
+                if self.unit.types[id].variants[index].fields.is_empty() {
+                    let kind = hir::ExprKind::Variant(id, generics.clone(), index, Vec::new());
+                    let span = Some(ast.span);
+                    let ty = hir::Type::Partial(hir::Partial {
+                        item: hir::Item::Enum(id),
+                        params: generics.clone(),
+                    });
+
+                    Ok(hir::Expr { kind, span, ty })
+                } else {
+                    let body_id = self.unit.types[id].variants[index].builder.unwrap();
+                    self.lower_func_expr(body_id, generics.clone(), ast.span)
+                }
+            }
             Resolved::Assoc(implementor, name, ref generics) => {
                 let ty = hir::Type::Projected(hir::Projected {
                     contract: self.contract,
@@ -127,6 +136,7 @@ impl BodyLowerer<'_, '_> {
                     projection: hir::Projection::AssocMethod {
                         name: name.clone(),
                         generics: generics.clone(),
+                        arguments: None,
                     },
                 });
 
@@ -135,13 +145,59 @@ impl BodyLowerer<'_, '_> {
                         implementor,
                         name,
                         generics: generics.clone(),
+                        arguments: None,
                     }),
                     span: Some(ast.span),
                     ty,
                 })
             }
+            Resolved::TraitMethod(trait_id, trait_generics, method_index, method_generics) => {
+                let hir_trait = &self.unit.types[trait_id];
+
+                let trait_spec =
+                    hir::Spec::specify(&hir_trait.generics, &trait_generics, ast.span)?;
+
+                let hir_method = &hir_trait.methods[method_index];
+
+                let method_spec =
+                    hir::Spec::specify(&hir_method.generics, &method_generics, ast.span)?;
+
+                let implementor = hir::Type::unknown(ast.span);
+
+                let constant = hir::Const::Method {
+                    implementor: implementor.clone(),
+                    trait_id,
+                    trait_generics,
+                    method_generics,
+                    index: method_index,
+                };
+
+                let mut spec = hir::Spec::new();
+                spec.insert(hir_trait.self_generic, implementor);
+                spec.extend(&trait_spec);
+                spec.extend(&method_spec);
+
+                let mut params = Vec::new();
+                params.push(spec.specialize(&hir_method.output));
+
+                for argument in &hir_method.arguments {
+                    params.push(spec.specialize(argument));
+                }
+
+                let kind = hir::ExprKind::Const(constant);
+                let span = Some(ast.span);
+                let ty = hir::Type::Partial(hir::Partial {
+                    item: hir::Item::Function,
+                    params,
+                });
+
+                Ok(hir::Expr { kind, span, ty })
+            }
             resolved => {
-                let message = format!("expected function, found {:?} with path {:?}", resolved, ast.path);
+                let message = format!(
+                    "unexpected item, found {:?} with path {:?}",
+                    resolved, ast.path
+                );
                 Err(Diagnostic::new(message).with_span(ast.span))
             }
         }
@@ -182,8 +238,24 @@ impl BodyLowerer<'_, '_> {
         Ok(hir::Expr { kind, span, ty })
     }
 
+    fn lower_as_expr(&mut self, ast: &ast::AsExpr) -> Result<hir::Expr, Diagnostic> {
+        let value = self.lower_expr(&ast.expr)?;
+        let ty = self.lower_type(&ast.type_)?;
+
+        let kind = hir::ExprKind::Cast(Box::new(value));
+        let span = Some(ast.span);
+
+        Ok(hir::Expr { kind, span, ty })
+    }
+
     fn lower_struct_expr(&mut self, ast: &ast::StructExpr) -> Result<hir::Expr, Diagnostic> {
-        let Resolved::Struct(id, mut generics) = self.resolve_path(&ast.item)? else {
+        let ty = self.lower_type(&ast::Type::Path(ast.item.clone()))?;
+
+        let hir::Type::Partial(hir::Partial {
+            item: hir::Item::Struct(id),
+            params: mut generics,
+        }) = ty
+        else {
             let message = format!("expected struct, found {:?}", ast.item);
             return Err(Diagnostic::new(message).with_span(ast.span));
         };
@@ -199,7 +271,7 @@ impl BodyLowerer<'_, '_> {
             generics.push(hir::Type::unknown(ast.span));
         }
 
-        let mut specialization = hir::Specialization::new();
+        let mut specialization = hir::Spec::new();
 
         for (&generic, ty) in struct_.generics.iter().zip(&generics) {
             specialization.insert(generic, ty.clone());
@@ -258,7 +330,7 @@ impl BodyLowerer<'_, '_> {
     }
 
     fn lower_call_expr(&mut self, ast: &ast::CallExpr) -> Result<hir::Expr, Diagnostic> {
-        let callee = self.lower_expr(&ast.callee)?;
+        let mut callee = self.lower_expr(&ast.callee)?;
         let ty = hir::Type::unknown(ast.span);
 
         let mut arguments = Vec::new();
@@ -270,6 +342,24 @@ impl BodyLowerer<'_, '_> {
             let argument = self.lower_expr(argumnet)?;
             params.push(argument.ty.clone());
             arguments.push(argument);
+        }
+
+        if let hir::ExprKind::Const(hir::Const::AssocMethod {
+            ref mut arguments, ..
+        }) = callee.kind
+        {
+            *arguments = Some(params.clone());
+
+            if let hir::Type::Projected(hir::Projected {
+                projection:
+                    hir::Projection::AssocMethod {
+                        ref mut arguments, ..
+                    },
+                ..
+            }) = callee.ty
+            {
+                *arguments = Some(params.clone());
+            }
         }
 
         let func = hir::Type::Partial(hir::Partial {
@@ -291,9 +381,9 @@ impl BodyLowerer<'_, '_> {
         match ast.op {
             ast::UnaryOp::Neg => todo!(),
             ast::UnaryOp::Not => todo!(),
-            ast::UnaryOp::Ref => {
+            ast::UnaryOp::Ref { mutable } => {
                 let ty = hir::Type::Partial(hir::Partial {
-                    item: hir::Item::Pointer { mutable: true },
+                    item: hir::Item::Pointer { mutable },
                     params: vec![value.ty.clone()],
                 });
 
@@ -305,7 +395,7 @@ impl BodyLowerer<'_, '_> {
             ast::UnaryOp::Deref => {
                 let ty = hir::Type::unknown(ast.span);
                 let pointer_ty = hir::Type::Partial(hir::Partial {
-                    item: hir::Item::Pointer { mutable: true },
+                    item: hir::Item::Pointer { mutable: false },
                     params: vec![ty.clone()],
                 });
 
@@ -346,7 +436,7 @@ impl BodyLowerer<'_, '_> {
         let ty = hir::Type::Projected(hir::Projected {
             contract: self.contract,
             base: Box::new(lhs.ty.clone()),
-            projection: hir::Projection::AssocType {
+            projection: hir::Projection::TraitType {
                 trait_id,
                 generics: vec![rhs.ty.clone()],
                 index: 0,
@@ -391,6 +481,8 @@ impl BodyLowerer<'_, '_> {
         let lhs = self.lower_expr(&ast.lhs)?;
         let rhs = self.lower_expr(&ast.rhs)?;
 
+        self.unit.types.unify(lhs.ty.clone(), rhs.ty.clone());
+
         match ast.op {
             ast::BinaryOp::Add => {
                 Ok(self.lower_binary_math(lhs, rhs, self.unit.builtins.add_trait))
@@ -412,8 +504,6 @@ impl BodyLowerer<'_, '_> {
     fn lower_assign_expr(&mut self, ast: &ast::AssignExpr) -> Result<hir::Expr, Diagnostic> {
         let lhs = self.lower_expr(&ast.lhs)?;
         let rhs = self.lower_expr(&ast.rhs)?;
-
-        self.unit.types.unify(lhs.ty.clone(), rhs.ty.clone());
 
         let kind = hir::ExprKind::Assign(Box::new(lhs), Box::new(rhs));
         let span = Some(ast.span);
@@ -496,18 +586,65 @@ impl BodyLowerer<'_, '_> {
             };
 
             let local = self.locals.push(local);
+            self.scope.push(local);
 
             return Ok(hir::Pat::Binding(local));
         }
 
-        let message = format!("expected local, found {:?}", ast);
-        Err(Diagnostic::new(message).with_span(ast.span))
+        match self.resolve_path(&ast.item)? {
+            Resolved::EnumVariant(id, _, index) => Ok(hir::Pat::Variant(id, index, Vec::new())),
+            _ => {
+                let message = format!("expected enum variant, found {:?}", ast.item);
+                Err(Diagnostic::new(message).with_span(ast.span))
+            }
+        }
+    }
+
+    fn lower_tuple_pat(
+        &mut self,
+        ast: &ast::TuplePat,
+        ty: &hir::Type,
+    ) -> Result<hir::Pat, Diagnostic> {
+        if let Some(ref path) = ast.path {
+            match self.resolve_path(path)? {
+                Resolved::EnumVariant(id, generics, index) => {
+                    let hir_enum = &self.unit.types[id];
+
+                    let mut specialization = hir::Spec::new();
+
+                    for (&generic, ty) in hir_enum.generics.iter().zip(&generics) {
+                        specialization.insert(generic, ty.clone());
+                    }
+
+                    let enum_ty = hir::Type::Partial(hir::Partial {
+                        item: hir::Item::Enum(id),
+                        params: generics.clone(),
+                    });
+
+                    self.unit.types.unify(ty.clone(), enum_ty.clone());
+
+                    let mut fields = Vec::new();
+
+                    for (i, pat) in ast.pats.iter().enumerate() {
+                        let ty = self.unit.types[id].variants[index].fields[i].clone();
+                        let ty = specialization.specialize(&ty);
+                        let pat = self.lower_pat(pat, &ty)?;
+                        fields.push(pat);
+                    }
+
+                    return Ok(hir::Pat::Variant(id, index, fields));
+                }
+                _ => todo!(),
+            }
+        }
+
+        todo!()
     }
 
     fn lower_pat(&mut self, ast: &ast::Pat, ty: &hir::Type) -> Result<hir::Pat, Diagnostic> {
         match ast {
-            ast::Pat::Item(item) => self.lower_item_pat(item, ty),
-            ast::Pat::Tuple(_) => todo!(),
+            ast::Pat::Item(ast) => self.lower_item_pat(ast, ty),
+            ast::Pat::Tuple(ast) => self.lower_tuple_pat(ast, ty),
         }
     }
 
@@ -519,7 +656,7 @@ impl BodyLowerer<'_, '_> {
 
         for arm in ast.arms.iter() {
             let pat = self.lower_pat(&arm.pat, &value.ty)?;
-            let expr = self.lower_expr(&arm.expr)?;
+            let expr = self.lower_expr(&arm.body)?;
 
             self.unit.types.unify(expr.ty.clone(), ty.clone());
 
@@ -565,6 +702,7 @@ impl BodyLowerer<'_, '_> {
             ast::Expr::LitInt(expr) => self.lower_int_expr(expr),
             ast::Expr::LitFloat(expr) => self.lower_float_expr(expr),
             ast::Expr::Null(expr) => self.lower_null_expr(expr),
+            ast::Expr::As(expr) => self.lower_as_expr(expr),
             ast::Expr::Struct(expr) => self.lower_struct_expr(expr),
             ast::Expr::Paren(expr) => self.lower_expr(&expr.expr),
             ast::Expr::Field(expr) => self.lower_field_expr(expr),

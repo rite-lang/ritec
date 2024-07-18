@@ -1,9 +1,11 @@
-use crate::{ContractId, Generic, Type};
+use crate::{BodyId, ContractId, Generic, Type};
 
 #[derive(Clone, Debug)]
 pub struct Variant {
     pub name: String,
+    pub discriminant: u64,
     pub fields: Vec<Type>,
+    pub builder: Option<BodyId>,
 }
 
 #[derive(Clone, Debug)]
@@ -12,6 +14,12 @@ pub struct Enum {
     pub contract: ContractId,
     pub generics: Vec<Generic>,
     pub variants: Vec<Variant>,
+}
+
+impl Enum {
+    pub fn variant_index(&self, name: &str) -> Option<usize> {
+        self.variants.iter().position(|v| v.name == name)
+    }
 }
 
 #[derive(Clone, Debug)]

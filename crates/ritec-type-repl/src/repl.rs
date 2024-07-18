@@ -77,7 +77,7 @@ impl Repl {
         stream.consume();
         let where_ = self.types.contracts.push(Contract::new());
         let variable = self.parse_variable(stream, where_)?;
-        let complete = self.types.query(&variable, &Default::default())?;
+        let complete = self.types.know(&variable, &Default::default())?;
         println!("{}", complete);
 
         Ok(())

@@ -1,4 +1,4 @@
-use crate::{BodyId, ContractId, Generic, TraitId, Type};
+use crate::{BodyId, ContractId, Generic, Item, Partial, TraitId, Type};
 
 /// A trait implementation.
 #[derive(Clone, Debug)]
@@ -24,6 +24,9 @@ pub struct TraitImpl {
 
 #[derive(Clone, Debug)]
 pub struct Impl {
+    /// The trait that is implemented.
+    pub generics: Vec<Generic>,
+
     /// The generics that specialize the trait.
     pub implementor: Type,
 
@@ -50,5 +53,21 @@ pub struct Method {
 
     /// The body of the method.
     pub body: BodyId,
+}
 
+impl Method {
+    pub fn function_type(&self) -> Type {
+        let mut params = Vec::new();
+
+        params.push(self.output.clone());
+
+        for argument in &self.arguments {
+            params.push(argument.clone());
+        }
+
+        Type::Partial(Partial {
+            item: Item::Function,
+            params,
+        })
+    }
 }

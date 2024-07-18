@@ -81,6 +81,8 @@ impl Lowerer {
     }
 
     fn lower_enum(&mut self, module: hir::ModuleId, ast: &ast::Enum) -> Result<(), Diagnostic> {
+        let id = self.unit.modules[module].enums[&ast.name];
+
         let mut generics = Vec::new();
 
         for generic in ast.generics.iter() {
@@ -98,7 +100,7 @@ impl Lowerer {
 
         let mut variants = Vec::new();
 
-        for variant in ast.variants.iter() {
+        for (i, variant) in ast.variants.iter().enumerate() {
             let name = variant.name.clone();
             let mut fields = Vec::new();
 
@@ -106,14 +108,75 @@ impl Lowerer {
                 fields.push(tcx.lower_type(&self.unit, field)?);
             }
 
-            variants.push(hir::Variant { name, fields });
+            variants.push(hir::Variant {
+                name,
+                discriminant: i as u64,
+                fields,
+                builder: None,
+            });
         }
+
+        tcx.allow_new_generics = false;
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
         let contract = self.unit.types.contracts.push(contract);
 
-        let generics = generics.into_iter().map(|(_, g)| g).collect();
+        let generics: Vec<_> = tcx.generics.iter().map(|(_, g)| *g).collect();
+        let params: Vec<_> = generics.iter().copied().map(hir::Type::Generic).collect();
+
+        let self_type = hir::Type::Partial(hir::Partial {
+            item: hir::Item::Enum(id),
+            params: params.clone(),
+        });
+
+        for (i, variant) in variants.iter_mut().enumerate() {
+            if variant.fields.is_empty() {
+                continue;
+            }
+
+            let mut arguments = Vec::new();
+            let mut locals = hir::Locals::new();
+            let mut fields = Vec::new();
+
+            for field in variant.fields.iter() {
+                let local = hir::Local {
+                    mutable: false,
+                    name: None,
+                    ty: field.clone(),
+                };
+
+                let id = locals.push(local);
+                arguments.push(id);
+
+                let field = hir::Expr {
+                    kind: hir::ExprKind::Local(id),
+                    span: None,
+                    ty: field.clone(),
+                };
+
+                fields.push(field);
+            }
+
+            let expr = hir::Expr {
+                kind: hir::ExprKind::Variant(id, params.clone(), i, fields),
+                span: None,
+                ty: self_type.clone(),
+            };
+
+            let body = hir::Body {
+                name: None,
+                arguments,
+                output: self_type.clone(),
+                generics: generics.clone(),
+                contract,
+                locals,
+                expr,
+            };
+
+            let body_id = self.unit.bodies.push(body);
+            variant.builder = Some(body_id);
+        }
 
         let hir = hir::Enum {
             name: Some(ast.name.clone()),
@@ -122,7 +185,6 @@ impl Lowerer {
             variants,
         };
 
-        let id = self.unit.modules[module].enums[&ast.name];
         self.unit.types.enums.insert(id, hir);
 
         Ok(())
@@ -275,7 +337,7 @@ impl Lowerer {
             let base = hir::Type::Projected(hir::Projected {
                 contract: trait_.contract,
                 base: Box::new(self_type.clone()),
-                projection: hir::Projection::AssocType {
+                projection: hir::Projection::TraitType {
                     trait_id: id,
                     generics: trait_generics.clone(),
                     index,
@@ -385,7 +447,7 @@ impl Lowerer {
 
         let trait_ = self.unit.types[trait_id].clone();
 
-        let mut specialization = hir::Specialization::new();
+        let mut specialization = hir::Spec::new();
         specialization.insert(trait_.self_generic, implementor.clone());
 
         for (&generic, type_) in trait_.generics.iter().zip(&generics) {
@@ -668,7 +730,10 @@ impl Lowerer {
             methods.push(method)
         }
 
+        let generics = tcx.generics.iter().map(|(_, g)| *g).collect();
+
         let impl_ = hir::Impl {
+            generics,
             implementor,
             contract,
             methods,

@@ -128,7 +128,7 @@ impl Repl {
         let projected = Projected {
             contract: where_,
             base: Box::new(base),
-            projection: Projection::AssocType {
+            projection: Projection::TraitType {
                 trait_id: trait_,
                 generics,
                 index: 0,

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use crate::{ContractId, Generic, Type};
 
 /// A trait method.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraitMethod {
     /// The name of the method.
     pub name: String,
@@ -21,13 +21,13 @@ pub struct TraitMethod {
     pub contract: ContractId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Assoc {
     pub name: String,
 }
 
 /// A trait.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Trait {
     /// The self type of the trait.
     ///

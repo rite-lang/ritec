@@ -14,7 +14,7 @@ impl Operand {
 
     pub fn ty(&self) -> &Type {
         match self {
-            Self::Copy(place) | Self::Move(place) => &place.ty,
+            Self::Copy(place) | Self::Move(place) => place.ty(),
             Self::Const(constant) => &constant.ty,
         }
     }

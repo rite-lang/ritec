@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{EnumId, Partial, StructId, Type};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
     Void,
     Bool,
@@ -54,7 +54,7 @@ impl Display for Item {
 }
 
 /// A fully known type.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Known {
     /// The item of this known type.
     pub item: Item,

@@ -3,10 +3,10 @@ use std::fmt::Display;
 use crate::{ContractId, TraitId, Type};
 
 /// A type projection.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Projection {
     /// An associated type.
-    AssocType {
+    TraitType {
         /// The trait that defines the associated type.
         trait_id: TraitId,
 
@@ -18,8 +18,14 @@ pub enum Projection {
     },
 
     AssocMethod {
+        /// The name of the method.
         name: String,
+
+        /// The generics that specialize the method.
         generics: Vec<Type>,
+
+        /// The arguments of the method.
+        arguments: Option<Vec<Type>>,
     },
 
     /// A field projection.
@@ -29,7 +35,7 @@ pub enum Projection {
 impl Display for Projection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Projection::AssocType {
+            Projection::TraitType {
                 trait_id: trait_,
                 generics,
                 index,
@@ -38,7 +44,7 @@ impl Display for Projection {
 
                 write!(f, "{}<{}> assoc {}", trait_, generics.join(", "), index)
             }
-            Projection::AssocMethod { name, generics } => {
+            Projection::AssocMethod { name, generics, .. } => {
                 let generics: Vec<_> = generics.iter().map(ToString::to_string).collect();
 
                 write!(f, "method {}<{}>", generics.join(", "), name)
@@ -49,7 +55,7 @@ impl Display for Projection {
 }
 
 /// A projected type.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Projected {
     /// The where clause this is attached to.
     pub contract: ContractId,

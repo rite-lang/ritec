@@ -1,15 +1,14 @@
-struct A
-    a: usize
+struct Vec<'a>
+    ptr: *mut 'a
+    len: usize
+    cap: usize
 
-impl A
-    fn new() -> A
-        A
-          a: 42
-
-    fn get_a(&mut self) -> usize
-        self.a
+impl Vec<'a>
+    pub fn new() -> Self
+        Self
+            ptr: null
+            len: 0
+            cap: 0 
 
 fn main(argc: usize, argv: **u8) -> usize
-    let a = A::new()
-    let x = A::get_a(&a)
-    x
+    0

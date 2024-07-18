@@ -10,7 +10,7 @@ pub struct TypeContext<'a> {
     pub allow_new_generics: bool,
     pub trait_id: Option<hir::TraitId>,
     pub self_type: Option<hir::Type>,
-    pub specialization: Option<&'a hir::Specialization>,
+    pub specialization: Option<&'a hir::Spec>,
 }
 
 #[derive(Debug)]
@@ -21,6 +21,8 @@ pub enum Resolved {
     Func(hir::BodyId, Vec<hir::Type>),
     AssocType(hir::Type, hir::TraitId, Vec<hir::Type>, usize),
     Assoc(hir::Type, String, Vec<hir::Type>),
+    TraitMethod(hir::TraitId, Vec<hir::Type>, usize, Vec<hir::Type>),
+    EnumVariant(hir::EnumId, Vec<hir::Type>, usize),
     Generic(hir::Generic),
     Module(ModuleId),
     SelfArgument,
@@ -85,38 +87,52 @@ impl<'a> TypeContext<'a> {
                     PathSegment::Named(named) => {
                         let name = &named.name;
                         let module = &unit.modules[module];
-                        let generics = named
+                        let mut generics: Vec<_> = named
                             .generics
                             .iter()
                             .map(|g| self.lower_type(unit, g))
                             .collect::<Result<_, _>>()?;
 
-                        if let Some(struct_id) = module.structs.get(name) {
-                            resolved = Resolved::Struct(*struct_id, generics);
+                        if let Some(&struct_id) = module.structs.get(name) {
+                            while generics.len() < unit.types[struct_id].generics.len() {
+                                generics.push(hir::Type::unknown(ast.span));
+                            }
+
+                            resolved = Resolved::Struct(struct_id, generics);
                             continue;
                         }
 
-                        if let Some(enum_id) = module.enums.get(name) {
-                            resolved = Resolved::Enum(*enum_id, generics);
+                        if let Some(&enum_id) = module.enums.get(name) {
+                            while generics.len() < unit.types[enum_id].generics.len() {
+                                generics.push(hir::Type::unknown(ast.span));
+                            }
+
+                            resolved = Resolved::Enum(enum_id, generics);
                             continue;
                         }
 
-                        if let Some(trait_id) = module.traits.get(name) {
-                            resolved = Resolved::Trait(*trait_id, generics);
+                        if let Some(&trait_id) = module.traits.get(name) {
+                            resolved = Resolved::Trait(trait_id, generics);
                             continue;
                         }
 
-                        if let Some(func_id) = module.funcs.get(name) {
-                            resolved = Resolved::Func(*func_id, generics);
-                            continue;
-                        }
+                        if let Some(&func_id) = module.funcs.get(name) {
+                            let mut generics = generics.clone();
 
-                        if !generics.is_empty() {
-                            return Err(Diagnostic::new("modules do not have generics")
-                                .with_span(named.span));
+                            while generics.len() < unit.bodies[func_id].generics.len() {
+                                generics.push(hir::Type::unknown(ast.span));
+                            }
+
+                            resolved = Resolved::Func(func_id, generics);
+                            continue;
                         }
 
                         if let Some(module_id) = module.modules.get(name) {
+                            if !generics.is_empty() {
+                                return Err(Diagnostic::new("modules do not have generics")
+                                    .with_span(named.span));
+                            }
+
                             resolved = Resolved::Module(*module_id);
                             continue;
                         }
@@ -141,15 +157,19 @@ impl<'a> TypeContext<'a> {
 
                         resolved = Resolved::AssocType(implementor, trait_id, generics, index);
                     }
+
                     PathSegment::Generic(generic) if i == 0 => {
-                        resolved = Resolved::Generic(self.get_generic(&generic)?);
+                        resolved = Resolved::Generic(self.get_generic(generic)?);
                     }
+
                     PathSegment::SelfLower(_) if i == 0 => {
                         resolved = Resolved::SelfArgument;
                     }
+
                     PathSegment::SelfUpper(_) if i == 0 => {
                         resolved = Resolved::SelfType;
                     }
+
                     _ => {
                         return Err(Diagnostic::new("unexpected path segment (1)")
                             .with_span(segment.span()))
@@ -163,7 +183,7 @@ impl<'a> TypeContext<'a> {
                             params: generics.clone(),
                         });
 
-                        let generics = named
+                        let generics: Vec<_> = named
                             .generics
                             .iter()
                             .map(|g| self.lower_type(unit, g))
@@ -183,13 +203,22 @@ impl<'a> TypeContext<'a> {
                             params: generics.clone(),
                         });
 
-                        let generics = named
-                            .generics
-                            .iter()
-                            .map(|g| self.lower_type(unit, g))
-                            .collect::<Result<_, _>>()?;
+                        if let Some(index) = unit.types[enum_id].variant_index(&named.name) {
+                            if !named.generics.is_empty() {
+                                let message = "enums variants do not have generics";
+                                return Err(Diagnostic::new(message).with_span(named.span));
+                            }
 
-                        resolved = Resolved::Assoc(ty, named.name.clone(), generics);
+                            resolved = Resolved::EnumVariant(enum_id, generics.clone(), index);
+                        } else {
+                            let generics = named
+                                .generics
+                                .iter()
+                                .map(|g| self.lower_type(unit, g))
+                                .collect::<Result<_, _>>()?;
+
+                            resolved = Resolved::Assoc(ty, named.name.clone(), generics);
+                        }
                     }
                     _ => {
                         let message = "unexpected path segment (3)";
@@ -233,9 +262,35 @@ impl<'a> TypeContext<'a> {
                         return Err(Diagnostic::new(message).with_span(segment.span()));
                     }
                 },
-                Resolved::Trait(_, _) => todo!(),
+                Resolved::Trait(trait_id, trait_generics) => match segment {
+                    PathSegment::Named(named) => {
+                        let hir_trait = &unit.types[trait_id];
+
+                        let Some(method_index) = hir_trait.method_index(&named.name) else {
+                            let message = format!("no method found for `{}`", named.name);
+                            return Err(Diagnostic::new(message).with_span(named.span));
+                        };
+
+                        let method_generics = named
+                            .generics
+                            .iter()
+                            .map(|g| self.lower_type(unit, g))
+                            .collect::<Result<_, _>>()?;
+
+                        resolved = Resolved::TraitMethod(
+                            trait_id,
+                            trait_generics,
+                            method_index,
+                            method_generics,
+                        );
+                    }
+                    _ => {
+                        let message = "unexpected path segment (6)";
+                        return Err(Diagnostic::new(message).with_span(segment.span()));
+                    }
+                },
                 _ => {
-                    let message = "unexpected path segment (6)";
+                    let message = "unexpected path segment (7)";
                     return Err(Diagnostic::new(message).with_span(segment.span()));
                 }
             }
@@ -288,7 +343,7 @@ impl<'a> TypeContext<'a> {
             ast::Type::Slice(_) => todo!(),
             ast::Type::Tuple(_) => todo!(),
             ast::Type::Function(_) => todo!(),
-            ast::Type::Item(item) => match self.resolve_path(unit, item)? {
+            ast::Type::Path(item) => match self.resolve_path(unit, item)? {
                 Resolved::Struct(id, generics) => hir::Type::Partial(hir::Partial {
                     item: hir::Item::Struct(id),
                     params: generics,
@@ -302,15 +357,22 @@ impl<'a> TypeContext<'a> {
                     hir::Type::Projected(hir::Projected {
                         contract: unit.types[trait_id].contract,
                         base: Box::new(implementor),
-                        projection: hir::Projection::AssocType {
+                        projection: hir::Projection::TraitType {
                             trait_id,
                             generics,
                             index,
                         },
                     })
                 }
+                Resolved::SelfType => match self.self_type.clone() {
+                    Some(ty) => ty,
+                    None => {
+                        let message = "no self type found";
+                        return Err(Diagnostic::new(message).with_span(item.span));
+                    }
+                },
                 _ => {
-                    let message = "unexpected item query";
+                    let message = "unexpected path query";
                     return Err(Diagnostic::new(message).with_span(item.span));
                 }
             },
