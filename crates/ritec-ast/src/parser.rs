@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use ritec_diagnostic::Diagnostic;
 use ritec_parse::{Tokenizer, TokenStream};
@@ -6,7 +7,7 @@ use ritec_source::{SourceId, Sources};
 use crate::{Module, parse_module};
 
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Parser {
     pub sources: Sources,
     modules: HashMap<String, Module>,
@@ -31,12 +32,12 @@ impl Parser {
         tokenizer.tokenize(&source.source).unwrap()
     }
 
-    pub fn get_module(&self, name: &String) -> Option<&Module> {
-        self.modules.get(name)
+    pub fn get_module(&self, path: String) -> Option<&Module> {
+        self.modules.get(&path)
     }
 
-    pub fn add_module(&mut self, name: String, module: Module) {
-        self.modules.insert(name, module);
+    pub fn add_module(&mut self, path: String, module: Module) {
+        self.modules.insert(path, module);
     }
 }
 
@@ -50,3 +51,11 @@ impl From<PathBuf> for Parser {
     }
 }
 
+
+impl Debug for Parser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Parser")
+            .field("modules", &self.modules)
+            .finish()
+    }
+}

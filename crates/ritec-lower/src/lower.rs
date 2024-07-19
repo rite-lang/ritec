@@ -751,8 +751,8 @@ impl Lowerer {
         module: hir::ModuleId,
         ast: &ast::ModuleDecl,
     ) -> Result<(), Diagnostic> {
-        let module_id = self.unit.module_map.get(&ast.name);
-        let ast_module = parser_state.get_module(&ast.name);
+        let module_id = self.unit.module_map.get(&ast.path.clone());
+        let ast_module = parser_state.get_module(ast.path.clone());
 
         match (module_id, ast_module) {
             (Some(module_id), Some(ast)) => self.lower_module(parser_state, module_id.clone(), ast),

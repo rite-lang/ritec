@@ -88,18 +88,28 @@ impl Lowerer {
         module: &mut hir::Module,
         ast: &ast::ModuleDecl,
     ) -> Result<(), Diagnostic> {
-        match parser_state.get_module(&ast.name) {
-            Some(ref ast_module) => {
+        match parser_state.get_module(ast.path.clone()) {
+            Some(ast_module) => {
                 let name = ast.name.clone();
+                let path = ast.path.clone();
 
-                if self.unit.module_map.contains_key(&name) {
+                // If the globally unique name already is register
+                // we can just use that instead.
+                if let Some(id) = self.unit.module_map.get(&path) {
+                    module.modules.insert(name, *id);
+
                     return Ok(()); // already populated
                 }
 
+                // Create new hir module
                 let mut sub_module = hir::Module::default();
                 self.populate_module(parser_state, &mut sub_module, ast_module)?;
                 let id = self.unit.modules.push(sub_module);
-                self.unit.module_map.insert(name, id);
+
+                // Add globally unique name to global module map
+                self.unit.module_map.insert(path, id);
+                // Add local name to module list.
+                module.modules.insert(name, id);
 
                 Ok(())
             }

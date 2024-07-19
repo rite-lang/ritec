@@ -78,7 +78,6 @@ impl<'a> TypeContext<'a> {
             }
         }
 
-        let mut module_path: String = "".into();
         let mut resolved = Resolved::Module(self.module);
 
         for (i, segment) in ast.segments.iter().enumerate() {
@@ -127,17 +126,14 @@ impl<'a> TypeContext<'a> {
                             continue;
                         }
 
-                        let new_module_path = format!("{}::{}", module_path, name);
 
-                        if let Some(module_id) = unit.module_map.get(&new_module_path) {
+                        if let Some(module_id) = module.modules.get(name) {
                             if !generics.is_empty() {
                                 return Err(Diagnostic::new("modules do not have generics")
                                     .with_span(named.span));
                             }
 
                             resolved = Resolved::Module(*module_id);
-                            module_path = new_module_path;
-
                             continue;
                         }
 

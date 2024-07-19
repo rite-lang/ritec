@@ -34,6 +34,7 @@ impl HirOptions {
         let mut module = ritec_hir::Module::default();
         lowerer.populate_module(&parser, &mut module, &ast).unwrap();
         let root = lowerer.unit.modules.push(module);
+
         lowerer.lower_module(&parser, root, &ast).unwrap();
 
         println!("{:#?}", lowerer.unit);

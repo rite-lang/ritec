@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
@@ -140,9 +141,8 @@ pub struct Impl {
 
 #[derive(Clone, Debug)]
 pub struct ModuleDecl {
-    /// Absolute namespace of the module
-    /// fx. ::std::io
     pub name: String,
+    pub path: String,
     pub span: Span,
 }
 
@@ -649,29 +649,21 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
 pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
     stream.expect(Token::Mod)?;
 
-    let (base, span) = stream.expect_ident_spanned()?;
+    let (name, span) = stream.expect_ident_spanned()?;
 
     let source = state.sources.get(stream.source_id());
-    let name = format!("{}::{}", source.name, base);
-
-    if state.get_module(&name).is_some() {
-        return Ok(ModuleDecl {
-            name,
-            span,
-        });
-    }
+    let mut path = source.path.clone();
 
     // Parse external module declaration
     // if we do not define a new block.
     if !stream.nth_is(1, Token::Indent) {
-        let mut path = source.path.clone();
 
         // Get parent directory
         if !path.is_dir() {
             path.pop();
         }
 
-        path.push(&base);
+        path.push(&name);
 
         if !path.exists() {
             path = path.with_extension("ri");
@@ -686,26 +678,38 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
             path.push("mod.ri");
 
             if !path.exists() {
-                let message = format!("mod.ri not found in module directory {}", name);
+                let message = format!("mod.ri not found in module directory {}", path.to_str().unwrap());
                 return Err(Diagnostic::new(message).with_span(span));
             }
         }
 
+        // Check if file path has already been loaded and use that module instead
+        if state.get_module(path.to_str().unwrap().into()).is_some() {
+            return Ok(ModuleDecl {
+                name,
+                path: path.to_str().unwrap().into(),
+                span,
+            });
+        }
+
 
         let source = state.sources.add_path(path, name.clone());
+        let path = source.path.to_str().unwrap().to_string();
 
         let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
         let mut stream = tokenizer.tokenize(&source.source).unwrap();
         let module = parse_module(state, &mut stream)?;
 
-        state.add_module(name.clone(), module);
+        state.add_module(path.clone(), module);
 
         return Ok(ModuleDecl {
             name,
+            path,
             span,
         });
     }
 
+    let path = path.to_str().unwrap().to_string();
     let mut decls = Vec::new();
 
     // Parse inline module declaration
@@ -720,10 +724,11 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
 
     stream.expect(Token::Dedent)?;
 
-    state.add_module(name.clone(), Module { decls });
+    state.add_module(path.clone(), Module { decls });
 
     Ok(ModuleDecl {
         name,
+        path,
         span,
     })
 }

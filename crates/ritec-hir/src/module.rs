@@ -10,6 +10,7 @@ pub enum Vis {
 
 #[derive(Clone, Debug, Default)]
 pub struct Module {
+    pub modules: HashMap<String, ModuleId>,
     pub structs: HashMap<String, StructId>,
     pub traits: HashMap<String, TraitId>,
     pub enums: HashMap<String, EnumId>,
