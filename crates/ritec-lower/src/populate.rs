@@ -135,6 +135,7 @@ impl Lowerer {
                     // there is nothing to do here
                 }
                 ast::Decl::Module(ast) => self.populate_sub_module(parser_state, module, ast)?,
+                ast::Decl::Use(_) => todo!(),
             }
         }
 

@@ -1,7 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
-use ritec_parse::{Token, TokenStream};
+use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_generic, parse_type, Generic, Type};
+use crate::{parse_generic, parse_type, Generic, Type, UseStmt, parse_use_stmt};
 
 /// name::name<'a, 'b>::name <- Three named segments, middle has generics
 #[derive(Clone, Debug)]
@@ -33,6 +33,14 @@ pub struct SelfUpperSegment {
     pub span: Span,
 }
 
+/// Special multi component segment for use statements
+/// {name::name::name, name as other_name, something}
+#[derive(Clone, Debug)]
+pub struct UseSegment {
+    pub uses: Vec<UseStmt>,
+    pub span: Span,
+}
+
 /// Any segment
 #[derive(Clone, Debug)]
 pub enum PathSegment {
@@ -41,6 +49,8 @@ pub enum PathSegment {
     Generic(Generic),
     SelfLower(SelfLowerSegment),
     SelfUpper(SelfUpperSegment),
+    Use(UseSegment),
+    MatchAll(Span),
 }
 
 impl PathSegment {
@@ -51,6 +61,8 @@ impl PathSegment {
             PathSegment::Generic(generic) => generic.span,
             PathSegment::SelfLower(segment) => segment.span,
             PathSegment::SelfUpper(segment) => segment.span,
+            PathSegment::Use(segment) => segment.span,
+            PathSegment::MatchAll(span) => *span,
         }
     }
 }
@@ -71,6 +83,17 @@ impl Path {
         match self.segments.first() {
             Some(PathSegment::Named(segment)) if segment.generics.is_empty() => Some(&segment.name),
             _ => None,
+        }
+    }
+
+    /// Extend one path with another.
+    pub fn join(&self, other: &Path) -> Path {
+        let mut segments = self.segments.clone();
+        segments.extend(other.segments.iter().cloned());
+
+        Path {
+            segments,
+            span: self.span.join(other.span),
         }
     }
 }
@@ -130,6 +153,29 @@ pub fn parse_assoc_segment(stream: &mut TokenStream) -> Result<AssocSegment, Dia
     })
 }
 
+/// Parse the special case nested path segments {} with use semantics.
+pub fn parse_use_path_segment(stream: &mut TokenStream) -> Result<PathSegment, Diagnostic> {
+    let start = stream.expect(Token::Brace(Delim::Open))?;
+
+    let mut uses = Vec::new();
+
+    loop {
+        let stmt = parse_use_stmt(stream)?;
+
+        uses.push(stmt);
+
+        if stream.is(Token::Brace(Delim::Close)) {
+            break;
+        }
+
+        stream.expect(Token::Comma)?;
+    }
+
+    let end = stream.expect(Token::Brace(Delim::Close))?;
+
+    Ok(PathSegment::Use(UseSegment { uses, span: start.join(end) }))
+}
+
 pub fn parse_path_segment(
     stream: &mut TokenStream,
     allow_generics: bool,
@@ -150,6 +196,11 @@ pub fn parse_path_segment(
         Token::SelfUpper => {
             stream.consume();
             Ok(PathSegment::SelfUpper(SelfUpperSegment { span }))
+        }
+        Token::Brace(Delim::Open) => parse_use_path_segment(stream),
+        Token::Star => {
+            stream.consume();
+            Ok(PathSegment::MatchAll(span))
         }
         _ => Err(Diagnostic::new("expected identifier").with_span(span)),
     }

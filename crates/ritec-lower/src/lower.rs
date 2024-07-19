@@ -775,6 +775,7 @@ impl Lowerer {
                 ast::Decl::TraitImpl(ast) => self.lower_trait_impl(module, ast)?,
                 ast::Decl::Impl(ast) => self.lower_impl(module, ast)?,
                 ast::Decl::Module(ast) => self.lower_module_decl(parser_state, module, ast)?,
+                ast::Decl::Use(_) => todo!(),
             }
         }
 

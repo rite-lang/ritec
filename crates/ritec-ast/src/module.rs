@@ -1,8 +1,7 @@
-use std::path::PathBuf;
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type, Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr, Parser};
+use crate::{parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type, Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr, Parser, parse_path};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Vis {
@@ -148,6 +147,22 @@ pub struct ModuleDecl {
 }
 
 #[derive(Clone, Debug)]
+pub struct UseStmt {
+    pub path: Path,
+    /// If the path has been aliased with "as"
+    pub alias: Option<String>,
+    /// Span of the use statement
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct UseDecl {
+    pub vis: Vis,
+    pub uses: UseStmt,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub enum Decl {
     Enum(Enum),
     Struct(Struct),
@@ -156,6 +171,7 @@ pub enum Decl {
     TraitImpl(TraitImpl),
     Impl(Impl),
     Module(ModuleDecl),
+    Use(UseDecl),
 }
 
 #[derive(Clone, Debug)]
@@ -739,6 +755,36 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
     })
 }
 
+/// Parse a::b::* as y expression
+pub fn parse_use_stmt(stream: &mut TokenStream) -> Result<UseStmt, Diagnostic> {
+    let path = parse_path(stream, false)?;
+    let mut span = path.span.clone();
+    let mut alias = None;
+
+    if stream.take(Token::As) {
+        let (ident, end) = stream.expect_ident_spanned()?;
+        alias = Some(ident);
+        span = span.join(end);
+    }
+
+
+    Ok(UseStmt { path, alias, span })
+}
+
+pub fn parse_use_decl(stream: &mut TokenStream) -> Result<UseDecl, Diagnostic> {
+    let vis = parse_visibility(stream)?;
+
+    let span = stream.expect(Token::Use)?;
+
+    let uses = parse_use_stmt(stream)?;
+
+    Ok(UseDecl {
+        vis,
+        uses,
+        span,
+    })
+}
+
 pub fn parse_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     let ((cur, span), (next, _)) = (stream.peek_nth(0), stream.peek_nth(1));
 
@@ -749,6 +795,7 @@ pub fn parse_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<Decl, 
         (Token::Trait, _) | (Token::Pub, Token::Trait) => Ok(Decl::Trait(parse_trait_decl(stream)?)),
         (Token::Impl, _) => parse_impl(stream),
         (Token::Mod, _) | (Token::Pub, Token::Mod) => Ok(Decl::Module(parse_module_decl(state, stream)?)),
+        (Token::Use, _) | (Token::Pub, Token::Use) => Ok(Decl::Use(parse_use_decl(stream)?)),
         (cur, _) => {
             let message = format!("expected declaration, found {}", cur);
             let diagnostic = Diagnostic::new(message).with_span(span);
