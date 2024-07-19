@@ -5,6 +5,7 @@ mod module;
 mod path;
 mod pattern;
 mod r#type;
+mod parser;
 
 pub use contract::*;
 pub use expr::*;
@@ -13,3 +14,4 @@ pub use module::*;
 pub use path::*;
 pub use pattern::*;
 pub use r#type::*;
+pub use parser::*;

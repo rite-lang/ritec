@@ -10,12 +10,15 @@ pub enum Vis {
 
 #[derive(Clone, Debug, Default)]
 pub struct Module {
-    pub modules: HashMap<String, ModuleId>,
     pub structs: HashMap<String, StructId>,
     pub traits: HashMap<String, TraitId>,
     pub enums: HashMap<String, EnumId>,
     pub funcs: HashMap<String, BodyId>,
 }
+
+/// Map a modules absolute name to a module id.
+/// Used for hir module caching.
+type ModuleNames = HashMap<String, ModuleId>;
 
 impl Module {
     pub fn use_builtins(&mut self, builtins: &Builtins) {

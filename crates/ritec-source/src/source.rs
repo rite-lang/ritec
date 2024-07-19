@@ -21,11 +21,13 @@ impl Default for SourceId {
 
 #[derive(Clone, Debug)]
 pub struct Source {
+    pub name: String,
     pub path: PathBuf,
     pub index: SourceId,
     pub source: String,
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct Sources {
     sources: Vec<Source>,
 }
@@ -37,12 +39,13 @@ impl Sources {
         }
     }
 
-    pub fn add_path(&mut self, path: PathBuf) -> &Source {
+    pub fn add_path(&mut self, path: PathBuf, name: String) -> &Source {
         let index = self.sources.len();
 
         let path = fs::canonicalize(path).unwrap();
 
         let source = Source {
+            name,
             path: path.clone(),
             index: SourceId::new(index),
             source: fs::read_to_string(&path).unwrap(),

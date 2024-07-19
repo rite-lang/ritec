@@ -2,10 +2,9 @@ use ritec_ast as ast;
 use ritec_ast::PathSegment;
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
-use ritec_hir::ModuleId;
 
 pub struct TypeContext<'a> {
-    pub module: ModuleId,
+    pub module: hir::ModuleId,
     pub generics: &'a mut Vec<(String, hir::Generic)>,
     pub allow_new_generics: bool,
     pub trait_id: Option<hir::TraitId>,
@@ -24,7 +23,7 @@ pub enum Resolved {
     TraitMethod(hir::TraitId, Vec<hir::Type>, usize, Vec<hir::Type>),
     EnumVariant(hir::EnumId, Vec<hir::Type>, usize),
     Generic(hir::Generic),
-    Module(ModuleId),
+    Module(hir::ModuleId),
     SelfArgument,
     SelfType,
 }
@@ -79,6 +78,7 @@ impl<'a> TypeContext<'a> {
             }
         }
 
+        let mut module_path: String = "".into();
         let mut resolved = Resolved::Module(self.module);
 
         for (i, segment) in ast.segments.iter().enumerate() {
@@ -127,13 +127,17 @@ impl<'a> TypeContext<'a> {
                             continue;
                         }
 
-                        if let Some(module_id) = module.modules.get(name) {
+                        let new_module_path = format!("{}::{}", module_path, name);
+
+                        if let Some(module_id) = unit.module_map.get(&new_module_path) {
                             if !generics.is_empty() {
                                 return Err(Diagnostic::new("modules do not have generics")
                                     .with_span(named.span));
                             }
 
                             resolved = Resolved::Module(*module_id);
+                            module_path = new_module_path;
+
                             continue;
                         }
 
@@ -290,7 +294,7 @@ impl<'a> TypeContext<'a> {
                     }
                 },
                 _ => {
-                    let message = "unexpected path segment (7)";
+                    let message = format!("unexpected path segment (7), resolved {:?} segment {:?}", resolved, segment);
                     return Err(Diagnostic::new(message).with_span(segment.span()));
                 }
             }

@@ -1,4 +1,5 @@
 use ritec_ast as ast;
+use ritec_ast::Parser;
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
 
@@ -746,19 +747,22 @@ impl Lowerer {
 
     fn lower_module_decl(
         &mut self,
+        parser_state: &Parser,
         module: hir::ModuleId,
         ast: &ast::ModuleDecl,
     ) -> Result<(), Diagnostic> {
-        let module = self.unit.modules[module].modules[&ast.name];
+        let module_id = self.unit.module_map.get(&ast.name);
+        let ast_module = parser_state.get_module(&ast.name);
 
-        match ast.module {
-            Some(ref ast) => self.lower_module(module, ast),
-            None => todo!(),
+        match (module_id, ast_module) {
+            (Some(module_id), Some(ast)) => self.lower_module(parser_state, module_id.clone(), ast),
+            _ => todo!(),
         }
     }
 
     pub fn lower_module(
         &mut self,
+        parser_state: &Parser,
         module: hir::ModuleId,
         ast: &ast::Module,
     ) -> Result<(), Diagnostic> {
@@ -770,7 +774,7 @@ impl Lowerer {
                 ast::Decl::Trait(ast) => self.lower_trait(module, ast)?,
                 ast::Decl::TraitImpl(ast) => self.lower_trait_impl(module, ast)?,
                 ast::Decl::Impl(ast) => self.lower_impl(module, ast)?,
-                ast::Decl::Module(ast) => self.lower_module_decl(module, ast)?,
+                ast::Decl::Module(ast) => self.lower_module_decl(parser_state, module, ast)?,
             }
         }
 

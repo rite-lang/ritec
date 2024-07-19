@@ -1,12 +1,9 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
-use ritec_source::Sources;
-use crate::{
-    parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type,
-    Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr,
-};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use crate::{parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type, Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr, Parser};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Vis {
     Public,
     Private,
@@ -143,8 +140,9 @@ pub struct Impl {
 
 #[derive(Clone, Debug)]
 pub struct ModuleDecl {
+    /// Absolute namespace of the module
+    /// fx. ::std::io
     pub name: String,
-    pub module: Option<Module>,
     pub span: Span,
 }
 
@@ -648,23 +646,32 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     }))
 }
 
-pub fn parse_module_decl(sources: &mut Sources, stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
+pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
     stream.expect(Token::Mod)?;
 
-    let (name, span) = stream.expect_ident_spanned()?;
+    let (base, span) = stream.expect_ident_spanned()?;
 
+    let source = state.sources.get(stream.source_id());
+    let name = format!("{}::{}", source.name, base);
+
+    if state.get_module(&name).is_some() {
+        return Ok(ModuleDecl {
+            name,
+            span,
+        });
+    }
 
     // Parse external module declaration
     // if we do not define a new block.
     if !stream.nth_is(1, Token::Indent) {
-        let mut path = sources.get(stream.source_id()).path.clone();
+        let mut path = source.path.clone();
 
         // Get parent directory
         if !path.is_dir() {
             path.pop();
         }
 
-        path.push(&name);
+        path.push(&base);
 
         if !path.exists() {
             path = path.with_extension("ri");
@@ -684,15 +691,17 @@ pub fn parse_module_decl(sources: &mut Sources, stream: &mut TokenStream) -> Res
             }
         }
 
-        let source = sources.add_path(path);
+
+        let source = state.sources.add_path(path, name.clone());
 
         let mut tokenizer = ritec_parse::Tokenizer::new(source.index);
         let mut stream = tokenizer.tokenize(&source.source).unwrap();
-        let module = parse_module(sources, &mut stream)?;
+        let module = parse_module(state, &mut stream)?;
+
+        state.add_module(name.clone(), module);
 
         return Ok(ModuleDecl {
             name,
-            module: Some(module),
             span,
         });
     }
@@ -705,21 +714,21 @@ pub fn parse_module_decl(sources: &mut Sources, stream: &mut TokenStream) -> Res
 
 
     while !stream.is(Token::Dedent) {
-        decls.push(parse_decl(sources, stream)?);
+        decls.push(parse_decl(state, stream)?);
         stream.take(Token::Newline);
     }
 
     stream.expect(Token::Dedent)?;
 
+    state.add_module(name.clone(), Module { decls });
 
     Ok(ModuleDecl {
         name,
-        module: Some(Module { decls }),
         span,
     })
 }
 
-pub fn parse_decl(sources: &mut Sources, stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
+pub fn parse_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     let (token, span) = stream.peek();
 
     match token {
@@ -728,7 +737,7 @@ pub fn parse_decl(sources: &mut Sources, stream: &mut TokenStream) -> Result<Dec
         Token::Fn => Ok(Decl::Function(parse_function_decl(stream)?)),
         Token::Trait => Ok(Decl::Trait(parse_trait_decl(stream)?)),
         Token::Impl => parse_impl(stream),
-        Token::Mod => Ok(Decl::Module(parse_module_decl(sources, stream)?)),
+        Token::Mod => Ok(Decl::Module(parse_module_decl(state, stream)?)),
         _ => {
             let message = format!("expected declaration, found {}", token);
             let diagnostic = Diagnostic::new(message).with_span(span);
@@ -737,11 +746,11 @@ pub fn parse_decl(sources: &mut Sources, stream: &mut TokenStream) -> Result<Dec
     }
 }
 
-pub fn parse_module(sources: &mut Sources, stream: &mut TokenStream) -> Result<Module, Diagnostic> {
+pub fn parse_module(state: &mut Parser, stream: &mut TokenStream) -> Result<Module, Diagnostic> {
     let mut decls = Vec::new();
 
     while !stream.is_empty() {
-        decls.push(parse_decl(sources, stream)?);
+        decls.push(parse_decl(state, stream)?);
         stream.take(Token::Newline);
     }
 

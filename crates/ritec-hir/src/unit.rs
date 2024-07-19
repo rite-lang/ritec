@@ -1,8 +1,5 @@
-use crate::{
-    Assoc, BinaryOp, Bodies, Body, BodyId, Contract, Expr, ExprKind, Generic, Item, Local, Locals,
-    Method, Modules, Partial, Projected, Projection, Trait, TraitId, TraitImpl, TraitMethod, Type,
-    Types,
-};
+use std::collections::HashMap;
+use crate::{Assoc, BinaryOp, Bodies, Body, BodyId, Contract, Expr, ExprKind, Generic, Item, Local, Locals, Method, ModuleId, Modules, Partial, Projected, Projection, Trait, TraitId, TraitImpl, TraitMethod, Type, Types};
 
 #[derive(Clone, Debug)]
 pub struct Builtins {
@@ -22,6 +19,10 @@ pub struct Builtins {
 #[derive(Clone, Debug)]
 pub struct Unit {
     pub modules: Modules,
+    /// Map a modules absolute name to a module id globally
+    /// Instead of relatively
+    pub module_map: HashMap<String, ModuleId>,
+
     pub types: Types,
     pub bodies: Bodies,
     pub builtins: Builtins,
@@ -43,6 +44,7 @@ impl Unit {
 
         Self {
             modules,
+            module_map: HashMap::new(),
             types,
             bodies,
             builtins,

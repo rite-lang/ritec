@@ -23,7 +23,7 @@ pub struct Clause {
     pub bounds: Vec<TraitBound>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Contract {
     pub clauses: Vec<Clause>,
 }

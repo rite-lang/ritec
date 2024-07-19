@@ -1,4 +1,5 @@
 use ritec_ast as ast;
+use ritec_ast::Parser;
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
 
@@ -83,17 +84,22 @@ impl Lowerer {
 
     fn populate_sub_module(
         &mut self,
+        parser_state: &Parser,
         module: &mut hir::Module,
         ast: &ast::ModuleDecl,
     ) -> Result<(), Diagnostic> {
-        match ast.module {
+        match parser_state.get_module(&ast.name) {
             Some(ref ast_module) => {
                 let name = ast.name.clone();
-                let mut sub_module = hir::Module::default();
-                self.populate_module(&mut sub_module, ast_module)?;
 
+                if self.unit.module_map.contains_key(&name) {
+                    return Ok(()); // already populated
+                }
+
+                let mut sub_module = hir::Module::default();
+                self.populate_module(parser_state, &mut sub_module, ast_module)?;
                 let id = self.unit.modules.push(sub_module);
-                module.modules.insert(name, id);
+                self.unit.module_map.insert(name, id);
 
                 Ok(())
             }
@@ -103,6 +109,7 @@ impl Lowerer {
 
     pub fn populate_module(
         &mut self,
+        parser_state: &Parser,
         module: &mut hir::Module,
         ast: &ast::Module,
     ) -> Result<(), Diagnostic> {
@@ -117,7 +124,7 @@ impl Lowerer {
                 ast::Decl::TraitImpl(_) | ast::Decl::Impl(_) => {
                     // there is nothing to do here
                 }
-                ast::Decl::Module(ast) => self.populate_sub_module(module, ast)?,
+                ast::Decl::Module(ast) => self.populate_sub_module(parser_state, module, ast)?,
             }
         }
 
