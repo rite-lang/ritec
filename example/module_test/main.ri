@@ -1,6 +1,4 @@
-mod mul
-mod mul
-mod mul
+pub mod mul
 mod ops
 
 mod test

@@ -141,6 +141,7 @@ pub struct Impl {
 
 #[derive(Clone, Debug)]
 pub struct ModuleDecl {
+    pub vis: Vis,
     pub name: String,
     pub path: String,
     pub span: Span,
@@ -647,6 +648,8 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
 }
 
 pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
+    let vis = parse_visibility(stream)?;
+
     stream.expect(Token::Mod)?;
 
     let (name, span) = stream.expect_ident_spanned()?;
@@ -686,6 +689,7 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
         // Check if file path has already been loaded and use that module instead
         if state.get_module(path.to_str().unwrap().into()).is_some() {
             return Ok(ModuleDecl {
+                vis,
                 name,
                 path: path.to_str().unwrap().into(),
                 span,
@@ -703,6 +707,7 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
         state.add_module(path.clone(), module);
 
         return Ok(ModuleDecl {
+            vis,
             name,
             path,
             span,
@@ -727,6 +732,7 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
     state.add_module(path.clone(), Module { decls });
 
     Ok(ModuleDecl {
+        vis,
         name,
         path,
         span,
@@ -734,17 +740,17 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
 }
 
 pub fn parse_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
-    let (token, span) = stream.peek();
+    let ((cur, span), (next, _)) = (stream.peek_nth(0), stream.peek_nth(1));
 
-    match token {
-        Token::Enum => Ok(Decl::Enum(parse_enum_decl(stream)?)),
-        Token::Struct => Ok(Decl::Struct(parse_struct_decl(stream)?)),
-        Token::Fn => Ok(Decl::Function(parse_function_decl(stream)?)),
-        Token::Trait => Ok(Decl::Trait(parse_trait_decl(stream)?)),
-        Token::Impl => parse_impl(stream),
-        Token::Mod => Ok(Decl::Module(parse_module_decl(state, stream)?)),
-        _ => {
-            let message = format!("expected declaration, found {}", token);
+    match (cur, next) {
+        (Token::Enum, _) | (Token::Pub, Token::Enum) => Ok(Decl::Enum(parse_enum_decl(stream)?)),
+        (Token::Struct, _) | (Token::Pub, Token::Struct) => Ok(Decl::Struct(parse_struct_decl(stream)?)),
+        (Token::Fn, _) | (Token::Pub, Token::Fn) => Ok(Decl::Function(parse_function_decl(stream)?)),
+        (Token::Trait, _) | (Token::Pub, Token::Trait) => Ok(Decl::Trait(parse_trait_decl(stream)?)),
+        (Token::Impl, _) => parse_impl(stream),
+        (Token::Mod, _) | (Token::Pub, Token::Mod) => Ok(Decl::Module(parse_module_decl(state, stream)?)),
+        (cur, _) => {
+            let message = format!("expected declaration, found {}", cur);
             let diagnostic = Diagnostic::new(message).with_span(span);
             Err(diagnostic)
         }
