@@ -126,7 +126,6 @@ impl<'a> TypeContext<'a> {
                             continue;
                         }
 
-
                         if let Some(module_id) = module.modules.get(name) {
                             if !generics.is_empty() {
                                 return Err(Diagnostic::new("modules do not have generics")
@@ -290,7 +289,10 @@ impl<'a> TypeContext<'a> {
                     }
                 },
                 _ => {
-                    let message = format!("unexpected path segment (7), resolved {:?} segment {:?}", resolved, segment);
+                    let message = format!(
+                        "unexpected path segment (7), resolved {:?} segment {:?}",
+                        resolved, segment
+                    );
                     return Err(Diagnostic::new(message).with_span(segment.span()));
                 }
             }

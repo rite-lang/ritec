@@ -117,6 +117,14 @@ impl Lowerer {
         }
     }
 
+    pub fn populate_use(
+        &mut self,
+        module: &mut hir::Module,
+        ast: &ast::UseDecl,
+    ) -> Result<(), Diagnostic> {
+        Ok(())
+    }
+
     pub fn populate_module(
         &mut self,
         parser_state: &Parser,
@@ -135,7 +143,7 @@ impl Lowerer {
                     // there is nothing to do here
                 }
                 ast::Decl::Module(ast) => self.populate_sub_module(parser_state, module, ast)?,
-                ast::Decl::Use(_) => todo!(),
+                ast::Decl::Use(ast) => self.populate_use(module, ast)?,
             }
         }
 

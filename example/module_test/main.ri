@@ -1,1 +1,6 @@
-use Option::{Some, None::{a,b} as Absent}
+pub fn a() -> usize => 10
+
+use a as b
+
+pub fn main(argc: usize, argv: **u8) -> usize
+    b()

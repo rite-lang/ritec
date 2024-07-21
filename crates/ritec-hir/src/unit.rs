@@ -1,5 +1,9 @@
+use crate::{
+    Assoc, BinaryOp, Bodies, Body, BodyId, Contract, Expr, ExprKind, Generic, Item, Local, Locals,
+    Method, ModuleId, Modules, Partial, Projected, Projection, Trait, TraitId, TraitImpl,
+    TraitMethod, Type, Types,
+};
 use std::collections::HashMap;
-use crate::{Assoc, BinaryOp, Bodies, Body, BodyId, Contract, Expr, ExprKind, Generic, Item, Local, Locals, Method, ModuleId, Modules, Partial, Projected, Projection, Trait, TraitId, TraitImpl, TraitMethod, Type, Types};
 
 #[derive(Clone, Debug)]
 pub struct Builtins {

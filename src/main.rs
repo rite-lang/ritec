@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use clap::Parser;
 use ritec_type_repl::TypeReplOptions;
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 struct AstOptions {
@@ -37,7 +37,7 @@ impl HirOptions {
 
         lowerer.lower_module(&parser, root, &ast).unwrap();
 
-        println!("{:#?}", lowerer.unit);
+        // println!("{:#?}", lowerer.unit);
 
         Ok(())
     }

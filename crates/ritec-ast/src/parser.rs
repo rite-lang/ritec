@@ -1,11 +1,10 @@
+use crate::{parse_module, Module};
+use ritec_diagnostic::Diagnostic;
+use ritec_parse::{TokenStream, Tokenizer};
+use ritec_source::{SourceId, Sources};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
-use ritec_diagnostic::Diagnostic;
-use ritec_parse::{Tokenizer, TokenStream};
-use ritec_source::{SourceId, Sources};
-use crate::{Module, parse_module};
-
 
 #[derive(Clone, Default)]
 pub struct Parser {
@@ -50,7 +49,6 @@ impl From<PathBuf> for Parser {
         parser
     }
 }
-
 
 impl Debug for Parser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

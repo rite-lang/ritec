@@ -1,7 +1,7 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_generic, parse_type, Generic, Type, UseStmt, parse_use_stmt};
+use crate::{parse_generic, parse_type, parse_use_stmt, Generic, Type, UseStmt};
 
 /// name::name<'a, 'b>::name <- Three named segments, middle has generics
 #[derive(Clone, Debug)]
@@ -82,6 +82,19 @@ impl Path {
 
         match self.segments.first() {
             Some(PathSegment::Named(segment)) if segment.generics.is_empty() => Some(&segment.name),
+            _ => None,
+        }
+    }
+
+    pub fn last_ident(&self) -> Option<String> {
+        if self.segments.is_empty() {
+            return None;
+        }
+
+        match self.segments.last() {
+            Some(PathSegment::Named(segment)) if segment.generics.is_empty() => {
+                Some(segment.name.clone())
+            }
             _ => None,
         }
     }
@@ -173,7 +186,10 @@ pub fn parse_use_path_segment(stream: &mut TokenStream) -> Result<PathSegment, D
 
     let end = stream.expect(Token::Brace(Delim::Close))?;
 
-    Ok(PathSegment::Use(UseSegment { uses, span: start.join(end) }))
+    Ok(PathSegment::Use(UseSegment {
+        uses,
+        span: start.join(end),
+    }))
 }
 
 pub fn parse_path_segment(

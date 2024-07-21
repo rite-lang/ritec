@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::Token;
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_source::SourceId;
-use crate::Token;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TokenStream {

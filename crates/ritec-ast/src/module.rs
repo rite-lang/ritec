@@ -1,7 +1,10 @@
 use ritec_diagnostic::{Diagnostic, Span};
 use ritec_parse::{Delim, Token, TokenStream};
 
-use crate::{parse_block_expr, parse_contract, parse_expr, parse_generic, parse_trait_bound, parse_type, Contract, Expr, Generic, Path, TraitBound, Type, VoidExpr, Parser, parse_path};
+use crate::{
+    parse_block_expr, parse_contract, parse_expr, parse_generic, parse_path, parse_trait_bound,
+    parse_type, Contract, Expr, Generic, Parser, Path, TraitBound, Type, VoidExpr,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Vis {
@@ -178,7 +181,6 @@ pub enum Decl {
 pub struct Module {
     pub decls: Vec<Decl>,
 }
-
 
 pub fn parse_visibility(stream: &mut TokenStream) -> Result<Vis, Diagnostic> {
     let (token, _) = stream.peek();
@@ -663,7 +665,10 @@ fn parse_impl(stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
     }))
 }
 
-pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<ModuleDecl, Diagnostic> {
+pub fn parse_module_decl(
+    state: &mut Parser,
+    stream: &mut TokenStream,
+) -> Result<ModuleDecl, Diagnostic> {
     let vis = parse_visibility(stream)?;
 
     stream.expect(Token::Mod)?;
@@ -676,7 +681,6 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
     // Parse external module declaration
     // if we do not define a new block.
     if !stream.nth_is(1, Token::Indent) {
-
         // Get parent directory
         if !path.is_dir() {
             path.pop();
@@ -697,7 +701,10 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
             path.push("mod.ri");
 
             if !path.exists() {
-                let message = format!("mod.ri not found in module directory {}", path.to_str().unwrap());
+                let message = format!(
+                    "mod.ri not found in module directory {}",
+                    path.to_str().unwrap()
+                );
                 return Err(Diagnostic::new(message).with_span(span));
             }
         }
@@ -711,7 +718,6 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
                 span,
             });
         }
-
 
         let source = state.sources.add_path(path, name.clone());
         let path = source.path.to_str().unwrap().to_string();
@@ -736,7 +742,6 @@ pub fn parse_module_decl(state: &mut Parser, stream: &mut TokenStream) -> Result
     // Parse inline module declaration
     stream.expect(Token::Newline)?;
     stream.expect(Token::Indent)?;
-
 
     while !stream.is(Token::Dedent) {
         decls.push(parse_decl(state, stream)?);
@@ -767,7 +772,6 @@ pub fn parse_use_stmt(stream: &mut TokenStream) -> Result<UseStmt, Diagnostic> {
         span = span.join(end);
     }
 
-
     Ok(UseStmt { path, alias, span })
 }
 
@@ -778,11 +782,7 @@ pub fn parse_use_decl(stream: &mut TokenStream) -> Result<UseDecl, Diagnostic> {
 
     let uses = parse_use_stmt(stream)?;
 
-    Ok(UseDecl {
-        vis,
-        uses,
-        span,
-    })
+    Ok(UseDecl { vis, uses, span })
 }
 
 pub fn parse_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<Decl, Diagnostic> {
@@ -790,11 +790,19 @@ pub fn parse_decl(state: &mut Parser, stream: &mut TokenStream) -> Result<Decl, 
 
     match (cur, next) {
         (Token::Enum, _) | (Token::Pub, Token::Enum) => Ok(Decl::Enum(parse_enum_decl(stream)?)),
-        (Token::Struct, _) | (Token::Pub, Token::Struct) => Ok(Decl::Struct(parse_struct_decl(stream)?)),
-        (Token::Fn, _) | (Token::Pub, Token::Fn) => Ok(Decl::Function(parse_function_decl(stream)?)),
-        (Token::Trait, _) | (Token::Pub, Token::Trait) => Ok(Decl::Trait(parse_trait_decl(stream)?)),
+        (Token::Struct, _) | (Token::Pub, Token::Struct) => {
+            Ok(Decl::Struct(parse_struct_decl(stream)?))
+        }
+        (Token::Fn, _) | (Token::Pub, Token::Fn) => {
+            Ok(Decl::Function(parse_function_decl(stream)?))
+        }
+        (Token::Trait, _) | (Token::Pub, Token::Trait) => {
+            Ok(Decl::Trait(parse_trait_decl(stream)?))
+        }
         (Token::Impl, _) => parse_impl(stream),
-        (Token::Mod, _) | (Token::Pub, Token::Mod) => Ok(Decl::Module(parse_module_decl(state, stream)?)),
+        (Token::Mod, _) | (Token::Pub, Token::Mod) => {
+            Ok(Decl::Module(parse_module_decl(state, stream)?))
+        }
         (Token::Use, _) | (Token::Pub, Token::Use) => Ok(Decl::Use(parse_use_decl(stream)?)),
         (cur, _) => {
             let message = format!("expected declaration, found {}", cur);

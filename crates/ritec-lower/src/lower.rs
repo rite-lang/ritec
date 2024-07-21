@@ -1,5 +1,5 @@
 use ritec_ast as ast;
-use ritec_ast::Parser;
+use ritec_ast::{NamedSegment, Parser, PathSegment};
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
 
@@ -760,6 +760,181 @@ impl Lowerer {
         }
     }
 
+    fn lower_use_decl(
+        &mut self,
+        module_id: hir::ModuleId,
+        vis: &ast::Vis,
+        ast: &ast::UseStmt,
+    ) -> Result<(), Diagnostic> {
+        // We can only extend the module namespace after it has been populated
+        let mut tcx = TypeContext {
+            module: module_id,
+            generics: &mut vec![],
+            allow_new_generics: false,
+            trait_id: None,
+            self_type: None,
+            specialization: None,
+        };
+
+        // Store fully qualified use statements to be used later.
+        let mut uses = Vec::new();
+
+        for (i, segment) in ast.path.segments.iter().enumerate() {
+            let is_last = i == (ast.path.segments.len() - 1);
+
+            match segment {
+                PathSegment::Named(_) => {
+                    // If the last part of the use declaration is named segment
+                    // Generate a single use statement with no alias
+                    if is_last {
+                        uses.push(ast.clone())
+                    }
+                }
+                PathSegment::MatchAll(_) => {
+                    if !is_last {
+                        let message = "match all segment must be last in path".to_string();
+                        return Err(Diagnostic::new(message).with_span(ast.span));
+                    }
+
+                    // Pop the last segment
+                    let mut use_ = ast.clone();
+                    use_.path.segments.pop();
+
+                    // Just include the top level module with the alias
+                    if ast.alias.is_some() {
+                        uses.push(use_);
+                        continue;
+                    }
+
+                    // Find all public items in the module and add them to the use list
+                    // TODO: This should respect visibility somehow
+                    let resolved = tcx.resolve_path(&self.unit, &use_.path)?;
+
+                    match resolved {
+                        Resolved::Module(module_id) => {
+                            let module = &self.unit.modules[module_id];
+                            let mut names = Vec::new();
+
+                            // TODO: Respect visibility here.
+                            for (module_name, module_id) in module.modules.iter() {
+                                names.push(module_name);
+                            }
+
+                            for (struct_name, struct_id) in module.structs.iter() {
+                                names.push(struct_name);
+                            }
+
+                            for (trait_name, trait_id) in module.traits.iter() {
+                                names.push(trait_name);
+                            }
+
+                            for (enum_name, enum_id) in module.enums.iter() {
+                                names.push(enum_name);
+                            }
+
+                            for (func_name, func_id) in module.funcs.iter() {
+                                names.push(func_name);
+                            }
+
+                            // Add all the names to the use list
+                            for name in names {
+                                let mut use_ = ast.clone();
+
+                                let segment = NamedSegment {
+                                    name: name.clone(),
+                                    generics: vec![],
+                                    span: use_.span.clone(),
+                                };
+
+                                use_.path.segments.push(PathSegment::Named(segment));
+
+                                uses.push(use_);
+                            }
+                        }
+                        Resolved::Enum(_, _) => todo!(),
+                        _ => {
+                            let message = "can only match all on a module or enum".to_string();
+                            return Err(Diagnostic::new(message).with_span(ast.span));
+                        }
+                    }
+                }
+                PathSegment::Use(segment) => {
+                    if !is_last {
+                        let message = "use segment must be last in path".to_string();
+                        return Err(Diagnostic::new(message).with_span(ast.span));
+                    }
+
+                    if ast.alias.is_some() {
+                        let message = "use segment cannot have an alias".to_string();
+                        return Err(Diagnostic::new(message).with_span(ast.span));
+                    }
+
+                    let mut path_without_last = ast.path.clone();
+                    path_without_last.segments.pop();
+
+                    for use_ in segment.uses.iter() {
+                        // Fully specify the use statement
+                        let mut use_ = use_.clone();
+
+                        use_.path = path_without_last.join(&use_.path);
+
+                        self.lower_use_decl(module_id, vis, &use_)?;
+                    }
+                }
+                _ => {
+                    let message = format!("invalid segment {:#?} in use declaration", segment);
+
+                    return Err(Diagnostic::new(message).with_span(ast.span));
+                }
+            }
+        }
+
+        // TODO: Store visibility
+        for use_ in uses {
+            let Some(name) = use_.alias.or(use_.path.last_ident()) else {
+                return Err(Diagnostic::new("use statement must have a name").with_span(use_.span));
+            };
+
+            // TODO: This should respect visibility somehow
+            let resolved = tcx.resolve_path(&self.unit, &use_.path)?;
+
+            let exists = match resolved {
+                Resolved::Module(other_module_id) => self.unit.modules[module_id]
+                    .modules
+                    .insert(name.to_string(), other_module_id)
+                    .is_some(),
+                Resolved::Trait(trait_id, _) => self.unit.modules[module_id]
+                    .traits
+                    .insert(name.to_string(), trait_id)
+                    .is_some(),
+                Resolved::Struct(struct_id, _) => self.unit.modules[module_id]
+                    .structs
+                    .insert(name.to_string(), struct_id)
+                    .is_some(),
+                Resolved::Enum(enum_id, _) => self.unit.modules[module_id]
+                    .enums
+                    .insert(name.to_string(), enum_id)
+                    .is_some(),
+                Resolved::Func(func_id, _) => self.unit.modules[module_id]
+                    .funcs
+                    .insert(name.to_string(), func_id)
+                    .is_some(),
+                Resolved::EnumVariant(_, _, _) => todo!(),
+                _ => {
+                    let message = format!("cannot use {:?}", use_.path);
+                    return Err(Diagnostic::new(message).with_span(use_.span));
+                }
+            };
+
+            if exists {
+                let message = format!("name `{}` already exists in module", name);
+                return Err(Diagnostic::new(message).with_span(use_.span));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn lower_module(
         &mut self,
         parser_state: &Parser,
@@ -775,7 +950,7 @@ impl Lowerer {
                 ast::Decl::TraitImpl(ast) => self.lower_trait_impl(module, ast)?,
                 ast::Decl::Impl(ast) => self.lower_impl(module, ast)?,
                 ast::Decl::Module(ast) => self.lower_module_decl(parser_state, module, ast)?,
-                ast::Decl::Use(_) => todo!(),
+                ast::Decl::Use(ast) => self.lower_use_decl(module, &ast.vis, &ast.uses)?,
             }
         }
 
