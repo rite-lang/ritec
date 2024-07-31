@@ -11,7 +11,7 @@ impl Lowerer {
         ast: &ast::Enum,
     ) -> Result<(), Diagnostic> {
         let name = ast.name.clone();
-        let id = self.unit.types.enums.alloc();
+        let id = self.unit.enums.alloc();
 
         module.enums.insert(name, id);
 
@@ -24,7 +24,7 @@ impl Lowerer {
         ast: &ast::Struct,
     ) -> Result<(), Diagnostic> {
         let name = ast.name.clone();
-        let id = self.unit.types.structs.alloc();
+        let id = self.unit.structs.alloc();
 
         module.structs.insert(name, id);
 
@@ -59,21 +59,24 @@ impl Lowerer {
 
         let mut assocs = Vec::new();
 
-        for ty in ast.types.iter() {
-            assocs.push(hir::Assoc {
-                name: ty.name.clone(),
+        for ast in ast.types.iter() {
+            assocs.push(hir::AssocDef {
+                name: ast.name.clone(),
+                span: Some(ast.span),
             });
         }
 
-        let contract = self.unit.types.contracts.alloc();
+        let contract = self.unit.contracts.alloc();
 
-        let id = self.unit.types.traits.push(hir::Trait {
+        let id = self.unit.traits.push(hir::TraitDef {
+            lang_trait: None,
             self_generic: hir::Generic::new(),
             name: Some(ast.name.clone()),
             generics,
             contract,
             assocs,
             methods: Vec::new(),
+            span: Some(ast.span),
         });
 
         module.traits.insert(name, id);
@@ -106,8 +109,6 @@ impl Lowerer {
         module: &mut hir::Module,
         ast: &ast::Module,
     ) -> Result<(), Diagnostic> {
-        module.use_builtins(&self.unit.builtins);
-
         for decl in ast.decls.iter() {
             match decl {
                 ast::Decl::Enum(ast) => self.populate_enum(module, ast)?,

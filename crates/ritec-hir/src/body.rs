@@ -1,4 +1,6 @@
-use crate::{ContractId, Expr, Generic, Item, Partial, Type};
+use ritec_diagnostic::Diagnostic;
+
+use crate::{ContractId, Expr, Generic, KnownTy, Spec, Ty};
 
 ritec_arena::arena!(Locals[LocalId]: Local);
 ritec_arena::arena!(Bodies[BodyId]: Body);
@@ -7,14 +9,14 @@ ritec_arena::arena!(Bodies[BodyId]: Body);
 pub struct Local {
     pub mutable: bool,
     pub name: Option<String>,
-    pub ty: Type,
+    pub ty: Ty,
 }
 
 #[derive(Clone, Debug)]
 pub struct Body {
     pub name: Option<String>,
-    pub arguments: Vec<LocalId>,
-    pub output: Type,
+    pub arguments: Vec<Argument>,
+    pub output: KnownTy,
     pub generics: Vec<Generic>,
     pub contract: ContractId,
     pub locals: Locals,
@@ -22,29 +24,23 @@ pub struct Body {
 }
 
 impl Body {
-    pub fn function_type(&self) -> Type {
-        let mut params = Vec::new();
-
-        params.push(self.output.clone());
-
-        for id in &self.arguments {
-            params.push(self.locals[*id].ty.clone());
-        }
-
-        Type::Partial(Partial {
-            item: Item::Function,
-            params,
-        })
-    }
-
     pub fn is_generic(&self) -> bool {
         !self.generics.is_empty()
     }
 
-    pub fn get_args(&self) -> Vec<Type> {
-        self.arguments
-            .iter()
-            .map(|id| self.locals[*id].ty.clone())
-            .collect()
+    pub fn get_args(&self) -> Vec<Ty> {
+        self.arguments.iter().map(|a| a.ty.to_ty()).collect()
     }
+
+    pub fn func_ty(&self, generics: &[Ty]) -> Result<Ty, Diagnostic> {
+        let spec = Spec::specified(&self.generics, generics)?;
+        Ok(spec.specialize(&self.output))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Argument {
+    pub name: Option<String>,
+    pub local: LocalId,
+    pub ty: KnownTy,
 }

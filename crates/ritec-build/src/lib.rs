@@ -57,19 +57,19 @@ impl<'bcx, 'hir> Builder<'bcx, 'hir> {
         self.blocks.push(mir::Block::new())
     }
 
-    fn build_type(&mut self, hir: &hir::Type) -> Result<mir::Type, Diagnostic> {
-        let known = self.bcx.hir.types.know(hir, &self.specialization)?;
+    fn build_type(&mut self, hir: &hir::Ty) -> Result<mir::Type, Diagnostic> {
+        let known = self.bcx.hir.know(hir, &self.specialization)?;
 
         self.build_known(known)
     }
 
-    fn build_known(&mut self, known: hir::Known) -> Result<mir::Type, Diagnostic> {
-        Ok(match known.item {
-            hir::Item::Void => mir::Type::VOID,
-            hir::Item::Bool => mir::Type::Bool,
-            hir::Item::Int { signed, width } => mir::Type::Int { signed, width },
-            hir::Item::Float { width } => mir::Type::Float { width },
-            hir::Item::Pointer { mutable } => {
+    fn build_known(&mut self, known: hir::KnownTy) -> Result<mir::Type, Diagnostic> {
+        Ok(match known.part {
+            hir::TyPart::Void => mir::Type::VOID,
+            hir::TyPart::Bool => mir::Type::Bool,
+            hir::TyPart::Int { signed, width } => mir::Type::Int { signed, width },
+            hir::TyPart::Float { width } => mir::Type::Float { width },
+            hir::TyPart::Pointer { mutable } => {
                 let pointee = self.build_known(known.params[0].clone())?;
 
                 mir::Type::Pointer {

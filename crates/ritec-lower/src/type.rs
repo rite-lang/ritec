@@ -1,35 +1,37 @@
+use hir::FromPartial;
 use ritec_ast as ast;
 use ritec_ast::PathSegment;
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
 use ritec_hir::ModuleId;
 
-pub struct TypeContext<'a> {
+pub struct TyCx<'a> {
     pub module: ModuleId,
     pub generics: &'a mut Vec<(String, hir::Generic)>,
     pub allow_new_generics: bool,
     pub trait_id: Option<hir::TraitId>,
-    pub self_type: Option<hir::Type>,
-    pub specialization: Option<&'a hir::Spec>,
+    pub self_ty: Option<hir::KnownTy>,
+    pub spec: Option<&'a hir::Spec<hir::KnownTy>>,
 }
 
 #[derive(Debug)]
 pub enum Resolved {
-    Struct(hir::StructId, Vec<hir::Type>),
-    Trait(hir::TraitId, Vec<hir::Type>),
-    Enum(hir::EnumId, Vec<hir::Type>),
-    Func(hir::BodyId, Vec<hir::Type>),
-    AssocType(hir::Type, hir::TraitId, Vec<hir::Type>, usize),
-    Assoc(hir::Type, String, Vec<hir::Type>),
-    TraitMethod(hir::TraitId, Vec<hir::Type>, usize, Vec<hir::Type>),
-    EnumVariant(hir::EnumId, Vec<hir::Type>, usize),
+    Struct(hir::StructId, Vec<hir::KnownTy>),
+    Trait(hir::TraitId, Vec<hir::KnownTy>),
+    Enum(hir::EnumId, Vec<hir::KnownTy>),
+    Func(hir::BodyId, Vec<hir::KnownTy>),
+    AssocTy(hir::KnownTy, hir::TraitId, Vec<hir::KnownTy>, usize),
+    Assoc(hir::KnownTy, String, Vec<hir::KnownTy>),
+    TraitMethod(hir::TraitId, Vec<hir::KnownTy>, usize, Vec<hir::KnownTy>),
+    EnumVariant(hir::EnumId, Vec<hir::KnownTy>, usize),
     Generic(hir::Generic),
-    Module(ModuleId),
+    Module(hir::ModuleId),
+    Ty(hir::KnownTy),
     SelfArgument,
-    SelfType,
+    SelfTy,
 }
 
-impl<'a> TypeContext<'a> {
+impl<'a> TyCx<'a> {
     fn get_generic(&mut self, ast: &ast::Generic) -> Result<hir::Generic, Diagnostic> {
         for (name, generic) in self.generics.iter() {
             if name == &ast.name {
@@ -55,23 +57,21 @@ impl<'a> TypeContext<'a> {
         // If the ast entry is just an identifier
         // And the type context has a trait_id
         // We are looking for an associated type from the trait
-        if let (Some(ident), Some(trait_id)) = (ast.ident(), self.trait_id) {
-            let trait_ = &unit.types[trait_id];
+        if let (Some(ident), Some(trait_id), Some(self_ty)) =
+            (ast.ident(), self.trait_id, self.self_ty.clone())
+        {
+            let trait_def = &unit[trait_id];
 
-            for (index, assoc) in trait_.assocs.iter().enumerate() {
-                if assoc.name != ident {
-                    continue;
-                }
-
-                let generics: Vec<_> = trait_
+            if let Some(index) = trait_def.assoc_index(ident) {
+                let generics: Vec<_> = trait_def
                     .generics
                     .iter()
                     .copied()
-                    .map(hir::Type::Generic)
+                    .map(hir::KnownTy::Generic)
                     .collect();
 
-                return Ok(Resolved::AssocType(
-                    trait_.self_type(),
+                return Ok(Resolved::AssocTy(
+                    self_ty.clone(),
                     trait_id,
                     generics.clone(),
                     index,
@@ -86,27 +86,19 @@ impl<'a> TypeContext<'a> {
                 Resolved::Module(module) => match segment {
                     PathSegment::Named(named) => {
                         let name = &named.name;
-                        let module = &unit.modules[module];
-                        let mut generics: Vec<_> = named
+                        let module = &unit[module];
+                        let generics: Vec<_> = named
                             .generics
                             .iter()
                             .map(|g| self.lower_type(unit, g))
                             .collect::<Result<_, _>>()?;
 
                         if let Some(&struct_id) = module.structs.get(name) {
-                            while generics.len() < unit.types[struct_id].generics.len() {
-                                generics.push(hir::Type::unknown(ast.span));
-                            }
-
                             resolved = Resolved::Struct(struct_id, generics);
                             continue;
                         }
 
                         if let Some(&enum_id) = module.enums.get(name) {
-                            while generics.len() < unit.types[enum_id].generics.len() {
-                                generics.push(hir::Type::unknown(ast.span));
-                            }
-
                             resolved = Resolved::Enum(enum_id, generics);
                             continue;
                         }
@@ -117,12 +109,6 @@ impl<'a> TypeContext<'a> {
                         }
 
                         if let Some(&func_id) = module.funcs.get(name) {
-                            let mut generics = generics.clone();
-
-                            while generics.len() < unit.bodies[func_id].generics.len() {
-                                generics.push(hir::Type::unknown(ast.span));
-                            }
-
                             resolved = Resolved::Func(func_id, generics);
                             continue;
                         }
@@ -150,16 +136,24 @@ impl<'a> TypeContext<'a> {
                             return Err(Diagnostic::new(message).with_span(assoc.trait_path.span));
                         };
 
-                        let Some(index) = unit.types[trait_id].assoc_index(&assoc.name) else {
+                        let Some(index) = unit[trait_id].assoc_index(&assoc.name) else {
                             let message = format!("no associated type found for `{}`", assoc.name);
                             return Err(Diagnostic::new(message).with_span(assoc.span));
                         };
 
-                        resolved = Resolved::AssocType(implementor, trait_id, generics, index);
+                        resolved = Resolved::AssocTy(implementor, trait_id, generics, index);
                     }
 
                     PathSegment::Generic(generic) if i == 0 => {
-                        resolved = Resolved::Generic(self.get_generic(generic)?);
+                        let generic = self.get_generic(generic)?;
+
+                        resolved = match self.spec {
+                            Some(ref spec) => match spec.get(generic) {
+                                Some(ty) => Resolved::Ty(ty.clone()),
+                                None => Resolved::Generic(generic),
+                            },
+                            None => Resolved::Generic(generic),
+                        };
                     }
 
                     PathSegment::SelfLower(_) if i == 0 => {
@@ -167,7 +161,7 @@ impl<'a> TypeContext<'a> {
                     }
 
                     PathSegment::SelfUpper(_) if i == 0 => {
-                        resolved = Resolved::SelfType;
+                        resolved = Resolved::SelfTy;
                     }
 
                     _ => {
@@ -178,10 +172,7 @@ impl<'a> TypeContext<'a> {
 
                 Resolved::Struct(struct_id, ref generics) => match segment {
                     PathSegment::Named(named) => {
-                        let ty = hir::Type::Partial(hir::Partial {
-                            item: hir::Item::Struct(struct_id),
-                            params: generics.clone(),
-                        });
+                        let ty = hir::KnownTy::new_struct(struct_id, generics.to_vec());
 
                         let generics: Vec<_> = named
                             .generics
@@ -198,12 +189,9 @@ impl<'a> TypeContext<'a> {
                 },
                 Resolved::Enum(enum_id, ref generics) => match segment {
                     PathSegment::Named(named) => {
-                        let ty = hir::Type::Partial(hir::Partial {
-                            item: hir::Item::Enum(enum_id),
-                            params: generics.clone(),
-                        });
+                        let ty = hir::KnownTy::new_enum(enum_id, generics.to_vec());
 
-                        if let Some(index) = unit.types[enum_id].variant_index(&named.name) {
+                        if let Some(index) = unit[enum_id].variant_index(&named.name) {
                             if !named.generics.is_empty() {
                                 let message = "enums variants do not have generics";
                                 return Err(Diagnostic::new(message).with_span(named.span));
@@ -227,7 +215,7 @@ impl<'a> TypeContext<'a> {
                 },
                 Resolved::Generic(generic) => match segment {
                     PathSegment::Named(named) => {
-                        let ty = hir::Type::Generic(generic);
+                        let ty = hir::KnownTy::Generic(generic);
 
                         let generics = named
                             .generics
@@ -242,9 +230,9 @@ impl<'a> TypeContext<'a> {
                         return Err(Diagnostic::new(message).with_span(segment.span()));
                     }
                 },
-                Resolved::SelfType => match segment {
+                Resolved::SelfTy => match segment {
                     PathSegment::Named(named) => {
-                        let Some(ty) = self.self_type.clone() else {
+                        let Some(ty) = self.self_ty.clone() else {
                             let message = "no self type found";
                             return Err(Diagnostic::new(message).with_span(named.span));
                         };
@@ -264,7 +252,7 @@ impl<'a> TypeContext<'a> {
                 },
                 Resolved::Trait(trait_id, trait_generics) => match segment {
                     PathSegment::Named(named) => {
-                        let hir_trait = &unit.types[trait_id];
+                        let hir_trait = &unit[trait_id];
 
                         let Some(method_index) = hir_trait.method_index(&named.name) else {
                             let message = format!("no method found for `{}`", named.name);
@@ -303,54 +291,30 @@ impl<'a> TypeContext<'a> {
         &mut self,
         unit: &hir::Unit,
         ast: &ast::Type,
-    ) -> Result<hir::Type, Diagnostic> {
-        let ty = match ast {
-            ast::Type::Void(_) => hir::Type::Partial(hir::Partial {
-                item: hir::Item::Void,
-                params: Vec::new(),
-            }),
+    ) -> Result<hir::KnownTy, Diagnostic> {
+        Ok(match ast {
+            ast::Type::Void(_) => hir::KnownTy::VOID,
 
-            ast::Type::Bool(_) => hir::Type::Partial(hir::Partial {
-                item: hir::Item::Bool,
-                params: Vec::new(),
-            }),
+            ast::Type::Bool(_) => hir::KnownTy::BOOL,
 
-            ast::Type::Int(ty) => hir::Type::Partial(hir::Partial {
-                item: hir::Item::Int {
-                    signed: ty.signed,
-                    width: ty.width,
-                },
-                params: Vec::new(),
-            }),
+            ast::Type::Int(ty) => hir::KnownTy::new_int(ty.signed, ty.width),
 
-            ast::Type::Float(ty) => hir::Type::Partial(hir::Partial {
-                item: hir::Item::Float { width: ty.width },
-                params: Vec::new(),
-            }),
+            ast::Type::Float(ty) => hir::KnownTy::new_float(ty.width),
 
             ast::Type::Pointer(ty) => {
                 let pointee = self.lower_type(unit, &ty.pointee)?;
-
-                hir::Type::Partial(hir::Partial {
-                    item: hir::Item::Pointer {
-                        mutable: ty.mutable,
-                    },
-                    params: vec![pointee],
-                })
+                hir::KnownTy::new_pointer(ty.mutable, pointee)
             }
 
             ast::Type::Function(ty) => {
-                let mut params = Vec::new();
-                params.push(self.lower_type(unit, &ty.output)?);
+                let mut arguments = Vec::with_capacity(ty.arguments.len());
 
-                for argument in &ty.arguments {
-                    params.push(self.lower_type(unit, argument)?);
+                for arg in &ty.arguments {
+                    arguments.push(self.lower_type(unit, arg)?);
                 }
 
-                hir::Type::Partial(hir::Partial {
-                    item: hir::Item::Function,
-                    params,
-                })
+                let output = self.lower_type(unit, &ty.output)?;
+                hir::KnownTy::new_func(arguments, output)
             }
 
             ast::Type::Array(_) => todo!(),
@@ -358,27 +322,18 @@ impl<'a> TypeContext<'a> {
             ast::Type::Tuple(_) => todo!(),
 
             ast::Type::Path(item) => match self.resolve_path(unit, item)? {
-                Resolved::Struct(id, generics) => hir::Type::Partial(hir::Partial {
-                    item: hir::Item::Struct(id),
-                    params: generics,
-                }),
-                Resolved::Enum(id, generics) => hir::Type::Partial(hir::Partial {
-                    item: hir::Item::Enum(id),
-                    params: generics,
-                }),
-                Resolved::Generic(generic) => hir::Type::Generic(generic),
-                Resolved::AssocType(implementor, trait_id, generics, index) => {
-                    hir::Type::Projected(hir::Projected {
-                        contract: unit.types[trait_id].contract,
-                        base: Box::new(implementor),
-                        projection: hir::Projection::TraitType {
-                            trait_id,
-                            generics,
-                            index,
-                        },
-                    })
+                Resolved::Struct(id, generics) => hir::KnownTy::new_struct(id, generics),
+                Resolved::Enum(id, generics) => hir::KnownTy::new_enum(id, generics),
+                Resolved::Generic(generic) => hir::KnownTy::Generic(generic),
+                Resolved::AssocTy(implementor, trait_id, trait_generics, assoc_index) => {
+                    hir::KnownTy::Assoc(
+                        Box::new(implementor),
+                        trait_id,
+                        trait_generics,
+                        assoc_index,
+                    )
                 }
-                Resolved::SelfType => match self.self_type.clone() {
+                Resolved::SelfTy => match self.self_ty.clone() {
                     Some(ty) => ty,
                     None => {
                         let message = "no self type found";
@@ -390,11 +345,6 @@ impl<'a> TypeContext<'a> {
                     return Err(Diagnostic::new(message).with_span(item.span));
                 }
             },
-        };
-
-        match self.specialization {
-            Some(specialization) => Ok(specialization.specialize(&ty)),
-            None => Ok(ty),
-        }
+        })
     }
 }

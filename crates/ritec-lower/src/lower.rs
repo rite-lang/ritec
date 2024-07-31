@@ -1,26 +1,27 @@
+use hir::FromPartial;
 use ritec_ast as ast;
 use ritec_diagnostic::Diagnostic;
 use ritec_hir as hir;
 
 use crate::{
-    r#type::{Resolved, TypeContext},
+    r#type::{Resolved, TyCx},
     Lowerer,
 };
 
 impl Lowerer {
     fn lower_trait_bound(
         &self,
-        tcx: &mut TypeContext,
-        base: hir::Type,
+        tcx: &mut TyCx,
+        base: hir::KnownTy,
         ast: &ast::TraitBound,
-    ) -> Result<hir::TraitBound, Diagnostic> {
+    ) -> Result<hir::Bound, Diagnostic> {
         let Resolved::Trait(trait_id, generics) = tcx.resolve_path(&self.unit, &ast.item)? else {
             todo!()
         };
 
         assert!(generics.is_empty());
 
-        let trait_ = &self.unit.types[trait_id];
+        let trait_ = &self.unit[trait_id];
 
         let mut generics = Vec::new();
 
@@ -38,33 +39,30 @@ impl Lowerer {
             return Err(Diagnostic::new(message).with_span(ast.span));
         }
 
-        let mut types = vec![None; trait_.assocs.len()];
+        let mut assocs = vec![None; trait_.assocs.len()];
 
-        for assoc in ast.types.iter() {
-            if let Some(i) = trait_
-                .assocs
-                .iter()
-                .position(|assoc_| assoc_.name == assoc.name)
-            {
-                assert!(types[i].is_none());
-                types[i] = Some(tcx.lower_type(&self.unit, &assoc.type_)?);
+        for ast in ast.types.iter() {
+            if let Some(i) = trait_.assoc_index(&ast.name) {
+                assert!(assocs[i].is_none());
+                assocs[i] = Some(tcx.lower_type(&self.unit, &ast.type_)?);
             } else {
-                let message = format!("trait has no associated type `{}`", assoc.name);
+                let message = format!("trait has no associated type `{}`", ast.name);
                 return Err(Diagnostic::new(message));
             }
         }
 
-        Ok(hir::TraitBound {
-            base,
+        Ok(hir::Bound {
+            implementor: base,
             trait_id,
             generics,
-            types,
+            assocs,
+            span: Some(ast.span),
         })
     }
 
     fn lower_contract(
         &self,
-        tcx: &mut TypeContext,
+        tcx: &mut TyCx,
         contract: &mut hir::Contract,
         ast: &ast::Contract,
     ) -> Result<(), Diagnostic> {
@@ -89,30 +87,30 @@ impl Lowerer {
             generics.push((generic.name.clone(), hir::Generic::new()));
         }
 
-        let mut tcx = TypeContext {
+        let mut tcx = TyCx {
             module,
             generics: &mut generics,
             allow_new_generics: true,
             trait_id: None,
-            self_type: None,
-            specialization: None,
+            self_ty: None,
+            spec: None,
         };
 
         let mut variants = Vec::new();
 
-        for (i, variant) in ast.variants.iter().enumerate() {
-            let name = variant.name.clone();
+        for (i, ast) in ast.variants.iter().enumerate() {
+            let name = ast.name.clone();
             let mut fields = Vec::new();
 
-            for field in variant.fields.iter() {
+            for field in ast.fields.iter() {
                 fields.push(tcx.lower_type(&self.unit, field)?);
             }
 
-            variants.push(hir::Variant {
+            variants.push(hir::VariantDef {
                 name,
-                discriminant: i as u64,
                 fields,
                 builder: None,
+                span: Some(ast.span),
             });
         }
 
@@ -120,15 +118,16 @@ impl Lowerer {
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
-        let contract = self.unit.types.contracts.push(contract);
+        let contract = self.unit.contracts.push(contract);
 
         let generics: Vec<_> = tcx.generics.iter().map(|(_, g)| *g).collect();
-        let params: Vec<_> = generics.iter().copied().map(hir::Type::Generic).collect();
+        let params = generics
+            .iter()
+            .copied()
+            .map(hir::KnownTy::Generic)
+            .collect();
 
-        let self_type = hir::Type::Partial(hir::Partial {
-            item: hir::Item::Enum(id),
-            params: params.clone(),
-        });
+        let self_type = hir::KnownTy::new_enum(id, params);
 
         for (i, variant) in variants.iter_mut().enumerate() {
             if variant.fields.is_empty() {
@@ -143,25 +142,33 @@ impl Lowerer {
                 let local = hir::Local {
                     mutable: false,
                     name: None,
+                    ty: field.to_ty(),
+                };
+
+                let local_id = locals.push(local);
+                let argument = hir::Argument {
+                    name: None,
+                    local: local_id,
                     ty: field.clone(),
                 };
 
-                let id = locals.push(local);
-                arguments.push(id);
+                arguments.push(argument);
 
                 let field = hir::Expr {
-                    kind: hir::ExprKind::Local(id),
+                    kind: hir::ExprKind::Local(local_id),
                     span: None,
-                    ty: field.clone(),
+                    ty: field.to_ty(),
                 };
 
                 fields.push(field);
             }
 
+            let params = generics.iter().copied().map(hir::Ty::Generic).collect();
+
             let expr = hir::Expr {
-                kind: hir::ExprKind::Variant(id, params.clone(), i, fields),
+                kind: hir::ExprKind::Variant(id, params, i, fields),
                 span: None,
-                ty: self_type.clone(),
+                ty: self_type.to_ty(),
             };
 
             let body = hir::Body {
@@ -178,14 +185,15 @@ impl Lowerer {
             variant.builder = Some(body_id);
         }
 
-        let hir = hir::Enum {
+        let hir = hir::EnumDef {
             name: Some(ast.name.clone()),
             contract,
             generics,
             variants,
+            span: Some(ast.span),
         };
 
-        self.unit.types.enums.insert(id, hir);
+        self.unit.enums.insert(id, hir);
 
         Ok(())
     }
@@ -199,37 +207,39 @@ impl Lowerer {
             generics.push((generic.name.clone(), hir::Generic::new()));
         }
 
-        let mut tcx = TypeContext {
+        let mut tcx = TyCx {
             module,
             generics: &mut generics,
             allow_new_generics: true,
             trait_id: None,
-            self_type: None,
-            specialization: None,
+            self_ty: None,
+            spec: None,
         };
 
         let mut fields = Vec::new();
 
         for field in ast.fields.iter() {
             let name = field.name.clone();
-            let type_ = tcx.lower_type(&self.unit, &field.type_)?;
-            fields.push(hir::Field { name, ty: type_ });
+            let ty = tcx.lower_type(&self.unit, &field.type_)?;
+            let span = Some(field.span);
+            fields.push(hir::FieldDef { name, ty, span });
         }
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
-        let contract = self.unit.types.contracts.push(contract);
+        let contract = self.unit.contracts.push(contract);
 
         let generics = generics.into_iter().map(|(_, g)| g).collect();
 
-        let hir = hir::Struct {
+        let hir = hir::StructDef {
             name: Some(ast.name.clone()),
             contract,
             generics,
             fields,
+            span: Some(ast.span),
         };
 
-        self.unit.types.structs.insert(id, hir);
+        self.unit.structs.insert(id, hir);
 
         Ok(())
     }
@@ -247,43 +257,57 @@ impl Lowerer {
             generics.push((generic.name.clone(), hir::Generic::new()));
         }
 
-        let mut tcx = TypeContext {
+        let mut tcx = TyCx {
             module,
             generics: &mut generics,
             allow_new_generics: true,
             trait_id: None,
-            self_type: None,
-            specialization: None,
+            self_ty: None,
+            spec: None,
         };
 
         let mut arguments = Vec::new();
         let mut locals = hir::Locals::new();
 
         for argument in ast.arguments.iter() {
+            let ty = tcx.lower_type(&self.unit, &argument.type_)?;
+
             let local = hir::Local {
                 mutable: argument.mutable,
                 name: Some(argument.name.clone()),
-                ty: tcx.lower_type(&self.unit, &argument.type_)?,
+                ty: ty.to_ty(),
             };
 
-            let id = locals.push(local);
-            arguments.push(id);
+            let argument = hir::Argument {
+                name: Some(argument.name.clone()),
+                local: locals.push(local),
+                ty,
+            };
+
+            arguments.push(argument);
         }
 
         let output = match &ast.output {
             Some(output) => tcx.lower_type(&self.unit, output)?,
-            None => hir::Type::VOID,
+            None => hir::KnownTy::VOID,
         };
 
         tcx.allow_new_generics = false;
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
-        let contract = self.unit.types.contracts.push(contract);
+        let contract = self.unit.contracts.push(contract);
 
-        let expr = self.lower_body(&mut tcx, &output, contract, None, &mut locals, &ast.body)?;
+        let expr = self.lower_body(
+            &mut tcx,
+            &output.to_ty(),
+            contract,
+            None,
+            &mut locals,
+            &ast.body,
+        )?;
 
-        self.unit.types.unify(expr.ty.clone(), output.clone());
+        self.unit.env.assign(expr.ty.clone(), output.to_ty());
 
         let generics = generics.into_iter().map(|(_, g)| g).collect();
 
@@ -304,45 +328,42 @@ impl Lowerer {
 
     fn lower_trait(&mut self, module: hir::ModuleId, ast: &ast::Trait) -> Result<(), Diagnostic> {
         let id = self.unit.modules[module].traits[&ast.name];
-        let trait_ = &self.unit.types.traits[id];
+        let trait_def = &self.unit.traits[id];
 
         let mut generics = Vec::new();
 
-        for (ast, &generic) in ast.generics.iter().zip(&trait_.generics) {
+        for (ast, &generic) in ast.generics.iter().zip(&trait_def.generics) {
             generics.push((ast.name.clone(), generic));
         }
 
-        let self_type = hir::Type::Generic(trait_.self_generic);
+        let self_type = hir::KnownTy::Generic(trait_def.self_generic);
 
-        let mut tcx = TypeContext {
+        let mut tcx = TyCx {
             module,
             generics: &mut generics,
             allow_new_generics: false,
             trait_id: Some(id),
-            self_type: Some(self_type.clone()),
-            specialization: None,
+            self_ty: Some(self_type.clone()),
+            spec: None,
         };
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
 
-        let trait_generics: Vec<_> = trait_
+        let trait_generics: Vec<_> = trait_def
             .generics
             .iter()
             .cloned()
-            .map(hir::Type::Generic)
+            .map(hir::KnownTy::Generic)
             .collect();
 
         for (index, assoc) in ast.types.iter().enumerate() {
-            let base = hir::Type::Projected(hir::Projected {
-                contract: trait_.contract,
-                base: Box::new(self_type.clone()),
-                projection: hir::Projection::TraitType {
-                    trait_id: id,
-                    generics: trait_generics.clone(),
-                    index,
-                },
-            });
+            let base = hir::KnownTy::Assoc(
+                Box::new(self_type.clone()),
+                id,
+                trait_generics.clone(),
+                index,
+            );
 
             for bound in assoc.bounds.iter() {
                 let bound = self.lower_trait_bound(&mut tcx, base.clone(), bound)?;
@@ -359,13 +380,13 @@ impl Lowerer {
                 generics.push((generic.name.clone(), hir::Generic::new()));
             }
 
-            let mut tcx = TypeContext {
+            let mut tcx = TyCx {
                 module,
                 generics: &mut generics,
                 allow_new_generics: true,
                 trait_id: Some(id),
-                self_type: Some(self_type.clone()),
-                specialization: None,
+                self_ty: Some(self_type.clone()),
+                spec: None,
             };
 
             let mut arguments = Vec::new();
@@ -373,14 +394,8 @@ impl Lowerer {
             if let Some(self_argument) = method.self_argument {
                 let type_ = match self_argument {
                     ast::SelfArgument::Value => self_type.clone(),
-                    ast::SelfArgument::Ref => hir::Type::Partial(hir::Partial {
-                        item: hir::Item::Pointer { mutable: false },
-                        params: vec![self_type.clone()],
-                    }),
-                    ast::SelfArgument::MutRef => hir::Type::Partial(hir::Partial {
-                        item: hir::Item::Pointer { mutable: true },
-                        params: vec![self_type.clone()],
-                    }),
+                    ast::SelfArgument::Ref => hir::KnownTy::new_pointer(false, self_type.clone()),
+                    ast::SelfArgument::MutRef => hir::KnownTy::new_pointer(true, self_type.clone()),
                 };
 
                 arguments.push(type_);
@@ -393,28 +408,29 @@ impl Lowerer {
 
             let output = match method.output {
                 Some(ref output) => tcx.lower_type(&self.unit, output)?,
-                None => hir::Type::VOID,
+                None => hir::KnownTy::VOID,
             };
 
             let mut contract = hir::Contract::default();
             self.lower_contract(&mut tcx, &mut contract, &method.contract)?;
-            let contract = self.unit.types.contracts.push(contract);
+            let contract = self.unit.contracts.push(contract);
 
             let generics = generics.into_iter().skip(offset).map(|(_, g)| g).collect();
 
-            let method = hir::TraitMethod {
+            let method = hir::MethodDef {
                 name,
                 generics,
                 arguments,
                 output,
                 contract,
+                span: Some(method.span),
             };
 
-            self.unit.types[id].methods.push(method);
+            self.unit[id].methods.push(method);
         }
 
-        let trait_ = &self.unit.types[id];
-        self.unit.types.contracts.insert(trait_.contract, contract);
+        let trait_ = &self.unit[id];
+        self.unit.contracts.insert(trait_.contract, contract);
 
         Ok(())
     }
@@ -425,13 +441,13 @@ impl Lowerer {
         ast: &ast::TraitImpl,
     ) -> Result<(), Diagnostic> {
         // the type context for lowering the trait
-        let mut tcx = TypeContext {
+        let mut tcx = TyCx {
             module,
             generics: &mut Vec::new(),
             allow_new_generics: true,
             trait_id: None,
-            self_type: None,
-            specialization: None,
+            self_ty: None,
+            spec: None,
         };
 
         let query = tcx.resolve_path(&self.unit, &ast.trait_)?;
@@ -443,9 +459,9 @@ impl Lowerer {
         let implementor = tcx.lower_type(&self.unit, &ast.implementor)?;
 
         tcx.trait_id = Some(trait_id);
-        tcx.self_type = Some(implementor.clone());
+        tcx.self_ty = Some(implementor.clone());
 
-        let trait_ = self.unit.types[trait_id].clone();
+        let trait_ = self.unit[trait_id].clone();
 
         let mut specialization = hir::Spec::new();
         specialization.insert(trait_.self_generic, implementor.clone());
@@ -454,14 +470,14 @@ impl Lowerer {
             specialization.insert(generic, type_.clone());
         }
 
-        tcx.specialization = Some(&specialization);
+        tcx.spec = Some(&specialization);
         tcx.allow_new_generics = false;
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
-        let contract = self.unit.types.contracts.push(contract);
+        let contract = self.unit.contracts.push(contract);
 
-        let mut types = vec![None; trait_.assocs.len()];
+        let mut assocs = vec![None; trait_.assocs.len()];
 
         for assoc in ast.types.iter() {
             let Some(index) = trait_.assoc_index(&assoc.name) else {
@@ -469,15 +485,20 @@ impl Lowerer {
                 return Err(Diagnostic::new(message).with_span(assoc.span));
             };
 
-            if types[index].is_some() {
+            if assocs[index].is_some() {
                 let message = format!("duplicate associated type `{}`", assoc.name);
                 return Err(Diagnostic::new(message).with_span(assoc.span));
             }
 
-            types[index] = Some(tcx.lower_type(&self.unit, &assoc.type_)?);
+            let assoc_impl = hir::AssocImpl {
+                ty: tcx.lower_type(&self.unit, &assoc.type_)?,
+                span: Some(assoc.span),
+            };
+
+            assocs[index] = Some(assoc_impl);
         }
 
-        let types = types.into_iter().map(Option::unwrap).collect();
+        let assocs = assocs.into_iter().map(Option::unwrap).collect();
 
         let mut methods = vec![None; trait_.methods.len()];
 
@@ -492,13 +513,13 @@ impl Lowerer {
                 return Err(Diagnostic::new(message).with_span(method.span));
             }
 
-            let mut tcx = TypeContext {
+            let mut tcx = TyCx {
                 module,
                 generics: &mut tcx.generics.clone(),
                 allow_new_generics: true,
                 trait_id: Some(trait_id),
-                self_type: Some(implementor.clone()),
-                specialization: Some(&specialization),
+                self_ty: Some(implementor.clone()),
+                spec: Some(&specialization),
             };
 
             for generic in method.generics.iter() {
@@ -511,26 +532,31 @@ impl Lowerer {
 
             let self_argument = match method.self_argument {
                 Some(self_argument) => {
-                    let type_ = match self_argument {
+                    let ty = match self_argument {
                         ast::SelfArgument::Value => implementor.clone(),
-                        ast::SelfArgument::Ref => hir::Type::Partial(hir::Partial {
-                            item: hir::Item::Pointer { mutable: false },
-                            params: vec![implementor.clone()],
-                        }),
-                        ast::SelfArgument::MutRef => hir::Type::Partial(hir::Partial {
-                            item: hir::Item::Pointer { mutable: true },
-                            params: vec![implementor.clone()],
-                        }),
+                        ast::SelfArgument::Ref => {
+                            hir::KnownTy::new_pointer(false, implementor.clone())
+                        }
+                        ast::SelfArgument::MutRef => {
+                            hir::KnownTy::new_pointer(true, implementor.clone())
+                        }
                     };
 
                     let local = hir::Local {
                         mutable: false,
                         name: Some(String::from("self")),
-                        ty: type_,
+                        ty: ty.to_ty(),
                     };
 
                     let id = locals.push(local);
-                    arguments.push(id);
+
+                    let argument = hir::Argument {
+                        name: Some(String::from("self")),
+                        local: id,
+                        ty,
+                    };
+
+                    arguments.push(argument);
 
                     Some(id)
                 }
@@ -538,56 +564,61 @@ impl Lowerer {
             };
 
             for argument in method.arguments.iter() {
+                let ty = tcx.lower_type(&self.unit, &argument.type_)?;
+
                 let local = hir::Local {
                     mutable: argument.mutable,
                     name: Some(argument.name.clone()),
-                    ty: tcx.lower_type(&self.unit, &argument.type_)?,
+                    ty: ty.to_ty(),
                 };
 
-                let id = locals.push(local);
-                arguments.push(id);
+                let argument = hir::Argument {
+                    name: Some(argument.name.clone()),
+                    local: locals.push(local),
+                    ty,
+                };
+
+                arguments.push(argument);
             }
 
             let output = match &method.output {
                 Some(output) => tcx.lower_type(&self.unit, output)?,
-                None => hir::Type::VOID,
+                None => hir::KnownTy::VOID,
             };
 
             tcx.allow_new_generics = false;
 
             let mut contract = hir::Contract::default();
             self.lower_contract(&mut tcx, &mut contract, &method.contract)?;
-            let contract = self.unit.types.contracts.push(contract);
+            let contract = self.unit.contracts.push(contract);
 
             let expr = self.lower_body(
                 &mut tcx,
-                &output,
+                &output.to_ty(),
                 contract,
                 self_argument,
                 &mut locals,
                 &method.body,
             )?;
 
-            self.unit.types.unify(expr.ty.clone(), output.clone());
+            self.unit.env.assign(expr.ty.clone(), output.to_ty());
 
             let generics: Vec<_> = tcx.generics.iter().map(|(_, g)| *g).collect();
 
             let body = hir::Body {
                 name: Some(method.name.clone()),
                 arguments: arguments.clone(),
-                output: output.clone(),
+                output,
                 generics: generics.clone(),
                 contract,
                 locals,
                 expr,
             };
 
-            let method = hir::Method {
+            let method = hir::MethodImpl {
                 name: method.name.clone(),
-                generics,
-                arguments: body.get_args(),
-                output,
                 body: self.unit.bodies.push(body),
+                span: Some(method.span),
             };
 
             methods[index] = Some(method);
@@ -600,42 +631,43 @@ impl Lowerer {
             generics,
             implementor,
             contract,
-            types,
+            assocs,
             methods,
+            span: Some(ast.span),
         };
 
-        self.unit.types.trait_impls.push(trait_impl);
+        self.unit.trait_impls.push(trait_impl);
 
         Ok(())
     }
 
     fn lower_impl(&mut self, module: hir::ModuleId, ast: &ast::Impl) -> Result<(), Diagnostic> {
-        let mut tcx = TypeContext {
+        let mut tcx = TyCx {
             module,
             generics: &mut Vec::new(),
             allow_new_generics: true,
             trait_id: None,
-            self_type: None,
-            specialization: None,
+            self_ty: None,
+            spec: None,
         };
 
         let implementor = tcx.lower_type(&self.unit, &ast.implementor)?;
-        tcx.self_type = Some(implementor.clone());
+        tcx.self_ty = Some(implementor.clone());
 
         let mut contract = hir::Contract::default();
         self.lower_contract(&mut tcx, &mut contract, &ast.contract)?;
-        let contract = self.unit.types.contracts.push(contract);
+        let contract = self.unit.contracts.push(contract);
 
         let mut methods = Vec::new();
 
         for method in ast.methods.iter() {
-            let mut tcx = TypeContext {
+            let mut tcx = TyCx {
                 module,
                 generics: &mut tcx.generics.clone(),
                 allow_new_generics: true,
                 trait_id: None,
-                self_type: tcx.self_type.clone(),
-                specialization: None,
+                self_ty: tcx.self_ty.clone(),
+                spec: None,
             };
 
             for generic in method.generics.iter() {
@@ -648,83 +680,91 @@ impl Lowerer {
 
             let self_argument = match method.self_argument {
                 Some(self_argument) => {
-                    let type_ = match self_argument {
+                    let ty = match self_argument {
                         ast::SelfArgument::Value => implementor.clone(),
-                        ast::SelfArgument::Ref => hir::Type::Partial(hir::Partial {
-                            item: hir::Item::Pointer { mutable: false },
-                            params: vec![implementor.clone()],
-                        }),
-                        ast::SelfArgument::MutRef => hir::Type::Partial(hir::Partial {
-                            item: hir::Item::Pointer { mutable: true },
-                            params: vec![implementor.clone()],
-                        }),
+                        ast::SelfArgument::Ref => {
+                            hir::KnownTy::new_pointer(false, implementor.clone())
+                        }
+                        ast::SelfArgument::MutRef => {
+                            hir::KnownTy::new_pointer(true, implementor.clone())
+                        }
                     };
 
                     let local = hir::Local {
                         mutable: false,
                         name: Some(String::from("self")),
-                        ty: type_,
+                        ty: ty.to_ty(),
                     };
 
                     let id = locals.push(local);
-                    arguments.push(id);
+                    let argument = hir::Argument {
+                        name: Some(String::from("self")),
+                        local: id,
+                        ty,
+                    };
 
+                    arguments.push(argument);
                     Some(id)
                 }
                 None => None,
             };
 
             for argument in method.arguments.iter() {
+                let ty = tcx.lower_type(&self.unit, &argument.type_)?;
+
                 let local = hir::Local {
                     mutable: argument.mutable,
                     name: Some(argument.name.clone()),
-                    ty: tcx.lower_type(&self.unit, &argument.type_)?,
+                    ty: ty.to_ty(),
                 };
 
-                let id = locals.push(local);
-                arguments.push(id);
+                let argument = hir::Argument {
+                    name: Some(argument.name.clone()),
+                    local: locals.push(local),
+                    ty,
+                };
+
+                arguments.push(argument);
             }
 
             let output = match &method.output {
                 Some(output) => tcx.lower_type(&self.unit, output)?,
-                None => hir::Type::VOID,
+                None => hir::KnownTy::VOID,
             };
 
             tcx.allow_new_generics = false;
 
             let mut contract = hir::Contract::default();
             self.lower_contract(&mut tcx, &mut contract, &method.contract)?;
-            let contract = self.unit.types.contracts.push(contract);
+            let contract = self.unit.contracts.push(contract);
 
             let expr = self.lower_body(
                 &mut tcx,
-                &output,
+                &output.to_ty(),
                 contract,
                 self_argument,
                 &mut locals,
                 &method.body,
             )?;
 
-            self.unit.types.unify(expr.ty.clone(), output.clone());
+            self.unit.env.assign(expr.ty.clone(), output.to_ty());
 
             let generics: Vec<_> = tcx.generics.iter().map(|(_, g)| *g).collect();
 
             let body = hir::Body {
                 name: Some(method.name.clone()),
                 arguments,
-                output: output.clone(),
+                output,
                 generics: generics.clone(),
                 contract,
                 locals,
                 expr,
             };
 
-            let method = hir::Method {
+            let method = hir::MethodImpl {
                 name: method.name.clone(),
-                generics,
-                arguments: body.get_args(),
-                output,
                 body: self.unit.bodies.push(body),
+                span: Some(method.span),
             };
 
             methods.push(method)
@@ -739,7 +779,7 @@ impl Lowerer {
             methods,
         };
 
-        self.unit.types.impls.push(impl_);
+        self.unit.impls.push(impl_);
 
         Ok(())
     }

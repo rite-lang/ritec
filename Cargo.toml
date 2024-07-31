@@ -24,7 +24,6 @@ ritec-hir           = { path = "crates/ritec-hir",          version = "0.1.0" }
 ritec-lower         = { path = "crates/ritec-lower",        version = "0.1.0" }
 ritec-mir           = { path = "crates/ritec-mir",          version = "0.1.0" }
 ritec-parse         = { path = "crates/ritec-parse",        version = "0.1.0" }
-ritec-type-repl     = { path = "crates/ritec-type-repl",    version = "0.1.0" }
 
 [dependencies]
 ritec-ast.workspace         = true
@@ -34,7 +33,6 @@ ritec-diagnostic.workspace  = true
 ritec-hir.workspace         = true
 ritec-lower.workspace       = true
 ritec-parse.workspace       = true
-ritec-type-repl.workspace   = true
 
 color-eyre = "0.6"
 eyre = "0.6"

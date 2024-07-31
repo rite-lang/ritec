@@ -1,7 +1,6 @@
 use std::{fs, path::PathBuf};
 
 use clap::Parser;
-use ritec_type_repl::TypeReplOptions;
 
 #[derive(Debug, Parser)]
 struct AstOptions {
@@ -130,9 +129,6 @@ enum Subcommand {
 
     /// Parse a file and print the C code.
     C(COptions),
-
-    /// Run the type REPL.
-    Type(TypeReplOptions),
 }
 
 #[derive(Debug, Parser)]
@@ -151,6 +147,5 @@ fn main() -> eyre::Result<()> {
         Subcommand::Hir(hir) => hir.run(),
         Subcommand::Mir(mir) => mir.run(),
         Subcommand::C(c) => c.run(),
-        Subcommand::Type(type_repl) => type_repl.run(),
     }
 }

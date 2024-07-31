@@ -1,6 +1,6 @@
 use ritec_diagnostic::Span;
 
-use crate::{BodyId, EnumId, LocalId, StructId, TraitId, Type};
+use crate::{BodyId, EnumId, LocalId, StructId, TraitId, Ty};
 
 #[derive(Clone, Debug)]
 pub enum Const {
@@ -8,19 +8,19 @@ pub enum Const {
     Int(u64),
     Float(f64),
     Null,
-    Func(BodyId, Vec<Type>),
+    Func(BodyId, Vec<Ty>),
     Method {
-        implementor: Type,
+        implementor: Ty,
         trait_id: TraitId,
-        trait_generics: Vec<Type>,
-        method_generics: Vec<Type>,
+        trait_generics: Vec<Ty>,
+        method_generics: Vec<Ty>,
         index: usize,
     },
     AssocMethod {
-        implementor: Type,
+        implementor: Ty,
         name: String,
-        generics: Vec<Type>,
-        arguments: Option<Vec<Type>>,
+        generics: Vec<Ty>,
+        arguments: Option<Vec<Ty>>,
     },
 }
 
@@ -65,12 +65,12 @@ pub enum ExprKind {
     Assign(Box<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
-    Struct(StructId, Vec<Type>, Vec<Expr>),
-    Variant(EnumId, Vec<Type>, usize, Vec<Expr>),
+    Struct(StructId, Vec<Ty>, Vec<Expr>),
+    Variant(EnumId, Vec<Ty>, usize, Vec<Expr>),
     Field(Box<Expr>, String),
     Ref(Box<Expr>),
     Deref(Box<Expr>),
-    Sizeof(Type),
+    Sizeof(Ty),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Match(Box<Expr>, Vec<Arm>),
     Block(Vec<Expr>),
@@ -81,7 +81,7 @@ pub enum ExprKind {
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Option<Span>,
-    pub ty: Type,
+    pub ty: Ty,
 }
 
 impl Expr {
@@ -89,7 +89,7 @@ impl Expr {
         Self {
             kind: ExprKind::Const(Const::Void),
             span: Some(span),
-            ty: Type::VOID,
+            ty: Ty::VOID,
         }
     }
 }

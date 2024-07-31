@@ -1,66 +1,25 @@
-use std::fmt::Display;
+use ritec_diagnostic::Span;
 
-use crate::{TraitId, Type};
+use crate::{KnownTy, TraitId};
 
-/// A trait bound.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TraitBound {
-    /// The base type of this bound.
-    pub base: Type,
+ritec_arena::arena!(Contracts[ContractId]: Contract);
 
-    /// The trait in question.
-    pub trait_id: TraitId,
-
-    /// The generics that specialize the trait.
-    pub generics: Vec<Type>,
-
-    /// The optionally specified associated types.
-    pub types: Vec<Option<Type>>,
-}
-
-impl Display for TraitBound {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}<", self.trait_id)?;
-
-        let generics: Vec<_> = self.generics.iter().map(ToString::to_string).collect();
-        write!(f, "{}", generics.join(", "))?;
-
-        for (i, type_) in self.types.iter().enumerate() {
-            match type_ {
-                Some(type_) => write!(f, ", {} = {}", i, type_)?,
-                None => write!(f, "")?,
-            }
-        }
-
-        write!(f, ">")?;
-
-        Ok(())
-    }
-}
-
-/// A where clause.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Contract {
-    /// The bounds of the where clause.
-    pub bounds: Vec<TraitBound>,
-}
-
-impl Default for Contract {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub bounds: Vec<Bound>,
 }
 
 impl Contract {
     pub fn new() -> Self {
-        Self { bounds: Vec::new() }
+        Self::default()
     }
 }
 
-ritec_arena::arena!(Contracts[ContractId]: Contract);
-
-impl Display for ContractId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.index)
-    }
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bound {
+    pub implementor: KnownTy,
+    pub trait_id: TraitId,
+    pub generics: Vec<KnownTy>,
+    pub assocs: Vec<Option<KnownTy>>,
+    pub span: Option<Span>,
 }
