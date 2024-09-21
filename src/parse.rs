@@ -1,0 +1,522 @@
+use miette::Severity;
+
+use crate::{
+    ast::{Adt, Argument, Decl, Expr, Func, Generic, Module, Path, Ty, Type, Variant, Vis},
+    number::{Base, IntKind},
+    span::Span,
+    token::{Token, TokenStream},
+};
+
+pub fn parse(tokens: &mut TokenStream) -> miette::Result<Module> {
+    while tokens.is(Token::Newline) {
+        tokens.consume();
+    }
+
+    let mut decls = Vec::new();
+
+    while !tokens.is_eof() {
+        decls.push(parse_decl(tokens)?);
+
+        while tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+    }
+
+    Ok(Module { decls })
+}
+
+fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
+    if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
+        parse_func_decl(tokens).map(Decl::Func)
+    } else if tokens.is(Token::Type) || tokens.nth_is(1, Token::Type) {
+        parse_type_decl(tokens).map(Decl::Type)
+    } else {
+        let (_, span) = tokens.peek();
+
+        Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::decl",
+            labels = vec![span.label("here")],
+            "expected function or type declaration, found {:?}",
+            tokens.peek().0,
+        )
+        .with_source_code(span))
+    }
+}
+
+fn parse_func_decl(tokens: &mut TokenStream) -> miette::Result<Func> {
+    let vis = parse_vis(tokens)?;
+    tokens.expect(Token::Fn)?;
+    let (name, span) = parse_snake(tokens)?;
+    let input = parse_arguments(tokens)?;
+    let output = parse_output(tokens)?;
+    let body = parse_body(tokens)?;
+
+    Ok(Func {
+        vis,
+        name,
+        input,
+        output,
+        body,
+        span,
+    })
+}
+
+fn parse_type_decl(tokens: &mut TokenStream) -> miette::Result<Type> {
+    let vis = parse_vis(tokens)?;
+    tokens.expect(Token::Type)?;
+
+    let (name, span) = parse_pascal(tokens)?;
+
+    tokens.expect(Token::Eq)?;
+
+    let mut variants = Vec::new();
+
+    tokens.expect(Token::Newline)?;
+    tokens.expect(Token::Indent)?;
+
+    while !tokens.is(Token::Dedent) {
+        tokens.expect(Token::Pipe)?;
+
+        let (name, span) = parse_pascal(tokens)?;
+
+        let fields = match tokens.is(Token::LParen) {
+            true => parse_arguments(tokens)?,
+            false => Vec::new(),
+        };
+
+        variants.push(Variant { name, fields, span });
+
+        while !tokens.is(Token::Dedent) && tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+    }
+
+    tokens.expect(Token::Dedent)?;
+
+    Ok(Type::Adt(Adt {
+        vis,
+        name,
+        variants,
+        span,
+    }))
+}
+
+fn parse_arguments(tokens: &mut TokenStream) -> miette::Result<Vec<Argument>> {
+    let mut arguments = Vec::new();
+
+    tokens.expect(Token::LParen)?;
+
+    while !tokens.is(Token::RParen) {
+        arguments.push(parse_argument(tokens)?);
+
+        if tokens.take(Token::Comma).is_none() {
+            break;
+        }
+    }
+
+    tokens.expect(Token::RParen)?;
+
+    Ok(arguments)
+}
+
+fn parse_output(tokens: &mut TokenStream) -> miette::Result<Option<Ty>> {
+    if tokens.take(Token::Arrow).is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(parse_ty(tokens)?))
+}
+
+fn parse_argument(tokens: &mut TokenStream) -> miette::Result<Argument> {
+    let (name, span) = parse_snake(tokens)?;
+
+    let ty = match tokens.take(Token::Colon) {
+        Some(_) => Some(parse_ty(tokens)?),
+        None => None,
+    };
+
+    Ok(Argument { name, ty, span })
+}
+
+fn parse_vis(tokens: &mut TokenStream) -> miette::Result<Vis> {
+    if tokens.take(Token::Pub).is_some() {
+        Ok(Vis::Public)
+    } else {
+        Ok(Vis::Private)
+    }
+}
+
+fn parse_ty(tokens: &mut TokenStream) -> miette::Result<Ty> {
+    let term = parse_ty_term(tokens)?;
+
+    match tokens.is(Token::Star) {
+        true => parse_tuple_ty(tokens, term),
+        false => Ok(term),
+    }
+}
+
+fn parse_tuple_ty(tokens: &mut TokenStream, first: Ty) -> miette::Result<Ty> {
+    let mut tys = vec![first];
+
+    while tokens.take(Token::Star).is_some() {
+        tys.push(parse_ty_term(tokens)?);
+    }
+
+    Ok(Ty::Tuple(tys))
+}
+
+fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
+    let (token, span) = tokens.peek();
+
+    match token {
+        Token::U8
+        | Token::U16
+        | Token::U32
+        | Token::U64
+        | Token::I8
+        | Token::I16
+        | Token::I32
+        | Token::I64
+        | Token::Int => parse_int_ty(tokens),
+        Token::LParen => {
+            tokens.consume();
+            let ty = parse_ty(tokens)?;
+            tokens.expect(Token::RParen)?;
+            Ok(ty)
+        }
+        Token::Void => {
+            tokens.consume();
+            Ok(Ty::Void)
+        }
+        Token::Snake | Token::Pascal => parse_path(tokens).map(Ty::Item),
+        Token::Quote => parse_generic(tokens).map(Ty::Generic),
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::ty",
+            labels = vec![span.label("here")],
+            "expected type, found {:?}",
+            token,
+        )
+        .with_source_code(span)),
+    }
+}
+
+fn parse_int_ty(tokens: &mut TokenStream) -> miette::Result<Ty> {
+    let (token, span) = tokens.consume();
+
+    match token {
+        Token::U8 => Ok(Ty::Int(IntKind::U8)),
+        Token::U16 => Ok(Ty::Int(IntKind::U16)),
+        Token::U32 => Ok(Ty::Int(IntKind::U32)),
+        Token::U64 => Ok(Ty::Int(IntKind::U64)),
+        Token::I8 => Ok(Ty::Int(IntKind::I8)),
+        Token::I16 => Ok(Ty::Int(IntKind::I16)),
+        Token::I32 => Ok(Ty::Int(IntKind::I32)),
+        Token::I64 => Ok(Ty::Int(IntKind::I64)),
+        Token::Int => Ok(Ty::Int(IntKind::Int)),
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::int_ty",
+            labels = vec![span.label("here")],
+            "expected integer type, found {:?}",
+            token,
+        )
+        .with_source_code(span)),
+    }
+}
+
+fn parse_generic(tokens: &mut TokenStream) -> miette::Result<Generic> {
+    let start = tokens.expect(Token::Quote)?;
+    let (name, span) = parse_snake(tokens)?;
+
+    let span = start.join(span);
+    Ok(Generic { name, span })
+}
+
+fn parse_body(tokens: &mut TokenStream) -> miette::Result<Option<Expr>> {
+    if !is_block(tokens) {
+        return Ok(None);
+    }
+
+    parse_block(tokens).map(Some)
+}
+
+fn parse_block(tokens: &mut TokenStream) -> miette::Result<Expr> {
+    let mut exprs = Vec::new();
+
+    tokens.expect(Token::Newline)?;
+    tokens.expect(Token::Indent)?;
+
+    while !tokens.is(Token::Dedent) {
+        exprs.push(parse_expr(tokens, true)?);
+
+        while tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+    }
+
+    tokens.expect(Token::Dedent)?;
+
+    Ok(Expr::Block(exprs))
+}
+
+fn is_block(tokens: &TokenStream) -> bool {
+    tokens.is(Token::Newline) && tokens.nth_is(1, Token::Indent)
+}
+
+fn parse_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let (token, _) = tokens.peek();
+
+    match token {
+        Token::Let => parse_let(tokens, multiline),
+        _ => parse_pipe(tokens, multiline),
+    }
+}
+
+fn parse_let(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    tokens.expect(Token::Let)?;
+
+    let (name, _) = parse_snake(tokens)?;
+
+    tokens.expect(Token::Eq)?;
+
+    let value = match is_block(tokens) {
+        true => parse_block(tokens)?,
+        false => parse_expr(tokens, multiline)?,
+    };
+
+    Ok(Expr::Let(name, Box::new(value)))
+}
+
+fn parse_pipe(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let input = parse_tuple(tokens, multiline)?;
+
+    if !tokens.is(Token::PipeGt) && !is_pipe_multiline(tokens) {
+        return Ok(input);
+    }
+
+    if is_pipe_multiline(tokens) && multiline {
+        return parse_pipe_multiline(tokens, input);
+    }
+
+    let mut exprs = Vec::new();
+
+    while tokens.take(Token::PipeGt).is_some() {
+        exprs.push(parse_call(tokens, multiline)?);
+    }
+
+    Ok(Expr::Pipe(Box::new(input), exprs))
+}
+
+fn parse_pipe_multiline(tokens: &mut TokenStream, input: Expr) -> miette::Result<Expr> {
+    let mut exprs = Vec::new();
+
+    while is_pipe_multiline(tokens) {
+        tokens.consume();
+        tokens.consume();
+        exprs.push(parse_call(tokens, true)?);
+    }
+
+    Ok(Expr::Pipe(Box::new(input), exprs))
+}
+
+fn is_pipe_multiline(tokens: &TokenStream) -> bool {
+    tokens.is(Token::Newline) && tokens.nth_is(1, Token::PipeGt)
+}
+
+fn parse_tuple(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let first = parse_call(tokens, multiline)?;
+
+    let mut items = vec![first];
+
+    while tokens.take(Token::Comma).is_some() {
+        let second = parse_call(tokens, multiline)?;
+        items.push(second);
+    }
+
+    if items.len() == 1 {
+        Ok(items.pop().unwrap())
+    } else {
+        Ok(Expr::Tuple(items))
+    }
+}
+
+fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let callee = parse_field(tokens, multiline)?;
+
+    if !tokens.is(Token::LParen) {
+        return Ok(callee);
+    }
+
+    let mut args = Vec::new();
+
+    tokens.expect(Token::LParen)?;
+
+    while !tokens.is(Token::RParen) {
+        match tokens.take(Token::Under).is_some() {
+            false => args.push(Some(parse_call(tokens, false)?)),
+            true => args.push(None),
+        }
+
+        if tokens.take(Token::Comma).is_none() {
+            break;
+        }
+    }
+
+    tokens.expect(Token::RParen)?;
+
+    Ok(Expr::Call(Box::new(callee), args))
+}
+
+fn parse_field(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let base = parse_term(tokens, multiline)?;
+
+    if !tokens.is(Token::Dot) {
+        return Ok(base);
+    }
+
+    tokens.expect(Token::Dot)?;
+
+    let (name, _) = parse_snake(tokens)?;
+
+    Ok(Expr::Field(Box::new(base), name))
+}
+
+fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let (token, span) = tokens.peek();
+
+    match token {
+        Token::LParen => parse_paren(tokens, multiline),
+        Token::Integer => parse_integer(tokens),
+        Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::term",
+            labels = vec![span.label("here")],
+            "expected term, found {:?}",
+            token,
+        )
+        .with_source_code(span)),
+    }
+}
+
+fn parse_paren(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let span = tokens.take(Token::LParen).unwrap();
+
+    let expr = parse_expr(tokens, multiline)?;
+
+    let close = tokens.take(Token::RParen).unwrap();
+
+    Ok(Expr::Paren(Box::new(expr), span.join(close)))
+}
+
+fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
+    let span = tokens.take(Token::Integer).ok_or_else(|| {
+        let (token, span) = tokens.peek();
+
+        miette::miette!(
+            severity = Severity::Error,
+            code = "expected::integer",
+            labels = vec![span.label("here")],
+            "expected integer, found {:?}",
+            token,
+        )
+        .with_source_code(span)
+    })?;
+
+    let base = Base::Dec;
+    let mut digits = Vec::new();
+
+    for c in span.as_str().chars() {
+        digits.push(c.to_digit(base.radix()).unwrap() as u8);
+    }
+
+    Ok(Expr::Int(false, base, digits, span))
+}
+
+fn parse_path(tokens: &mut TokenStream) -> miette::Result<Path> {
+    let (name, mut span) = parse_segment(tokens)?;
+    let mut segments = vec![name];
+
+    while tokens.take(Token::Colon).is_some() {
+        let (name, new_span) = parse_segment(tokens)?;
+        segments.push(name);
+        span = span.join(new_span);
+    }
+
+    Ok(Path { segments, span })
+}
+
+fn parse_segment(tokens: &mut TokenStream) -> miette::Result<(&'static str, Span)> {
+    match tokens.consume() {
+        (Token::Snake, span) => Ok((span.as_str(), span)),
+        (Token::Pascal, span) => Ok((span.as_str(), span)),
+        (token, span) => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::snake_case",
+            labels = vec![span.label("here")],
+            "expected snake_case identifier, found {:?}",
+            token,
+        )
+        .with_source_code(span)),
+    }
+}
+
+fn parse_snake(tokens: &mut TokenStream) -> miette::Result<(&'static str, Span)> {
+    match tokens.consume() {
+        (Token::Snake, span) => Ok((span.as_str(), span)),
+        (token, span) => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::snake_case",
+            labels = vec![span.label("here")],
+            "expected snake_case identifier, found {:?}",
+            token,
+        )
+        .with_source_code(span)),
+    }
+}
+
+fn parse_pascal(tokens: &mut TokenStream) -> miette::Result<(&'static str, Span)> {
+    match tokens.consume() {
+        (Token::Pascal, span) => Ok((span.as_str(), span)),
+        (token, span) => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::pascal_case",
+            labels = vec![span.label("here")],
+            "expected PascalCase identifier, found {:?}",
+            token,
+        )
+        .with_source_code(span)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{lex, token::TokenStream};
+
+    use super::*;
+
+    fn tokens(input: &'static str) -> TokenStream {
+        lex::lex("", input).unwrap()
+    }
+
+    macro_rules! parse {
+        ($parser:expr, $input:expr) => {
+            $parser(&mut tokens($input)).unwrap()
+        };
+    }
+
+    macro_rules! parse_err {
+        ($parser:expr, $input:expr) => {
+            $parser(&mut tokens($input)).is_err()
+        };
+    }
+
+    #[test]
+    fn snake() {
+        assert_eq!(parse!(parse_snake, "foo").0, "foo");
+        assert_eq!(parse!(parse_snake, "foo_bar").0, "foo_bar");
+        assert!(parse_err!(parse_snake, "Foo"));
+    }
+}
