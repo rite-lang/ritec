@@ -1,12 +1,5 @@
-type Result =
-  | Ok(ok: 'a)
-  | Err(err: 'b)
-
 fn main()
-  foo(true)
+    "%s", "Hello World!" |> print
 
-fn foo(x)
-  match x, true
-  | _, true -> 1
-  | true, _ -> 2
-  | false, false -> 3
+fn print(f: str, x: str)
+    x

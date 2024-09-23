@@ -198,6 +198,10 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.consume();
             Ok(Ty::Void)
         }
+        Token::Str => {
+            tokens.consume();
+            Ok(Ty::Str)
+        }
         Token::Bool => {
             tokens.consume();
             Ok(Ty::Bool)
@@ -614,6 +618,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     match token {
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
+        Token::String => parse_string(tokens),
         Token::LBracket => parse_list(tokens, multiline),
         Token::True | Token::False => parse_bool(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
@@ -660,6 +665,15 @@ fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
     }
 
     Ok(Expr::Int(false, base, digits, span))
+}
+
+fn parse_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
+    let (token, span) = tokens.consume();
+
+    match token {
+        Token::String => Ok(Expr::String(span.as_str(), span)),
+        _ => unreachable!(),
+    }
 }
 
 fn parse_list(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {

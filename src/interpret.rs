@@ -8,6 +8,7 @@ pub enum Value {
     Func(usize),
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
+    String(&'static str),
 }
 
 impl std::fmt::Display for Value {
@@ -17,6 +18,7 @@ impl std::fmt::Display for Value {
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Func(func) => write!(f, "func {}", func),
+            Value::String(s) => write!(f, r#"{}"#, s),
             Value::List(None) => write!(f, "[]"),
             Value::List(Some(list)) => write!(f, "[{}]", list),
             Value::Adt(variant, fields) => {
@@ -97,6 +99,7 @@ impl<'a> Interpreter<'a> {
 
                     Value::Int(n)
                 }
+                mir::Constant::String(value) => Value::String(value),
                 mir::Constant::Bool(value) => Value::Bool(*value),
                 mir::Constant::Func(func) => Value::Func(*func),
             },
