@@ -7,7 +7,6 @@ type Foo =
   | Baz
 
 fn main()
-  match Bar(False, 1 + 2)
-  | Bar(True, _) -> 1
-  | Bar(False, v) -> v
-  | Baz -> 3
+  match true
+  | true -> Bar(True, 1)
+  | false -> Bar(False, 2)

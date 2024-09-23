@@ -445,6 +445,15 @@ fn build_match_expr(
     r#match: &rir::Match,
 ) -> miette::Result<mir::Expr> {
     match r#match {
+        rir::Match::Bool(r#true, r#false) => {
+            let r#true = build_expr(builder, r#true)?;
+            let r#false = build_expr(builder, r#false)?;
+
+            let r#match = mir::Match::Bool(Box::new(r#true), Box::new(r#false));
+            let kind = mir::ExprKind::Match(input, r#match);
+            let ty = build_ty(builder, ty);
+            Ok(mir::Expr { kind, ty })
+        }
         rir::Match::Adt(variants, default) => {
             let mut items = Vec::new();
 

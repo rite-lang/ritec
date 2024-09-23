@@ -157,7 +157,7 @@ pub enum ExprKind {
 
 #[derive(Clone, Debug)]
 pub enum Match {
-    Bool(Option<(usize, Box<Expr>)>, Option<(usize, Box<Expr>)>),
+    Bool(Box<Expr>, Box<Expr>),
     Adt(usize, Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
 }
 

@@ -162,6 +162,17 @@ impl<'a> Interpreter<'a> {
                 fields[*field].clone()
             }
             mir::ExprKind::Match(input, r#match) => match r#match {
+                mir::Match::Bool(r#true, r#false) => {
+                    let Value::Bool(value) = frame.locals[*input].clone() else {
+                        panic!("expected boolean");
+                    };
+
+                    if value {
+                        self.eval(frame, r#true)
+                    } else {
+                        self.eval(frame, r#false)
+                    }
+                }
                 mir::Match::Adt(variants, default) => {
                     let Value::Adt(tag, fields) = frame.locals[*input].clone() else {
                         panic!("expected ADT");

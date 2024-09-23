@@ -661,7 +661,27 @@ fn build_match_tree(
 ) -> miette::Result<hir::Ty> {
     match pat {
         Pat::Bool(value) => {
-            todo!()
+            let Match::Bool {
+                r#true, r#false, ..
+            } = tree.as_bool(input)?
+            else {
+                unreachable!()
+            };
+
+            let subtree = match value {
+                true => r#true.get_or_insert_with(|| Box::new(Match::None)),
+                false => r#false.get_or_insert_with(|| Box::new(Match::None)),
+            };
+
+            match pats.next() {
+                Some((input, pat)) => build_match_tree(cx, input, pat, pats, subtree, body),
+                None => {
+                    let expr = lower_expr(cx, body)?;
+                    let ty = expr.ty.clone();
+                    *subtree = Box::new(Match::Leaf(expr));
+                    Ok(ty)
+                }
+            }
         }
         Pat::Variant(adt, variant, fields) => {
             let variants = cx.unit.adts[adt].variants.len();
@@ -732,7 +752,21 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
             r#false,
             default,
         } => {
-            todo!()
+            let (r#true, r#false) = match (r#true, r#false) {
+                (Some(r#true), Some(r#false)) => (r#true, r#false),
+                (Some(r#true), None) => (r#true, default),
+                (None, Some(r#false)) => (default, r#false),
+                (None, None) => unreachable!(),
+            };
+
+            let r#true = build_match_expr(cx, *r#true)?.map(Box::new).unwrap();
+            let r#false = build_match_expr(cx, *r#false)?.map(Box::new).unwrap();
+
+            let r#match = hir::Match::Bool(r#true, r#false);
+            let kind = hir::ExprKind::Match(input, r#match);
+            let ty = hir::Ty::bool();
+
+            Ok(Some(hir::Expr { kind, ty }))
         }
         Match::Adt {
             input,
@@ -773,8 +807,8 @@ enum Match {
     Leaf(hir::Expr),
     Bool {
         input: usize,
-        r#true: Option<(usize, hir::Expr)>,
-        r#false: Option<(usize, hir::Expr)>,
+        r#true: Option<Box<Match>>,
+        r#false: Option<Box<Match>>,
         default: Box<Match>,
     },
     Adt {

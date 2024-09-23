@@ -82,6 +82,7 @@ pub enum ExprKind {
 
 #[derive(Debug)]
 pub enum Match {
+    Bool(Box<Expr>, Box<Expr>),
     Adt(Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
 }
 
@@ -372,7 +373,10 @@ impl ExprKind {
             hir::ExprKind::Match(input, r#match) => {
                 let r#match = match r#match {
                     hir::Match::Bool(r#true, r#false) => {
-                        todo!()
+                        let r#true = Expr::from_hir(unit, generics, r#true)?;
+                        let r#false = Expr::from_hir(unit, generics, r#false)?;
+
+                        Match::Bool(Box::new(r#true), Box::new(r#false))
                     }
                     hir::Match::Adt(_, variants, default) => {
                         let variants = variants
