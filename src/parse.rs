@@ -383,6 +383,35 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
             let kind = PatKind::Bind(None);
             Ok(Pat { kind, span })
         }
+        Token::LBracket => {
+            let start = tokens.expect(Token::LBracket)?;
+
+            let mut pats = Vec::new();
+            let mut rest = None;
+
+            while !tokens.is(Token::RBracket) {
+                if tokens.take(Token::DotDot).is_some() {
+                    rest = match tokens.is(Token::RBracket) {
+                        true => Some(None),
+                        false => Some(Some(Box::new(parse_pat_term(tokens)?))),
+                    };
+
+                    break;
+                }
+
+                pats.push(parse_pat_term(tokens)?);
+
+                if tokens.take(Token::Comma).is_none() {
+                    break;
+                }
+            }
+
+            let end = tokens.expect(Token::RBracket)?;
+
+            let kind = PatKind::List(pats, rest);
+            let span = start.join(end);
+            Ok(Pat { kind, span })
+        }
         Token::Snake | Token::Pascal => {
             let path = parse_path(tokens)?;
 
@@ -579,6 +608,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     match token {
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
+        Token::LBracket => parse_list(tokens, multiline),
         Token::True | Token::False => parse_bool(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
         _ => Err(miette::miette!(
@@ -624,6 +654,30 @@ fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
     }
 
     Ok(Expr::Int(false, base, digits, span))
+}
+
+fn parse_list(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let start = tokens.expect(Token::LBracket)?;
+
+    let mut items = Vec::new();
+    let mut rest = None;
+
+    while !tokens.is(Token::RBracket) {
+        if tokens.take(Token::DotDot).is_some() {
+            rest = Some(Box::new(parse_expr(tokens, multiline)?));
+            break;
+        }
+
+        items.push(parse_binary(tokens, multiline)?);
+
+        if tokens.take(Token::Comma).is_none() {
+            break;
+        }
+    }
+
+    let end = tokens.expect(Token::RBracket)?;
+
+    Ok(Expr::List(items, rest, start.join(end)))
 }
 
 fn parse_bool(tokens: &mut TokenStream) -> miette::Result<Expr> {

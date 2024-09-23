@@ -43,7 +43,7 @@ fn main() -> miette::Result<()> {
     let interpreter = Interpreter::new(&mir);
     let value = interpreter.run(0);
 
-    println!("{:?}", value);
+    println!("Output: {}", value);
 
     Ok(())
 }

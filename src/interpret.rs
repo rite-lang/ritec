@@ -6,8 +6,52 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Func(usize),
-    List(Vec<Value>),
+    List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Value::Void => write!(f, "void"),
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Func(func) => write!(f, "func {}", func),
+            Value::List(None) => write!(f, "[]"),
+            Value::List(Some(list)) => write!(f, "[{}]", list),
+            Value::Adt(variant, fields) => {
+                write!(f, "Adt({}, [", variant)?;
+
+                for (i, field) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+
+                    write!(f, "{}", field)?;
+                }
+
+                write!(f, "])")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct List {
+    head: Value,
+    tail: Option<Box<List>>,
+}
+
+impl std::fmt::Display for List {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.head)?;
+
+        if let Some(tail) = &self.tail {
+            write!(f, ", {}", tail)?;
+        }
+
+        Ok(())
+    }
 }
 
 pub struct Interpreter<'a> {
@@ -52,7 +96,42 @@ impl<'a> Interpreter<'a> {
             },
             mir::ExprKind::Local(index) => frame.locals[*index].clone(),
             mir::ExprKind::Argument(index) => frame.arguments[*index].clone(),
-            mir::ExprKind::List(_) => todo!(),
+            mir::ExprKind::List(items, rest) => {
+                let mut values = match rest {
+                    Some(rest) => {
+                        let Value::List(rest) = self.eval(frame, rest) else {
+                            panic!("expected list");
+                        };
+
+                        rest
+                    }
+                    None => None,
+                };
+
+                for item in items.iter().rev() {
+                    let value = self.eval(frame, item);
+                    values = Some(Box::new(List {
+                        head: value,
+                        tail: values,
+                    }));
+                }
+
+                Value::List(values)
+            }
+            mir::ExprKind::ListHead(list) => {
+                let Value::List(Some(list)) = self.eval(frame, list) else {
+                    panic!("expected list");
+                };
+
+                list.head.clone()
+            }
+            mir::ExprKind::ListTail(list) => {
+                let Value::List(Some(list)) = self.eval(frame, list) else {
+                    panic!("expected list");
+                };
+
+                Value::List(list.tail.clone())
+            }
             mir::ExprKind::Block(exprs) => {
                 let mut value = Value::Void;
 
@@ -206,10 +285,19 @@ impl<'a> Interpreter<'a> {
                         panic!("expected boolean");
                     };
 
-                    if value {
-                        self.eval(frame, r#true)
-                    } else {
-                        self.eval(frame, r#false)
+                    match value {
+                        true => self.eval(frame, r#true),
+                        false => self.eval(frame, r#false),
+                    }
+                }
+                mir::Match::List(some, none) => {
+                    let Value::List(list) = self.eval(frame, input) else {
+                        panic!("expected list");
+                    };
+
+                    match list.is_some() {
+                        true => self.eval(frame, some),
+                        false => self.eval(frame, none),
                     }
                 }
                 mir::Match::Adt(variants, default) => {

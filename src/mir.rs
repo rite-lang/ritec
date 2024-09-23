@@ -57,7 +57,9 @@ pub enum ExprKind {
     Const(Constant),
     Local(usize),
     Argument(usize),
-    List(Vec<Expr>),
+    List(Vec<Expr>, Option<Box<Expr>>),
+    ListHead(Box<Expr>),
+    ListTail(Box<Expr>),
     Block(Vec<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
@@ -71,6 +73,7 @@ pub enum ExprKind {
 #[derive(Debug)]
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
+    List(Box<Expr>, Box<Expr>),
     Adt(Vec<Option<Expr>>, Option<Box<Expr>>),
 }
 

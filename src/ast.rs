@@ -139,6 +139,7 @@ pub enum PatKind {
     Bool(bool),
     Tuple(Vec<Pat>),
     Variant(Path, Vec<Pat>),
+    List(Vec<Pat>, Option<Option<Box<Pat>>>),
 }
 
 #[derive(Debug)]

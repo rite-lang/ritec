@@ -70,7 +70,9 @@ pub enum ExprKind {
     Local(usize),
     Argument(usize),
     Tuple(Vec<Expr>),
-    List(Vec<Expr>),
+    List(Vec<Expr>, Option<Box<Expr>>),
+    ListHead(Box<Expr>),
+    ListTail(Box<Expr>),
     Block(Vec<Expr>),
     Field(Box<Expr>, usize),
     VariantField(Box<Expr>, usize, usize),
@@ -85,6 +87,7 @@ pub enum ExprKind {
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
     Adt(Vec<Option<Expr>>, Option<Box<Expr>>),
+    List(Box<Expr>, Box<Expr>),
 }
 
 impl Unit {
@@ -330,10 +333,24 @@ impl ExprKind {
 
                 Ok(ExprKind::Tuple(tuple))
             }
-            hir::ExprKind::List(exprs) => {
+            hir::ExprKind::List(exprs, rest) => {
                 let list = Expr::vec_from_hir(unit, generics, exprs)?;
+                let rest = match rest {
+                    Some(rest) => Some(Box::new(Expr::from_hir(unit, generics, rest)?)),
+                    None => None,
+                };
 
-                Ok(ExprKind::List(list))
+                Ok(ExprKind::List(list, rest))
+            }
+            hir::ExprKind::ListHead(expr) => {
+                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+
+                Ok(ExprKind::ListHead(expr))
+            }
+            hir::ExprKind::ListTail(expr) => {
+                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+
+                Ok(ExprKind::ListTail(expr))
             }
             hir::ExprKind::Block(exprs) => {
                 let block = Expr::vec_from_hir(unit, generics, exprs)?;
@@ -412,6 +429,12 @@ impl ExprKind {
                             .map(Box::new);
 
                         Match::Adt(variants, default)
+                    }
+                    hir::Match::List(some, none) => {
+                        let some = Expr::from_hir(unit, generics, some)?;
+                        let none = Expr::from_hir(unit, generics, none)?;
+
+                        Match::List(Box::new(some), Box::new(none))
                     }
                 };
 

@@ -146,7 +146,9 @@ pub enum ExprKind {
     Local(usize),
     Argument(usize),
     Tuple(Vec<Expr>),
-    List(Vec<Expr>),
+    List(Vec<Expr>, Option<Box<Expr>>),
+    ListHead(Box<Expr>),
+    ListTail(Box<Expr>),
     Block(Vec<Expr>),
     Field(Box<Expr>, &'static str),
     VariantField(Box<Expr>, usize, usize),
@@ -162,6 +164,7 @@ pub enum ExprKind {
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
     Adt(usize, Vec<Option<Expr>>, Option<Box<Expr>>),
+    List(Box<Expr>, Box<Expr>),
 }
 
 impl Unit {

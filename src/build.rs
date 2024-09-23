@@ -197,7 +197,9 @@ fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Ex
         rir::ExprKind::Local(index) => build_local_expr(builder, &expr.ty, index),
         rir::ExprKind::Argument(index) => build_argument_expr(builder, &expr.ty, index),
         rir::ExprKind::Tuple(ref exprs) => build_tuple_expr(builder, &expr.ty, exprs),
-        rir::ExprKind::List(_) => todo!(),
+        rir::ExprKind::List(ref items, ref rest) => build_list_expr(builder, &expr.ty, items, rest),
+        rir::ExprKind::ListHead(ref expr) => build_list_head_expr(builder, &expr.ty, expr),
+        rir::ExprKind::ListTail(ref expr) => build_list_tail_expr(builder, &expr.ty, expr),
         rir::ExprKind::Block(ref exprs) => build_block_expr(builder, &expr.ty, exprs),
         rir::ExprKind::Field(ref expr, index) => build_field_expr(builder, &expr.ty, expr, index),
         rir::ExprKind::VariantField(ref expr, variant, index) => {
@@ -327,6 +329,51 @@ fn build_tuple_expr(
         .collect::<miette::Result<_>>()?;
 
     let kind = mir::ExprKind::Adt(0, exprs);
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
+fn build_list_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    items: &[rir::Expr],
+    rest: &Option<Box<rir::Expr>>,
+) -> miette::Result<mir::Expr> {
+    let items = items
+        .iter()
+        .map(|expr| build_expr(builder, expr))
+        .collect::<miette::Result<_>>()?;
+
+    let rest = rest
+        .as_ref()
+        .map(|expr| build_expr(builder, expr))
+        .transpose()?;
+
+    let kind = mir::ExprKind::List(items, rest.map(Box::new));
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
+fn build_list_head_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    expr: &rir::Expr,
+) -> miette::Result<mir::Expr> {
+    let expr = build_expr(builder, expr)?;
+
+    let kind = mir::ExprKind::ListHead(Box::new(expr));
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
+fn build_list_tail_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    expr: &rir::Expr,
+) -> miette::Result<mir::Expr> {
+    let expr = build_expr(builder, expr)?;
+
+    let kind = mir::ExprKind::ListTail(Box::new(expr));
     let ty = build_ty(builder, ty);
     Ok(mir::Expr { kind, ty })
 }
@@ -469,6 +516,15 @@ fn build_match_expr(
             let r#false = build_expr(builder, r#false)?;
 
             let r#match = mir::Match::Bool(Box::new(r#true), Box::new(r#false));
+            let kind = mir::ExprKind::Match(Box::new(input), r#match);
+            let ty = build_ty(builder, ty);
+            Ok(mir::Expr { kind, ty })
+        }
+        rir::Match::List(some, none) => {
+            let some = build_expr(builder, some)?;
+            let none = build_expr(builder, none)?;
+
+            let r#match = mir::Match::List(Box::new(some), Box::new(none));
             let kind = mir::ExprKind::Match(Box::new(input), r#match);
             let ty = build_ty(builder, ty);
             Ok(mir::Expr { kind, ty })

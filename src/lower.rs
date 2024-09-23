@@ -325,7 +325,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Paren(expr, _) => lower_expr(cx, expr),
         ast::Expr::Item(path) => lower_item(cx, path),
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
-        ast::Expr::List(_, _, _) => todo!(),
+        ast::Expr::List(exprs, rest, _) => lower_list(cx, exprs, rest),
         ast::Expr::Block(block) => lower_block(cx, block),
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
         ast::Expr::Call(func, args) => lower_call(cx, func, args),
@@ -362,7 +362,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             .first()
             .expect("path should have at least one segment");
 
-        for (scope_name, id) in &cx.scope {
+        for (scope_name, id) in cx.scope.iter().rev() {
             if scope_name == name {
                 let ty = cx.locals[*id].ty.clone();
                 let kind = hir::ExprKind::Local(*id);
@@ -441,6 +441,36 @@ fn lower_tuple(cx: &mut BodyCx, exprs: &[ast::Expr]) -> miette::Result<hir::Expr
 
     let ty = hir::Ty::Partial(hir::Part::Tuple, tys);
     let kind = hir::ExprKind::Tuple(args);
+    Ok(hir::Expr { kind, ty })
+}
+
+fn lower_list(
+    cx: &mut BodyCx,
+    exprs: &[ast::Expr],
+    rest: &Option<Box<ast::Expr>>,
+) -> miette::Result<hir::Expr> {
+    let mut args = Vec::new();
+    let ty = hir::Ty::any();
+
+    for expr in exprs {
+        let arg = lower_expr(cx, expr)?;
+        cx.unit.unify(arg.ty.clone(), ty.clone());
+
+        args.push(arg);
+    }
+
+    let ty = hir::Ty::Partial(hir::Part::List, vec![ty]);
+
+    let rest = match rest {
+        Some(rest) => {
+            let rest = lower_expr(cx, rest)?;
+            cx.unit.unify(rest.ty.clone(), ty.clone());
+            Some(Box::new(rest))
+        }
+        None => None,
+    };
+
+    let kind = hir::ExprKind::List(args, rest);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -656,6 +686,20 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
 
             Ok(Pat::Variant(adt, index, hir))
         }
+        ast::PatKind::List(ref pats, ref rest) => {
+            let mut rest = match rest {
+                Some(Some(rest)) => lower_pat(cx, rest, &hir::Ty::any())?,
+                Some(None) => Pat::Bind(None),
+                None => Pat::List(None),
+            };
+
+            for pat in pats.iter().rev() {
+                let pat = lower_pat(cx, pat, &hir::Ty::any())?;
+                rest = Pat::List(Some(Box::new((pat, rest))));
+            }
+
+            Ok(rest)
+        }
     }
 }
 
@@ -665,6 +709,7 @@ enum Pat {
     Bool(bool),
     Tuple(Vec<Pat>),
     Variant(usize, usize, Vec<(hir::Ty, Pat)>),
+    List(Option<Box<(Pat, Pat)>>),
 }
 
 fn build_match_tree(
@@ -787,6 +832,54 @@ fn build_match_tree(
                 }
             }
         }
+        Pat::List(pat) => {
+            let Match::List { some, none, .. } = tree.as_list(&input)? else {
+                unreachable!()
+            };
+
+            match pat.map(|p| *p) {
+                Some((head, tail)) => {
+                    let some = some.get_or_insert_with(|| Box::new(Match::None));
+
+                    let head_ty = hir::Ty::any();
+                    let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()]);
+
+                    cx.unit.unify(input.ty.clone(), list_ty);
+
+                    let head_kind = hir::ExprKind::ListHead(Box::new(input.clone()));
+                    let head_expr = hir::Expr {
+                        kind: head_kind,
+                        ty: head_ty,
+                    };
+
+                    let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
+                    let tail_expr = hir::Expr {
+                        kind: tail_kind,
+                        ty: input.ty.clone(),
+                    };
+
+                    let mut pats = [(head_expr, head), (tail_expr, tail)]
+                        .into_iter()
+                        .chain(pats);
+
+                    let (input, pat) = pats.next().unwrap();
+                    build_match_tree(cx, input, pat, &mut pats, some, body)
+                }
+                None => {
+                    let none = none.get_or_insert_with(|| Box::new(Match::None));
+
+                    match pats.next() {
+                        Some(_) => todo!(),
+                        None => {
+                            let expr = lower_expr(cx, body)?;
+                            let ty = expr.ty.clone();
+                            *none = Box::new(Match::Leaf(expr));
+                            Ok(ty)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -861,6 +954,31 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
             let kind = hir::ExprKind::Match(Box::new(input), r#match);
             Ok(Some(hir::Expr { kind, ty }))
         }
+        Match::List {
+            input,
+            some,
+            none,
+            default,
+        } => {
+            let (some, none) = match (some, none) {
+                (Some(some), Some(none)) => (some, none),
+                (Some(some), None) => (some, default),
+                (None, Some(none)) => (default, none),
+                (None, None) => unreachable!(),
+            };
+
+            let ty = hir::Ty::any();
+
+            let some = build_match_expr(cx, *some)?.map(Box::new).unwrap();
+            let none = build_match_expr(cx, *none)?.map(Box::new).unwrap();
+
+            cx.unit.unify(ty.clone(), some.ty.clone());
+            cx.unit.unify(ty.clone(), none.ty.clone());
+
+            let r#match = hir::Match::List(some, none);
+            let kind = hir::ExprKind::Match(Box::new(input), r#match);
+            Ok(Some(hir::Expr { kind, ty }))
+        }
     }
 }
 
@@ -879,6 +997,12 @@ enum Match {
         input: hir::Expr,
         adt: usize,
         variants: Vec<Option<Match>>,
+        default: Box<Match>,
+    },
+    List {
+        input: hir::Expr,
+        some: Option<Box<Match>>,
+        none: Option<Box<Match>>,
         default: Box<Match>,
     },
 }
@@ -945,6 +1069,28 @@ impl Match {
         }
     }
 
+    fn as_list(&mut self, input: &hir::Expr) -> miette::Result<&mut Match> {
+        match self {
+            Match::None | Match::Leaf(_) => {
+                *self = Self::List {
+                    input: input.clone(),
+                    some: None,
+                    none: None,
+                    default: Box::new(self.clone()),
+                };
+
+                Ok(self)
+            }
+            Match::Bind(_, tree) => tree.as_list(input),
+            Match::List { .. } => Ok(self),
+            _ => Err(miette::miette!(
+                severity = Severity::Error,
+                code = "invalid::match",
+                "expected list"
+            )),
+        }
+    }
+
     fn visit(&mut self, f: &mut impl FnMut(&mut Match)) {
         match self {
             Match::None | Match::Leaf(_) => {}
@@ -974,6 +1120,22 @@ impl Match {
 
                 default.visit(f);
             }
+            Match::List {
+                some,
+                none,
+                default,
+                ..
+            } => {
+                if let Some(some) = some {
+                    some.visit(f);
+                }
+
+                if let Some(none) = none {
+                    none.visit(f);
+                }
+
+                default.visit(f);
+            }
         }
 
         f(self);
@@ -983,7 +1145,9 @@ impl Match {
         match self {
             Match::None | Match::Leaf(_) => self,
             Match::Bind(_, default) => default.default(),
-            Match::Bool { default, .. } | Match::Adt { default, .. } => default,
+            Match::Bool { default, .. }
+            | Match::Adt { default, .. }
+            | Match::List { default, .. } => default.default(),
         }
     }
 }
@@ -1014,6 +1178,17 @@ impl std::fmt::Debug for Match {
                 .debug_struct("Adt")
                 .field("adt", adt)
                 .field("variants", variants)
+                .field("default", default)
+                .finish(),
+            Match::List {
+                some,
+                none,
+                default,
+                ..
+            } => f
+                .debug_struct("List")
+                .field("some", some)
+                .field("none", none)
                 .field("default", default)
                 .finish(),
         }

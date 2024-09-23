@@ -1,10 +1,6 @@
 fn main()
-  let x = 10 |> fib
+  let x = [1, 2]
 
-fn fib(a)
-  match a == 0
-  | true -> 0
-  | false ->
-    match a == 1
-    | true -> 1
-    | false -> fib(a - 1) + fib(a - 2)
+  match x
+  | [_, ..rest] -> rest
+  | _ -> x
