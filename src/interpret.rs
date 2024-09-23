@@ -1,9 +1,10 @@
-use crate::mir;
+use crate::{ast::BinOp, mir};
 
 #[derive(Clone, Debug)]
 pub enum Value {
     Void,
     Int(i64),
+    Bool(bool),
     Func(usize),
     List(Vec<Value>),
     Adt(usize, Vec<Value>),
@@ -22,7 +23,7 @@ impl<'a> Interpreter<'a> {
         let func = &self.mir.funcs[main];
 
         let mut frame = Frame {
-            locals: Vec::new(),
+            locals: vec![Value::Void; func.locals.len()],
             arguments: Vec::new(),
         };
 
@@ -46,6 +47,7 @@ impl<'a> Interpreter<'a> {
 
                     Value::Int(n)
                 }
+                mir::Constant::Bool(value) => Value::Bool(*value),
                 mir::Constant::Func(func) => Value::Func(*func),
             },
             mir::ExprKind::Local(index) => frame.locals[*index].clone(),
@@ -74,15 +76,73 @@ impl<'a> Interpreter<'a> {
                 }
 
                 let mut frame = Frame {
-                    locals: Vec::new(),
+                    locals: vec![Value::Void; func.locals.len()],
                     arguments,
                 };
 
                 self.eval(&mut frame, &func.body)
             }
-            mir::ExprKind::Let(_, expr) => {
+            mir::ExprKind::Binary(op, lhs, rhs) => match op {
+                BinOp::Add => {
+                    let Value::Int(lhs) = self.eval(frame, lhs) else {
+                        panic!("expected integer");
+                    };
+
+                    let Value::Int(rhs) = self.eval(frame, rhs) else {
+                        panic!("expected integer");
+                    };
+
+                    Value::Int(lhs + rhs)
+                }
+                BinOp::Sub => {
+                    let Value::Int(lhs) = self.eval(frame, lhs) else {
+                        panic!("expected integer");
+                    };
+
+                    let Value::Int(rhs) = self.eval(frame, rhs) else {
+                        panic!("expected integer");
+                    };
+
+                    Value::Int(lhs - rhs)
+                }
+                BinOp::Mul => {
+                    let Value::Int(lhs) = self.eval(frame, lhs) else {
+                        panic!("expected integer");
+                    };
+
+                    let Value::Int(rhs) = self.eval(frame, rhs) else {
+                        panic!("expected integer");
+                    };
+
+                    Value::Int(lhs * rhs)
+                }
+                BinOp::Div => {
+                    let Value::Int(lhs) = self.eval(frame, lhs) else {
+                        panic!("expected integer");
+                    };
+
+                    let Value::Int(rhs) = self.eval(frame, rhs) else {
+                        panic!("expected integer");
+                    };
+
+                    Value::Int(lhs / rhs)
+                }
+                BinOp::Rem => {
+                    let Value::Int(lhs) = self.eval(frame, lhs) else {
+                        panic!("expected integer");
+                    };
+
+                    let Value::Int(rhs) = self.eval(frame, rhs) else {
+                        panic!("expected integer");
+                    };
+
+                    Value::Int(lhs % rhs)
+                }
+                _ => todo!(),
+            },
+            mir::ExprKind::Let(index, expr) => {
                 let value = self.eval(frame, expr);
-                frame.locals.push(value);
+                frame.locals[*index] = value;
                 Value::Void
             }
             mir::ExprKind::Adt(variant, fields) => {
@@ -101,6 +161,27 @@ impl<'a> Interpreter<'a> {
 
                 fields[*field].clone()
             }
+            mir::ExprKind::Match(input, r#match) => match r#match {
+                mir::Match::Adt(variants, default) => {
+                    let Value::Adt(tag, fields) = frame.locals[*input].clone() else {
+                        panic!("expected ADT");
+                    };
+
+                    match variants[tag] {
+                        Some((ref locals, ref body)) => {
+                            for (i, &index) in locals.iter().enumerate() {
+                                frame.locals[index] = fields[i].clone();
+                            }
+
+                            self.eval(frame, body)
+                        }
+                        None => match default {
+                            Some(default) => self.eval(frame, default),
+                            None => panic!("no default branch"),
+                        },
+                    }
+                }
+            },
         }
     }
 }

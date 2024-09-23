@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    ast::BinOp,
     infer::TyEnv,
     number::{Base, FloatKind, IntKind},
     span::Span,
@@ -119,6 +120,7 @@ pub enum Inferred {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Part {
     Void,
+    Bool,
     List,
     Tuple,
     Func,
@@ -127,16 +129,17 @@ pub enum Part {
     Adt(usize),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
     pub ty: Ty,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ExprKind {
     Void,
     Int(bool, Base, Vec<u8>),
+    Bool(bool),
     Func(usize),
     Variant(usize, usize),
     Local(usize),
@@ -147,7 +150,15 @@ pub enum ExprKind {
     Field(Box<Expr>, &'static str),
     Call(Box<Expr>, Vec<Expr>),
     Pipe(Box<Expr>, Box<Expr>),
+    Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(usize, Box<Expr>),
+    Match(usize, Match),
+}
+
+#[derive(Clone, Debug)]
+pub enum Match {
+    Bool(Option<(usize, Box<Expr>)>, Option<(usize, Box<Expr>)>),
+    Adt(usize, Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
 }
 
 impl Unit {
@@ -189,7 +200,11 @@ impl Adt {
 
         for variant in &self.variants {
             let Some(field) = variant.fields.iter().position(|field| field.name == name) else {
-                return Err(miette::miette!("field not found"));
+                return Err(miette::miette!(
+                    "field not found `{}` in variant `{}`",
+                    name,
+                    variant.name
+                ));
             };
 
             if index.is_none() {
@@ -215,6 +230,10 @@ impl Adt {
 }
 
 impl Ty {
+    pub fn any() -> Self {
+        Ty::Inferred(Tid::new(), Inferred::Any, None)
+    }
+
     pub fn inferred(inferred: Inferred) -> Self {
         Ty::Inferred(Tid::new(), inferred, None)
     }
@@ -223,8 +242,43 @@ impl Ty {
         Ty::Partial(Part::Void, Vec::new())
     }
 
+    pub const fn bool() -> Self {
+        Ty::Partial(Part::Bool, Vec::new())
+    }
+
     pub const fn int(kind: IntKind) -> Self {
         Ty::Partial(Part::Int(kind), Vec::new())
+    }
+
+    pub fn specialize(&self, generics: &[Ty]) -> Ty {
+        match self {
+            Ty::Inferred(_, _, _) => self.clone(),
+            Ty::Partial(Part::Generic(index), args) => {
+                assert!(args.is_empty());
+                generics[*index].clone()
+            }
+            Ty::Partial(part, args) => {
+                let args = args.iter().map(|arg| arg.specialize(generics)).collect();
+                Ty::Partial(*part, args)
+            }
+            Ty::Field(adt, field) => {
+                let base = adt.specialize(generics);
+                Ty::Field(Box::new(base), field)
+            }
+            Ty::Call(callee, arguments) => {
+                let callee = callee.specialize(generics);
+                let arguments = arguments
+                    .iter()
+                    .map(|arg| arg.specialize(generics))
+                    .collect();
+                Ty::Call(Box::new(callee), arguments)
+            }
+            Ty::Pipe(lhs, rhs) => {
+                let lhs = lhs.specialize(generics);
+                let rhs = rhs.specialize(generics);
+                Ty::Pipe(Box::new(lhs), Box::new(rhs))
+            }
+        }
     }
 }
 
@@ -255,6 +309,7 @@ impl std::fmt::Display for Ty {
 pub fn format_partial(part: &Part, args: &[Ty]) -> String {
     match part {
         Part::Void => String::from("void"),
+        Part::Bool => String::from("bool"),
         Part::List => format!("[{}]", args[0]),
         Part::Tuple => {
             let args = args

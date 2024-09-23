@@ -1,7 +1,10 @@
 use miette::Severity;
 
 use crate::{
-    ast::{Adt, Argument, Decl, Expr, Func, Generic, Module, Path, Ty, Type, Variant, Vis},
+    ast::{
+        Adt, Argument, Arm, BinOp, Decl, Expr, Func, Generic, Module, Pat, PatKind, Path, Ty, Type,
+        Variant, Vis,
+    },
     number::{Base, IntKind},
     span::Span,
     token::{Token, TokenStream},
@@ -270,6 +273,7 @@ fn parse_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
 
     match token {
         Token::Let => parse_let(tokens, multiline),
+        Token::Match => parse_match(tokens, multiline),
         _ => parse_pipe(tokens, multiline),
     }
 }
@@ -287,6 +291,105 @@ fn parse_let(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> 
     };
 
     Ok(Expr::Let(name, Box::new(value)))
+}
+
+fn parse_match(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    if !multiline {
+        return Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::match",
+            labels = vec![tokens.peek().1.label("here")],
+            "expected match expression",
+        )
+        .with_source_code(tokens.peek().1));
+    }
+
+    tokens.expect(Token::Match)?;
+
+    let input = parse_expr(tokens, false)?;
+    let mut arms = Vec::new();
+
+    while is_arm(tokens) {
+        tokens.expect(Token::Newline)?;
+        arms.push(parse_arm(tokens)?);
+    }
+
+    Ok(Expr::Match(Box::new(input), arms))
+}
+
+fn is_arm(tokens: &TokenStream) -> bool {
+    tokens.is(Token::Newline) && tokens.nth_is(1, Token::Pipe)
+}
+
+fn parse_arm(tokens: &mut TokenStream) -> miette::Result<Arm> {
+    let start = tokens.expect(Token::Pipe)?;
+
+    let pat = parse_pat(tokens)?;
+
+    let end = tokens.expect(Token::Arrow)?;
+
+    let expr = parse_expr(tokens, true)?;
+
+    let span = start.join(end);
+    Ok(Arm { pat, expr, span })
+}
+
+fn parse_pat(tokens: &mut TokenStream) -> miette::Result<Pat> {
+    parse_pat_term(tokens)
+}
+
+fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
+    let (token, span) = tokens.peek();
+
+    match token {
+        Token::Under => {
+            tokens.consume();
+
+            let kind = PatKind::Bind(None);
+            Ok(Pat { kind, span })
+        }
+        Token::Snake | Token::Pascal => {
+            let path = parse_path(tokens)?;
+
+            if path.segments.len() == 1 && token == Token::Snake {
+                let kind = PatKind::Bind(Some(path.segments[0]));
+                return Ok(Pat { kind, span });
+            }
+
+            if tokens.take(Token::LParen).is_none() {
+                let kind = PatKind::Variant(path, Vec::new());
+                return Ok(Pat { kind, span });
+            }
+
+            let mut pats = Vec::new();
+
+            while !tokens.is(Token::RParen) {
+                pats.push(parse_pat(tokens)?);
+
+                if tokens.take(Token::Comma).is_none() {
+                    break;
+                }
+            }
+
+            tokens.expect(Token::RParen)?;
+
+            let kind = PatKind::Variant(path, pats);
+            Ok(Pat { kind, span })
+        }
+        Token::True | Token::False => {
+            let kind = PatKind::Bool(token == Token::True);
+            tokens.consume();
+            Ok(Pat { kind, span })
+        }
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "expected::pat",
+            labels = vec![tokens.peek().1.label("here")],
+            "expected pattern, found {:?}",
+            token,
+        )
+        .with_source_code(tokens.peek().1)),
+    }
 }
 
 fn parse_pipe(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
@@ -315,7 +418,7 @@ fn parse_pipe_multiline(tokens: &mut TokenStream, input: Expr) -> miette::Result
     while is_pipe_multiline(tokens) {
         tokens.consume();
         tokens.consume();
-        exprs.push(parse_call(tokens, true)?);
+        exprs.push(parse_binary(tokens, true)?);
     }
 
     Ok(Expr::Pipe(Box::new(input), exprs))
@@ -326,12 +429,12 @@ fn is_pipe_multiline(tokens: &TokenStream) -> bool {
 }
 
 fn parse_tuple(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let first = parse_call(tokens, multiline)?;
+    let first = parse_binary(tokens, multiline)?;
 
     let mut items = vec![first];
 
     while tokens.take(Token::Comma).is_some() {
-        let second = parse_call(tokens, multiline)?;
+        let second = parse_binary(tokens, multiline)?;
         items.push(second);
     }
 
@@ -340,6 +443,58 @@ fn parse_tuple(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
     } else {
         Ok(Expr::Tuple(items))
     }
+}
+
+fn parse_binary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let lhs = parse_call(tokens, multiline)?;
+
+    let Some(lop) = get_binop(tokens) else {
+        return Ok(lhs);
+    };
+
+    tokens.consume();
+
+    let rhs = parse_binary(tokens, multiline)?;
+
+    match rhs {
+        Expr::Binary(rop, mid, rhs) => {
+            if lop.precedence() < rop.precedence() {
+                Ok(Expr::Binary(
+                    rop,
+                    mid,
+                    Box::new(Expr::Binary(lop, Box::new(lhs), rhs)),
+                ))
+            } else {
+                Ok(Expr::Binary(
+                    lop,
+                    Box::new(lhs),
+                    Box::new(Expr::Binary(rop, mid, rhs)),
+                ))
+            }
+        }
+        rhs => Ok(Expr::Binary(lop, Box::new(lhs), Box::new(rhs))),
+    }
+}
+
+fn get_binop(tokens: &TokenStream) -> Option<BinOp> {
+    let (token, _) = tokens.peek();
+
+    Some(match token {
+        Token::Plus => BinOp::Add,
+        Token::Minus => BinOp::Sub,
+        Token::Star => BinOp::Mul,
+        Token::Slash => BinOp::Div,
+        Token::Percent => BinOp::Rem,
+        Token::Amp => BinOp::And,
+        Token::Pipe => BinOp::Or,
+        Token::EqEq => BinOp::Eq,
+        Token::NotEq => BinOp::Ne,
+        Token::Lt => BinOp::Lt,
+        Token::LtEq => BinOp::Le,
+        Token::Gt => BinOp::Gt,
+        Token::GtEq => BinOp::Ge,
+        _ => return None,
+    })
 }
 
 fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
@@ -355,7 +510,7 @@ fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
 
     while !tokens.is(Token::RParen) {
         match tokens.take(Token::Under).is_some() {
-            false => args.push(Some(parse_call(tokens, false)?)),
+            false => args.push(Some(parse_binary(tokens, false)?)),
             true => args.push(None),
         }
 
@@ -390,6 +545,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
+        Token::True | Token::False => parse_bool(tokens),
         _ => Err(miette::miette!(
             severity = Severity::Error,
             code = "expected::term",
@@ -433,6 +589,16 @@ fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
     }
 
     Ok(Expr::Int(false, base, digits, span))
+}
+
+fn parse_bool(tokens: &mut TokenStream) -> miette::Result<Expr> {
+    let (token, span) = tokens.consume();
+
+    match token {
+        Token::True => Ok(Expr::Bool(true, span)),
+        Token::False => Ok(Expr::Bool(false, span)),
+        _ => unreachable!(),
+    }
 }
 
 fn parse_path(tokens: &mut TokenStream) -> miette::Result<Path> {

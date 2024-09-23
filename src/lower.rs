@@ -98,9 +98,14 @@ pub fn lower_ast(unit: &mut hir::Unit, module: usize, ast: &ast::Module) -> miet
                 };
 
                 let body = lower_expr(&mut cx, body)?;
-                unit.unify(body.ty.clone(), unit.funcs[id].output.clone());
 
+                unit.funcs[id].locals = cx.locals;
                 unit.funcs[id].body = body;
+
+                unit.unify(
+                    unit.funcs[id].body.ty.clone(),
+                    unit.funcs[id].output.clone(),
+                );
             } else {
                 unit.unify(hir::Ty::void(), unit.funcs[id].output.clone());
             }
@@ -240,6 +245,23 @@ fn find_adt(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result
     }
 }
 
+fn find_variant(
+    unit: &hir::Unit,
+    module: usize,
+    path: &ast::Path,
+) -> miette::Result<(usize, usize)> {
+    match resolve_item(unit, module, path)? {
+        Item::Variant(adt, variant) => Ok((adt, variant)),
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::path",
+            labels = vec![path.span.label("here")],
+            "expected variant"
+        )
+        .with_source_code(path.span)),
+    }
+}
+
 fn resolve_item(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<Item> {
     let mut current = module;
 
@@ -290,7 +312,7 @@ struct BodyCx<'a> {
     arguments: &'a [hir::Argument],
     module: usize,
     locals: Vec<hir::Local>,
-    scope: Vec<usize>,
+    scope: Vec<(String, usize)>,
 }
 
 fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
@@ -298,6 +320,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Int(negative, base, digits, span) => {
             lower_int(cx, *negative, *base, digits, *span)
         }
+        ast::Expr::Bool(value, span) => lower_bool(cx, *value, *span),
         ast::Expr::Paren(expr, _) => lower_expr(cx, expr),
         ast::Expr::Item(path) => lower_item(cx, path),
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
@@ -306,7 +329,9 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
         ast::Expr::Call(func, args) => lower_call(cx, func, args),
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
+        ast::Expr::Binary(op, lhs, rhs) => todo!(),
         ast::Expr::Let(name, expr) => lower_let(cx, name, expr),
+        ast::Expr::Match(input, arms) => lower_match(cx, input, arms),
     }
 }
 
@@ -323,6 +348,12 @@ fn lower_int(
     Ok(hir::Expr { kind, ty })
 }
 
+fn lower_bool(_cx: &mut BodyCx, value: bool, _span: Span) -> miette::Result<hir::Expr> {
+    let ty = hir::Ty::bool();
+    let kind = hir::ExprKind::Bool(value);
+    Ok(hir::Expr { kind, ty })
+}
+
 fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
     if path.segments.len() == 1 {
         let name = path
@@ -330,10 +361,10 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             .first()
             .expect("path should have at least one segment");
 
-        for &id in &cx.scope {
-            if cx.locals[id].name == *name {
-                let ty = cx.locals[id].ty.clone();
-                let kind = hir::ExprKind::Local(id);
+        for (scope_name, id) in &cx.scope {
+            if scope_name == name {
+                let ty = cx.locals[*id].ty.clone();
+                let kind = hir::ExprKind::Local(*id);
                 return Ok(hir::Expr { kind, ty });
             }
         }
@@ -383,11 +414,9 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             let output = hir::Ty::Partial(hir::Part::Adt(adt), generics.clone());
 
             let mut parts = Vec::new();
-            let mut generics = generics.into_iter().enumerate().collect();
 
             for field in variant.fields.iter() {
-                let ty = cx.unit.env.use_ty(&mut generics, &field.ty);
-                parts.push(ty);
+                parts.push(field.ty.specialize(&generics));
             }
 
             parts.push(output);
@@ -495,9 +524,305 @@ fn lower_let(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::R
     let ty = value.ty.clone();
 
     cx.locals.push(hir::Local { name, ty });
-    cx.scope.push(id);
+    cx.scope.push((name.to_owned(), id));
 
     let kind = hir::ExprKind::Let(id, Box::new(value));
     let ty = hir::Ty::void();
     Ok(hir::Expr { kind, ty })
+}
+
+fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette::Result<hir::Expr> {
+    let input = lower_expr(cx, input)?;
+
+    let mut pats = Vec::new();
+
+    for arm in arms {
+        pats.push(lower_pat(cx, &arm.pat, &input.ty)?);
+    }
+
+    let local = cx.locals.len();
+    cx.locals.push(hir::Local {
+        name: "",
+        ty: input.ty.clone(),
+    });
+
+    let mut tree = Match::None;
+    let ty = hir::Ty::any();
+
+    for (pat, arm) in pats.into_iter().zip(arms.iter()) {
+        let scope = cx.scope.len();
+
+        let arm_ty = build_match_tree(
+            cx,
+            local,
+            pat,
+            &mut std::iter::empty(),
+            &mut tree,
+            &arm.expr,
+        )?;
+
+        cx.scope.truncate(scope);
+        cx.unit.unify(ty.clone(), arm_ty);
+    }
+
+    let exprs = vec![
+        hir::Expr {
+            kind: hir::ExprKind::Let(local, Box::new(input)),
+            ty: hir::Ty::void(),
+        },
+        build_match_expr(cx, tree)?.unwrap(),
+    ];
+
+    let kind = hir::ExprKind::Block(exprs);
+    Ok(hir::Expr { kind, ty })
+}
+
+fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pat> {
+    match pat.kind {
+        ast::PatKind::Bind(name) => Ok(Pat::Bind(name)),
+        ast::PatKind::Bool(b) => {
+            cx.unit.unify(ty.clone(), hir::Ty::bool());
+            Ok(Pat::Bool(b))
+        }
+        ast::PatKind::Variant(ref path, ref pats) => {
+            let (adt, index) = find_variant(cx.unit, cx.module, path)?;
+
+            let generics: Vec<_> = cx.unit.adts[adt]
+                .generics
+                .iter()
+                .map(|_| hir::Ty::any())
+                .collect();
+
+            let variant = &cx.unit.adts[adt].variants[index];
+
+            if pats.len() != variant.fields.len() {
+                return Err(miette::miette!(
+                    severity = Severity::Error,
+                    code = "invalid::pattern",
+                    "expected `{}` fields, found `{}`",
+                    variant.fields.len(),
+                    pats.len()
+                ));
+            }
+
+            let mut hir = Vec::new();
+
+            for (pat, field) in pats.iter().zip(variant.fields.clone()) {
+                let ty = field.ty.specialize(&generics);
+                let pat = lower_pat(cx, pat, &ty)?;
+                hir.push((ty, pat));
+            }
+
+            let adt_ty = hir::Ty::Partial(hir::Part::Adt(adt), generics);
+            cx.unit.unify(ty.clone(), adt_ty);
+
+            Ok(Pat::Variant(adt, index, hir))
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Pat {
+    Bind(Option<&'static str>),
+    Bool(bool),
+    Variant(usize, usize, Vec<(hir::Ty, Pat)>),
+}
+
+fn build_match_tree(
+    cx: &mut BodyCx,
+    input: usize,
+    pat: Pat,
+    pats: &mut dyn Iterator<Item = (usize, Pat)>,
+    tree: &mut Match,
+    body: &ast::Expr,
+) -> miette::Result<hir::Ty> {
+    match pat {
+        Pat::Bool(value) => {
+            todo!()
+        }
+        Pat::Variant(adt, variant, fields) => {
+            let variants = cx.unit.adts[adt].variants.len();
+            let Match::Adt { variants, .. } = tree.as_adt(input, adt, variants)? else {
+                unreachable!()
+            };
+
+            let (locals, subtree) = match variants[variant] {
+                Some(ref mut pair) => pair,
+                None => {
+                    let mut locals = Vec::new();
+
+                    for (ty, _) in &fields {
+                        let id = cx.locals.len();
+                        let ty = ty.clone();
+                        cx.locals.push(hir::Local { name: "", ty });
+                        locals.push(id);
+                    }
+
+                    variants[variant] = Some((locals, Match::None));
+                    variants[variant].as_mut().unwrap()
+                }
+            };
+
+            let fields = fields
+                .into_iter()
+                .enumerate()
+                .map(move |(i, (_ty, pat))| (locals[i], pat));
+
+            let mut pats = fields.chain(pats);
+
+            match pats.next() {
+                Some((input, pat)) => build_match_tree(cx, input, pat, &mut pats, subtree, body),
+                None => {
+                    let expr = lower_expr(cx, body)?;
+                    let ty = expr.ty.clone();
+                    *subtree = Match::Leaf(expr);
+                    Ok(ty)
+                }
+            }
+        }
+        Pat::Bind(name) => match name {
+            Some(_) => todo!(),
+            None => match pats.next() {
+                Some((input, pat)) => build_match_tree(cx, input, pat, pats, tree, body),
+                None => {
+                    assert!(matches!(tree.default(), Match::None));
+                    let expr = lower_expr(cx, body)?;
+                    let ty = expr.ty.clone();
+                    *tree.default() = Match::Leaf(expr);
+                    Ok(ty)
+                }
+            },
+        },
+    }
+}
+
+fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::Expr>> {
+    match tree {
+        Match::None => Ok(None),
+        Match::Leaf(expr) => Ok(Some(expr)),
+        Match::Bool {
+            input,
+            r#true,
+            r#false,
+            default,
+        } => {
+            todo!()
+        }
+        Match::Adt {
+            input,
+            adt,
+            variants,
+            default,
+        } => {
+            let mut exprs = Vec::new();
+            let ty = hir::Ty::any();
+
+            for variant in variants {
+                match variant {
+                    Some((locals, subtree)) => {
+                        let expr = build_match_expr(cx, subtree)?.unwrap();
+                        cx.unit.unify(ty.clone(), expr.ty.clone());
+                        exprs.push(Some((locals, expr)));
+                    }
+                    None => exprs.push(None),
+                }
+            }
+
+            let default = build_match_expr(cx, *default)?.map(Box::new);
+
+            if let Some(ref default) = default {
+                cx.unit.unify(ty.clone(), default.ty.clone());
+            }
+
+            let r#match = hir::Match::Adt(adt, exprs, default);
+            let kind = hir::ExprKind::Match(input, r#match);
+            Ok(Some(hir::Expr { kind, ty }))
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Match {
+    None,
+    Leaf(hir::Expr),
+    Bool {
+        input: usize,
+        r#true: Option<(usize, hir::Expr)>,
+        r#false: Option<(usize, hir::Expr)>,
+        default: Box<Match>,
+    },
+    Adt {
+        input: usize,
+        adt: usize,
+        variants: Vec<Option<(Vec<usize>, Match)>>,
+        default: Box<Match>,
+    },
+}
+
+impl Match {
+    fn as_bool(&mut self, input: usize) -> miette::Result<&mut Match> {
+        match self {
+            Match::None | Match::Leaf(_) => {
+                *self = Self::Bool {
+                    input,
+                    r#true: None,
+                    r#false: None,
+                    default: Box::new(self.clone()),
+                };
+
+                Ok(self)
+            }
+            Match::Bool { .. } => Ok(self),
+            _ => Err(miette::miette!(
+                severity = Severity::Error,
+                code = "invalid::match",
+                "expected bool"
+            )),
+        }
+    }
+
+    fn as_adt(
+        &mut self,
+        input: usize,
+        index: usize,
+        variants: usize,
+    ) -> miette::Result<&mut Match> {
+        match self {
+            Match::None | Match::Leaf(_) => {
+                *self = Self::Adt {
+                    input,
+                    adt: index,
+                    variants: vec![None; variants],
+                    default: Box::new(self.clone()),
+                };
+
+                Ok(self)
+            }
+            Match::Adt { adt, .. } => {
+                if *adt != index {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "invalid::match",
+                        "expected ADT `{}`, found `{}`",
+                        index,
+                        adt
+                    ));
+                }
+
+                Ok(self)
+            }
+            _ => Err(miette::miette!(
+                severity = Severity::Error,
+                code = "invalid::match",
+                "expected ADT"
+            )),
+        }
+    }
+
+    fn default(&mut self) -> &mut Match {
+        match self {
+            Match::None | Match::Leaf(_) => self,
+            Match::Bool { default, .. } | Match::Adt { default, .. } => default,
+        }
+    }
 }

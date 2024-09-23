@@ -75,6 +75,7 @@ pub struct Generic {
 #[derive(Debug)]
 pub enum Expr {
     Int(bool, Base, Vec<u8>, Span),
+    Bool(bool, Span),
     Paren(Box<Expr>, Span),
     Item(Path),
     Tuple(Vec<Expr>),
@@ -83,7 +84,59 @@ pub enum Expr {
     Field(Box<Expr>, &'static str),
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Vec<Expr>),
+    Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(&'static str, Box<Expr>),
+    Match(Box<Expr>, Vec<Arm>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    And,
+    Or,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl BinOp {
+    pub const fn precedence(self) -> u8 {
+        match self {
+            BinOp::Or => 1,
+            BinOp::And => 2,
+            BinOp::Eq | BinOp::Ne => 3,
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => 4,
+            BinOp::Add | BinOp::Sub => 5,
+            BinOp::Mul | BinOp::Div | BinOp::Rem => 6,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Arm {
+    pub pat: Pat,
+    pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Pat {
+    pub kind: PatKind,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum PatKind {
+    Bind(Option<&'static str>),
+    Bool(bool),
+    Variant(Path, Vec<Pat>),
 }
 
 #[derive(Debug)]

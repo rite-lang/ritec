@@ -1,4 +1,5 @@
 use crate::{
+    ast::BinOp,
     hir,
     number::{Base, IntKind},
     span::Span,
@@ -44,6 +45,7 @@ pub struct Argument {
 #[derive(Clone, Debug)]
 pub enum Ty {
     Void,
+    Bool,
     Int(IntKind),
     List(Box<Ty>),
     Tuple(Vec<Ty>),
@@ -62,6 +64,7 @@ pub struct Expr {
 pub enum ExprKind {
     Void,
     Int(bool, Base, Vec<u8>),
+    Bool(bool),
     Func(usize),
     Variant(usize, usize),
     Local(usize),
@@ -72,7 +75,14 @@ pub enum ExprKind {
     Field(Box<Expr>, usize),
     Call(Box<Expr>, Vec<Expr>),
     Pipe(Box<Expr>, Box<Expr>),
+    Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(usize, Box<Expr>),
+    Match(usize, Match),
+}
+
+#[derive(Debug)]
+pub enum Match {
+    Adt(Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
 }
 
 impl Unit {
@@ -214,6 +224,10 @@ impl Ty {
                     assert!(arguments.is_empty());
                     Ok(Ty::Void)
                 }
+                hir::Part::Bool => {
+                    assert!(arguments.is_empty());
+                    Ok(Ty::Bool)
+                }
                 hir::Part::List => {
                     assert_eq!(arguments.len(), 1);
                     Ok(Ty::List(Box::new(Ty::from_hir(
@@ -301,6 +315,7 @@ impl ExprKind {
         match kind {
             hir::ExprKind::Void => Ok(ExprKind::Void),
             hir::ExprKind::Int(n, base, bytes) => Ok(ExprKind::Int(*n, *base, bytes.clone())),
+            hir::ExprKind::Bool(b) => Ok(ExprKind::Bool(*b)),
             hir::ExprKind::Func(i) => Ok(ExprKind::Func(*i)),
             hir::ExprKind::Variant(i, j) => Ok(ExprKind::Variant(*i, *j)),
             hir::ExprKind::Local(i) => Ok(ExprKind::Local(*i)),
@@ -343,10 +358,47 @@ impl ExprKind {
 
                 Ok(ExprKind::Pipe(lhs, rhs))
             }
+            hir::ExprKind::Binary(op, lhs, rhs) => {
+                let lhs = Box::new(Expr::from_hir(unit, generics, lhs)?);
+                let rhs = Box::new(Expr::from_hir(unit, generics, rhs)?);
+
+                Ok(ExprKind::Binary(*op, lhs, rhs))
+            }
             hir::ExprKind::Let(local, expr) => {
                 let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
 
                 Ok(ExprKind::Let(*local, expr))
+            }
+            hir::ExprKind::Match(input, r#match) => {
+                let r#match = match r#match {
+                    hir::Match::Bool(r#true, r#false) => {
+                        todo!()
+                    }
+                    hir::Match::Adt(_, variants, default) => {
+                        let variants = variants
+                            .iter()
+                            .map(|variant| {
+                                variant
+                                    .as_ref()
+                                    .map(|(locals, expr)| {
+                                        Expr::from_hir(unit, generics, expr)
+                                            .map(|expr| (locals.clone(), expr))
+                                    })
+                                    .transpose()
+                            })
+                            .collect::<miette::Result<_>>()?;
+
+                        let default = default
+                            .as_ref()
+                            .map(|expr| Expr::from_hir(unit, generics, expr))
+                            .transpose()?
+                            .map(Box::new);
+
+                        Match::Adt(variants, default)
+                    }
+                };
+
+                Ok(ExprKind::Match(*input, r#match))
             }
         }
     }

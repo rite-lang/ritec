@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
+    ast::BinOp,
     mir,
     number::{Base, IntKind},
     rir,
@@ -46,11 +47,18 @@ fn build_func(
 
     let output = build_ty(&mut builder, &func.output);
 
+    let locals = func
+        .locals
+        .iter()
+        .map(|ty| build_ty(&mut builder, ty))
+        .collect();
+
     let body = build_expr(&mut builder, &func.body)?;
 
     let func = mir::Func {
         input,
         output,
+        locals,
         body,
     };
 
@@ -74,6 +82,7 @@ struct Builder<'a> {
 fn build_ty(builder: &mut Builder, ty: &rir::Ty) -> mir::Ty {
     match ty {
         rir::Ty::Void => mir::Ty::Void,
+        rir::Ty::Bool => mir::Ty::Bool,
         rir::Ty::Int(kind) => mir::Ty::Int(*kind),
         rir::Ty::List(item) => {
             let item = Box::new(build_ty(builder, item));
@@ -182,6 +191,7 @@ fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Ex
         rir::ExprKind::Int(negative, base, ref value) => {
             build_int_expr(builder, &expr.ty, negative, base, value)
         }
+        rir::ExprKind::Bool(value) => build_bool_expr(builder, &expr.ty, value),
         rir::ExprKind::Func(index) => build_func_expr(builder, &expr.ty, index),
         rir::ExprKind::Variant(adt, variant) => build_variant_expr(builder, &expr.ty, adt, variant),
         rir::ExprKind::Local(index) => build_local_expr(builder, &expr.ty, index),
@@ -192,7 +202,13 @@ fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Ex
         rir::ExprKind::Field(ref expr, index) => build_field_expr(builder, &expr.ty, expr, index),
         rir::ExprKind::Call(ref func, ref args) => build_call_expr(builder, &expr.ty, func, args),
         rir::ExprKind::Pipe(ref lhs, ref rhs) => build_pipe_expr(builder, &expr.ty, lhs, rhs),
+        rir::ExprKind::Binary(op, ref lhs, ref rhs) => {
+            build_binary_expr(builder, &expr.ty, op, lhs, rhs)
+        }
         rir::ExprKind::Let(index, ref expr) => build_let_expr(builder, &expr.ty, index, expr),
+        rir::ExprKind::Match(input, ref r#match) => {
+            build_match_expr(builder, &expr.ty, input, r#match)
+        }
     }
 }
 
@@ -211,6 +227,12 @@ fn build_int_expr(
     value: &[u8],
 ) -> miette::Result<mir::Expr> {
     let kind = mir::ExprKind::Const(mir::Constant::Int(signed, base, value.into()));
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
+fn build_bool_expr(builder: &mut Builder, ty: &rir::Ty, value: bool) -> miette::Result<mir::Expr> {
+    let kind = mir::ExprKind::Const(mir::Constant::Bool(value));
     let ty = build_ty(builder, ty);
     Ok(mir::Expr { kind, ty })
 }
@@ -257,6 +279,7 @@ fn build_variant_expr(
     let func = mir::Func {
         input: input.clone(),
         output: output.as_ref().clone(),
+        locals: Vec::new(),
         body: mir::Expr {
             kind: mir::ExprKind::Adt(index, items),
             ty: output.as_ref().clone(),
@@ -387,6 +410,21 @@ fn build_pipe_expr(
     Ok(mir::Expr { kind, ty })
 }
 
+fn build_binary_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    op: BinOp,
+    lhs: &rir::Expr,
+    rhs: &rir::Expr,
+) -> miette::Result<mir::Expr> {
+    let lhs = build_expr(builder, lhs)?;
+    let rhs = build_expr(builder, rhs)?;
+
+    let kind = mir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
 fn build_let_expr(
     builder: &mut Builder,
     ty: &rir::Ty,
@@ -398,4 +436,37 @@ fn build_let_expr(
     let kind = mir::ExprKind::Let(index, Box::new(expr));
     let ty = build_ty(builder, ty);
     Ok(mir::Expr { kind, ty })
+}
+
+fn build_match_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    input: usize,
+    r#match: &rir::Match,
+) -> miette::Result<mir::Expr> {
+    match r#match {
+        rir::Match::Adt(variants, default) => {
+            let mut items = Vec::new();
+
+            for variant in variants {
+                let Some((fields, expr)) = variant else {
+                    items.push(None);
+                    continue;
+                };
+
+                let expr = build_expr(builder, expr)?;
+                items.push(Some((fields.clone(), expr)));
+            }
+
+            let default = default
+                .as_ref()
+                .map(|expr| build_expr(builder, expr))
+                .transpose()?;
+
+            let r#match = mir::Match::Adt(items, default.map(Box::new));
+            let kind = mir::ExprKind::Match(input, r#match);
+            let ty = build_ty(builder, ty);
+            Ok(mir::Expr { kind, ty })
+        }
+    }
 }

@@ -1,10 +1,12 @@
+type Bool =
+  | True
+  | False
+
 type Foo =
-  | Foo(a: 'a)
+  | Bar(a: Bool, b: int)
+  | Baz
 
 fn main()
-  1 |> foo |> bar
-
-fn foo(a: int)
-  Foo(a)
-
-fn bar(foo)
+  match true
+  | true => Bar(True, 1)
+  | false => Bar(False, 2)

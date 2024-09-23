@@ -30,6 +30,10 @@ impl TyEnv {
     }
 
     pub fn use_ty(&mut self, generics: &mut HashMap<usize, hir::Ty>, ty: &hir::Ty) -> hir::Ty {
+        if let Some(ty) = self.substitute(ty) {
+            return self.use_ty(generics, &ty.clone());
+        }
+
         match ty {
             hir::Ty::Inferred(tid, kind, func) => {
                 let ty = hir::Ty::inferred(*kind);
@@ -273,10 +277,12 @@ fn normalize(unit: &mut hir::Unit, ty: &hir::Ty) -> Result<hir::Ty, RetryOrError
 
 fn with_func(unit: &mut hir::Unit, ty: &hir::Ty, new_func: usize) -> hir::Ty {
     match ty {
-        hir::Ty::Inferred(tid, kind, func) => {
+        hir::Ty::Inferred(_, kind, func) => {
             assert!(func.is_none() || *func == Some(new_func));
 
-            hir::Ty::Inferred(*tid, *kind, Some(new_func))
+            let new_ty = hir::Ty::Inferred(hir::Tid::new(), *kind, Some(new_func));
+            unit.unify(ty.clone(), new_ty.clone());
+            new_ty
         }
         hir::Ty::Partial(part, arguments) => {
             let arguments = arguments
@@ -329,38 +335,7 @@ fn normalize_field(
     };
 
     let (_, ty) = unit.adts[index].find_field(field)?;
-    Ok(specialize(&ty, &generics))
-}
-
-fn specialize(ty: &hir::Ty, generics: &[hir::Ty]) -> hir::Ty {
-    match ty {
-        hir::Ty::Inferred(_, _, _) => ty.clone(),
-        hir::Ty::Partial(hir::Part::Generic(index), args) => {
-            assert!(args.is_empty());
-            generics[*index].clone()
-        }
-        hir::Ty::Partial(part, args) => {
-            let args = args.iter().map(|arg| specialize(arg, generics)).collect();
-            hir::Ty::Partial(*part, args)
-        }
-        hir::Ty::Field(adt, field) => {
-            let base = specialize(adt, generics);
-            hir::Ty::Field(Box::new(base), field)
-        }
-        hir::Ty::Call(callee, arguments) => {
-            let callee = specialize(callee, generics);
-            let arguments = arguments
-                .iter()
-                .map(|arg| specialize(arg, generics))
-                .collect();
-            hir::Ty::Call(Box::new(callee), arguments)
-        }
-        hir::Ty::Pipe(lhs, rhs) => {
-            let lhs = specialize(lhs, generics);
-            let rhs = specialize(rhs, generics);
-            hir::Ty::Pipe(Box::new(lhs), Box::new(rhs))
-        }
-    }
+    Ok(ty.specialize(&generics))
 }
 
 fn normalize_call(
