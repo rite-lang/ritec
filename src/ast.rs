@@ -64,6 +64,7 @@ pub enum Ty {
     Int(IntKind),
     Tuple(Vec<Ty>),
     Item(Path),
+    List(Box<Ty>),
     Generic(Generic),
 }
 

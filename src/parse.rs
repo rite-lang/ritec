@@ -188,6 +188,12 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.expect(Token::RParen)?;
             Ok(ty)
         }
+        Token::LBracket => {
+            tokens.consume();
+            let ty = parse_ty(tokens)?;
+            tokens.expect(Token::RBracket)?;
+            Ok(Ty::List(Box::new(ty)))
+        }
         Token::Void => {
             tokens.consume();
             Ok(Ty::Void)

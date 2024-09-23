@@ -54,6 +54,12 @@ impl std::fmt::Display for List {
     }
 }
 
+#[derive(Debug)]
+struct Frame {
+    locals: Vec<Value>,
+    arguments: Vec<Value>,
+}
+
 pub struct Interpreter<'a> {
     mir: &'a mir::Mir,
 }
@@ -316,10 +322,4 @@ impl<'a> Interpreter<'a> {
             },
         }
     }
-}
-
-#[derive(Debug)]
-struct Frame {
-    locals: Vec<Value>,
-    arguments: Vec<Value>,
 }

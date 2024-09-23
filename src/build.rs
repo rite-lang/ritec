@@ -134,6 +134,7 @@ fn extract_generics(unit: &rir::Unit, ty: &rir::Ty, expected: &mir::Ty) -> Vec<m
     fn recurse(unit: &rir::Unit, generics: &mut Vec<Option<mir::Ty>>, ty: &rir::Ty, ex: &mir::Ty) {
         match (ty, ex) {
             (rir::Ty::Void, mir::Ty::Void) => {}
+            (rir::Ty::Bool, mir::Ty::Bool) => {}
             (rir::Ty::Int(kind), mir::Ty::Int(ex)) => {
                 assert_eq!(kind, ex);
             }

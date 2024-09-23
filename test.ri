@@ -1,6 +1,12 @@
-fn main()
-  let x = [1, 2]
+type Result =
+  | Ok(ok: 'a)
+  | Err(err: 'b)
 
-  match x
-  | [_, ..rest] -> rest
-  | _ -> x
+fn main()
+  foo(true)
+
+fn foo(x)
+  match x, true
+  | _, true -> 1
+  | true, _ -> 2
+  | false, false -> 3

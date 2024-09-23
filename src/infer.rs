@@ -15,7 +15,7 @@ impl TyEnv {
     }
 
     pub fn normalize(&mut self, ty: hir::Ty) {
-        self.constraints.push_back((ty.clone(), ty.clone()));
+        self.unify(ty.clone(), ty);
     }
 
     pub fn substitute(&self, ty: &hir::Ty) -> Option<&hir::Ty> {
@@ -30,10 +30,6 @@ impl TyEnv {
     }
 
     pub fn use_ty(&mut self, generics: &mut HashMap<usize, hir::Ty>, ty: &hir::Ty) -> hir::Ty {
-        if let Some(ty) = self.substitute(ty) {
-            return self.use_ty(generics, &ty.clone());
-        }
-
         match ty {
             hir::Ty::Inferred(tid, kind, func) => {
                 let ty = hir::Ty::inferred(*kind);
@@ -112,7 +108,9 @@ pub fn infer(unit: &mut hir::Unit) -> miette::Result<()> {
 
     while let Some((a, b)) = unit.env.constraints.pop_front() {
         match unify_ty_ty(unit, &a, &b) {
-            Ok(()) => {}
+            Ok(()) => {
+                retried = 0;
+            }
             Err(RetryOrError::Retry) => {
                 unit.env.constraints.push_back((a, b));
                 retried += 1;
@@ -363,16 +361,16 @@ fn normalize_tuple(
 ) -> Result<hir::Ty, RetryOrError> {
     let base = normalize(unit, base)?;
 
-    let (index, generics) = match base {
+    let (index, items) = match base {
         hir::Ty::Inferred(_, _, _) => return Err(RetryOrError::Retry),
-        hir::Ty::Partial(hir::Part::Tuple, generics) => (index, generics),
+        hir::Ty::Partial(hir::Part::Tuple, items) => (index, items),
         hir::Ty::Partial(_, _) => return Err(miette::miette!("expected a tuple").into()),
         hir::Ty::Field(_, _) | hir::Ty::Tuple(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
             unreachable!()
         }
     };
 
-    Ok(generics[index].clone())
+    Ok(items[index].clone())
 }
 
 fn normalize_call(
