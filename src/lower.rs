@@ -329,7 +329,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
         ast::Expr::Call(func, args) => lower_call(cx, func, args),
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
-        ast::Expr::Binary(op, lhs, rhs) => todo!(),
+        ast::Expr::Binary(op, lhs, rhs) => lower_binary(cx, *op, lhs, rhs),
         ast::Expr::Let(name, expr) => lower_let(cx, name, expr),
         ast::Expr::Match(input, arms) => lower_match(cx, input, arms),
     }
@@ -517,6 +517,29 @@ fn lower_pipe(
     Ok(pipee)
 }
 
+fn lower_binary(
+    cx: &mut BodyCx,
+    op: ast::BinOp,
+    lhs: &ast::Expr,
+    rhs: &ast::Expr,
+) -> miette::Result<hir::Expr> {
+    let lhs = lower_expr(cx, lhs)?;
+    let rhs = lower_expr(cx, rhs)?;
+
+    match op {
+        ast::BinOp::Add | ast::BinOp::Sub | ast::BinOp::Mul | ast::BinOp::Div | ast::BinOp::Rem => {
+            let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int));
+
+            cx.unit.unify(lhs.ty.clone(), ty.clone());
+            cx.unit.unify(rhs.ty.clone(), ty.clone());
+
+            let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
+            Ok(hir::Expr { kind, ty })
+        }
+        _ => todo!(),
+    }
+}
+
 fn lower_let(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::Result<hir::Expr> {
     let value = lower_expr(cx, expr)?;
 
@@ -680,9 +703,12 @@ fn build_match_tree(
                 }
             }
         }
-        Pat::Bind(name) => match name {
-            Some(_) => todo!(),
-            None => match pats.next() {
+        Pat::Bind(name) => {
+            if let Some(name) = name {
+                cx.scope.push((name.to_owned(), input));
+            }
+
+            match pats.next() {
                 Some((input, pat)) => build_match_tree(cx, input, pat, pats, tree, body),
                 None => {
                     assert!(matches!(tree.default(), Match::None));
@@ -691,8 +717,8 @@ fn build_match_tree(
                     *tree.default() = Match::Leaf(expr);
                     Ok(ty)
                 }
-            },
-        },
+            }
+        }
     }
 }
 
