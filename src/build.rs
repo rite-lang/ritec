@@ -53,19 +53,19 @@ fn build_func(
         .map(|ty| build_ty(&mut builder, ty))
         .collect();
 
-    let body = build_expr(&mut builder, &func.body)?;
-
-    let func = mir::Func {
+    let index = builder.mir.funcs.len();
+    builder.mir.funcs.push(mir::Func {
         input,
         output,
         locals,
-        body,
-    };
+        ..Default::default()
+    });
 
-    let index = mir.funcs.len();
-    mir.funcs.push(func);
+    builder.funcs.insert(key, index);
 
-    funcs.insert(key, index);
+    let body = build_expr(&mut builder, &func.body)?;
+
+    mir.funcs[index].body = body;
 
     Ok(index)
 }
@@ -200,13 +200,16 @@ fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Ex
         rir::ExprKind::List(_) => todo!(),
         rir::ExprKind::Block(ref exprs) => build_block_expr(builder, &expr.ty, exprs),
         rir::ExprKind::Field(ref expr, index) => build_field_expr(builder, &expr.ty, expr, index),
+        rir::ExprKind::VariantField(ref expr, variant, index) => {
+            build_variant_field_expr(builder, &expr.ty, expr, variant, index)
+        }
         rir::ExprKind::Call(ref func, ref args) => build_call_expr(builder, &expr.ty, func, args),
         rir::ExprKind::Pipe(ref lhs, ref rhs) => build_pipe_expr(builder, &expr.ty, lhs, rhs),
         rir::ExprKind::Binary(op, ref lhs, ref rhs) => {
             build_binary_expr(builder, &expr.ty, op, lhs, rhs)
         }
         rir::ExprKind::Let(index, ref expr) => build_let_expr(builder, &expr.ty, index, expr),
-        rir::ExprKind::Match(input, ref r#match) => {
+        rir::ExprKind::Match(ref input, ref r#match) => {
             build_match_expr(builder, &expr.ty, input, r#match)
         }
     }
@@ -356,6 +359,20 @@ fn build_field_expr(
     Ok(mir::Expr { kind, ty })
 }
 
+fn build_variant_field_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    expr: &rir::Expr,
+    variant: usize,
+    index: usize,
+) -> miette::Result<mir::Expr> {
+    let expr = build_expr(builder, expr)?;
+
+    let kind = mir::ExprKind::VariantField(Box::new(expr), variant, index);
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
 fn build_call_expr(
     builder: &mut Builder,
     ty: &rir::Ty,
@@ -441,16 +458,18 @@ fn build_let_expr(
 fn build_match_expr(
     builder: &mut Builder,
     ty: &rir::Ty,
-    input: usize,
+    input: &rir::Expr,
     r#match: &rir::Match,
 ) -> miette::Result<mir::Expr> {
+    let input = build_expr(builder, input)?;
+
     match r#match {
         rir::Match::Bool(r#true, r#false) => {
             let r#true = build_expr(builder, r#true)?;
             let r#false = build_expr(builder, r#false)?;
 
             let r#match = mir::Match::Bool(Box::new(r#true), Box::new(r#false));
-            let kind = mir::ExprKind::Match(input, r#match);
+            let kind = mir::ExprKind::Match(Box::new(input), r#match);
             let ty = build_ty(builder, ty);
             Ok(mir::Expr { kind, ty })
         }
@@ -458,13 +477,13 @@ fn build_match_expr(
             let mut items = Vec::new();
 
             for variant in variants {
-                let Some((fields, expr)) = variant else {
+                let Some(expr) = variant else {
                     items.push(None);
                     continue;
                 };
 
                 let expr = build_expr(builder, expr)?;
-                items.push(Some((fields.clone(), expr)));
+                items.push(Some(expr));
             }
 
             let default = default
@@ -473,7 +492,7 @@ fn build_match_expr(
                 .transpose()?;
 
             let r#match = mir::Match::Adt(items, default.map(Box::new));
-            let kind = mir::ExprKind::Match(input, r#match);
+            let kind = mir::ExprKind::Match(Box::new(input), r#match);
             let ty = build_ty(builder, ty);
             Ok(mir::Expr { kind, ty })
         }

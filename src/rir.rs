@@ -73,17 +73,18 @@ pub enum ExprKind {
     List(Vec<Expr>),
     Block(Vec<Expr>),
     Field(Box<Expr>, usize),
+    VariantField(Box<Expr>, usize, usize),
     Call(Box<Expr>, Vec<Expr>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(usize, Box<Expr>),
-    Match(usize, Match),
+    Match(Box<Expr>, Match),
 }
 
 #[derive(Debug)]
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
-    Adt(Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
+    Adt(Vec<Option<Expr>>, Option<Box<Expr>>),
 }
 
 impl Unit {
@@ -266,7 +267,10 @@ impl Ty {
                     Ok(Ty::Generic(index))
                 }
             },
-            hir::Ty::Field(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
+            hir::Ty::Field(_, _)
+            | hir::Ty::Tuple(_, _)
+            | hir::Ty::Call(_, _)
+            | hir::Ty::Pipe(_, _) => {
                 unreachable!("unexpected field, call or pipe: {}", ty)
             }
         }
@@ -353,6 +357,16 @@ impl ExprKind {
 
                 Ok(ExprKind::Field(expr, index))
             }
+            hir::ExprKind::VariantField(expr, i, j) => {
+                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+
+                Ok(ExprKind::VariantField(expr, *i, *j))
+            }
+            hir::ExprKind::TupleField(expr, i) => {
+                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+
+                Ok(ExprKind::Field(expr, *i))
+            }
             hir::ExprKind::Pipe(lhs, rhs) => {
                 let lhs = Box::new(Expr::from_hir(unit, generics, lhs)?);
                 let rhs = Box::new(Expr::from_hir(unit, generics, rhs)?);
@@ -371,6 +385,8 @@ impl ExprKind {
                 Ok(ExprKind::Let(*local, expr))
             }
             hir::ExprKind::Match(input, r#match) => {
+                let input = Box::new(Expr::from_hir(unit, generics, input)?);
+
                 let r#match = match r#match {
                     hir::Match::Bool(r#true, r#false) => {
                         let r#true = Expr::from_hir(unit, generics, r#true)?;
@@ -384,10 +400,7 @@ impl ExprKind {
                             .map(|variant| {
                                 variant
                                     .as_ref()
-                                    .map(|(locals, expr)| {
-                                        Expr::from_hir(unit, generics, expr)
-                                            .map(|expr| (locals.clone(), expr))
-                                    })
+                                    .map(|expr| Expr::from_hir(unit, generics, expr))
                                     .transpose()
                             })
                             .collect::<miette::Result<_>>()?;
@@ -402,7 +415,7 @@ impl ExprKind {
                     }
                 };
 
-                Ok(ExprKind::Match(*input, r#match))
+                Ok(ExprKind::Match(input, r#match))
             }
         }
     }

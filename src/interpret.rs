@@ -1,6 +1,6 @@
 use crate::{ast::BinOp, mir};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Void,
     Int(i64),
@@ -82,64 +82,92 @@ impl<'a> Interpreter<'a> {
 
                 self.eval(&mut frame, &func.body)
             }
-            mir::ExprKind::Binary(op, lhs, rhs) => match op {
-                BinOp::Add => {
-                    let Value::Int(lhs) = self.eval(frame, lhs) else {
-                        panic!("expected integer");
-                    };
+            mir::ExprKind::Binary(op, lhs, rhs) => {
+                let lhs = self.eval(frame, lhs);
+                let rhs = self.eval(frame, rhs);
 
-                    let Value::Int(rhs) = self.eval(frame, rhs) else {
-                        panic!("expected integer");
-                    };
+                match op {
+                    BinOp::Add => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
 
-                    Value::Int(lhs + rhs)
+                        Value::Int(lhs + rhs)
+                    }
+                    BinOp::Sub => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Int(lhs - rhs)
+                    }
+                    BinOp::Mul => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Int(lhs * rhs)
+                    }
+                    BinOp::Div => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Int(lhs / rhs)
+                    }
+                    BinOp::Rem => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Int(lhs % rhs)
+                    }
+                    BinOp::Eq => Value::Bool(lhs == rhs),
+                    BinOp::Ne => Value::Bool(lhs != rhs),
+                    BinOp::Lt => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Bool(lhs < rhs)
+                    }
+                    BinOp::Le => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Bool(lhs <= rhs)
+                    }
+                    BinOp::Gt => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Bool(lhs > rhs)
+                    }
+                    BinOp::Ge => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integer");
+                        };
+
+                        Value::Bool(lhs >= rhs)
+                    }
+                    BinOp::And => {
+                        let (Value::Bool(lhs), Value::Bool(rhs)) = (lhs, rhs) else {
+                            panic!("expected boolean");
+                        };
+
+                        Value::Bool(lhs && rhs)
+                    }
+                    BinOp::Or => {
+                        let (Value::Bool(lhs), Value::Bool(rhs)) = (lhs, rhs) else {
+                            panic!("expected boolean");
+                        };
+
+                        Value::Bool(lhs || rhs)
+                    }
                 }
-                BinOp::Sub => {
-                    let Value::Int(lhs) = self.eval(frame, lhs) else {
-                        panic!("expected integer");
-                    };
-
-                    let Value::Int(rhs) = self.eval(frame, rhs) else {
-                        panic!("expected integer");
-                    };
-
-                    Value::Int(lhs - rhs)
-                }
-                BinOp::Mul => {
-                    let Value::Int(lhs) = self.eval(frame, lhs) else {
-                        panic!("expected integer");
-                    };
-
-                    let Value::Int(rhs) = self.eval(frame, rhs) else {
-                        panic!("expected integer");
-                    };
-
-                    Value::Int(lhs * rhs)
-                }
-                BinOp::Div => {
-                    let Value::Int(lhs) = self.eval(frame, lhs) else {
-                        panic!("expected integer");
-                    };
-
-                    let Value::Int(rhs) = self.eval(frame, rhs) else {
-                        panic!("expected integer");
-                    };
-
-                    Value::Int(lhs / rhs)
-                }
-                BinOp::Rem => {
-                    let Value::Int(lhs) = self.eval(frame, lhs) else {
-                        panic!("expected integer");
-                    };
-
-                    let Value::Int(rhs) = self.eval(frame, rhs) else {
-                        panic!("expected integer");
-                    };
-
-                    Value::Int(lhs % rhs)
-                }
-                _ => todo!(),
-            },
+            }
             mir::ExprKind::Let(index, expr) => {
                 let value = self.eval(frame, expr);
                 frame.locals[*index] = value;
@@ -161,9 +189,20 @@ impl<'a> Interpreter<'a> {
 
                 fields[*field].clone()
             }
+            mir::ExprKind::VariantField(adt, variant, field) => {
+                let Value::Adt(tag, fields) = self.eval(frame, adt) else {
+                    panic!("expected ADT");
+                };
+
+                if tag != *variant {
+                    panic!("expected variant");
+                }
+
+                fields[*field].clone()
+            }
             mir::ExprKind::Match(input, r#match) => match r#match {
                 mir::Match::Bool(r#true, r#false) => {
-                    let Value::Bool(value) = frame.locals[*input].clone() else {
+                    let Value::Bool(value) = self.eval(frame, input) else {
                         panic!("expected boolean");
                     };
 
@@ -174,18 +213,12 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 mir::Match::Adt(variants, default) => {
-                    let Value::Adt(tag, fields) = frame.locals[*input].clone() else {
+                    let Value::Adt(tag, _) = self.eval(frame, input) else {
                         panic!("expected ADT");
                     };
 
                     match variants[tag] {
-                        Some((ref locals, ref body)) => {
-                            for (i, &index) in locals.iter().enumerate() {
-                                frame.locals[index] = fields[i].clone();
-                            }
-
-                            self.eval(frame, body)
-                        }
+                        Some(ref body) => self.eval(frame, body),
                         None => match default {
                             Some(default) => self.eval(frame, default),
                             None => panic!("no default branch"),

@@ -192,6 +192,10 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.consume();
             Ok(Ty::Void)
         }
+        Token::Bool => {
+            tokens.consume();
+            Ok(Ty::Bool)
+        }
         Token::Snake | Token::Pascal => parse_path(tokens).map(Ty::Item),
         Token::Quote => parse_generic(tokens).map(Ty::Generic),
         _ => Err(miette::miette!(
@@ -327,15 +331,46 @@ fn parse_arm(tokens: &mut TokenStream) -> miette::Result<Arm> {
     let pat = parse_pat(tokens)?;
 
     let end = tokens.expect(Token::Arrow)?;
-
-    let expr = parse_expr(tokens, true)?;
-
     let span = start.join(end);
+
+    if is_block(tokens) {
+        let expr = parse_block(tokens)?;
+        return Ok(Arm { pat, expr, span });
+    }
+
+    let expr = parse_expr(tokens, false)?;
+
     Ok(Arm { pat, expr, span })
 }
 
 fn parse_pat(tokens: &mut TokenStream) -> miette::Result<Pat> {
-    parse_pat_term(tokens)
+    let pat = parse_pat_term(tokens)?;
+
+    if !tokens.is(Token::Comma) {
+        return Ok(pat);
+    }
+
+    let mut span = pat.span;
+    let mut pats = vec![pat];
+
+    while tokens.take(Token::Comma).is_some() {
+        let pat = parse_pat_term(tokens)?;
+        span = span.join(pat.span);
+
+        pats.push(pat);
+    }
+
+    let kind = PatKind::Tuple(pats);
+    Ok(Pat { kind, span })
+}
+
+fn is_pat_term(tokens: &TokenStream) -> bool {
+    let (token, _) = tokens.peek();
+
+    matches!(
+        token,
+        Token::Under | Token::Snake | Token::Pascal | Token::True | Token::False
+    )
 }
 
 fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
@@ -364,7 +399,7 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
             let mut pats = Vec::new();
 
             while !tokens.is(Token::RParen) {
-                pats.push(parse_pat(tokens)?);
+                pats.push(parse_pat_term(tokens)?);
 
                 if tokens.take(Token::Comma).is_none() {
                     break;
@@ -544,8 +579,8 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     match token {
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
-        Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
         Token::True | Token::False => parse_bool(tokens),
+        Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
         _ => Err(miette::miette!(
             severity = Severity::Error,
             code = "expected::term",

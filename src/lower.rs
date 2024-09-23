@@ -160,6 +160,7 @@ fn lower_output(cx: &mut TyCx, output: &Option<ast::Ty>) -> miette::Result<hir::
 fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
     match ty {
         ast::Ty::Void => Ok(hir::Ty::void()),
+        ast::Ty::Bool => Ok(hir::Ty::bool()),
         ast::Ty::Int(kind) => Ok(hir::Ty::Partial(hir::Part::Int(*kind), Vec::new())),
         ast::Ty::Tuple(tys) => {
             let mut args = Vec::new();
@@ -324,7 +325,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Paren(expr, _) => lower_expr(cx, expr),
         ast::Expr::Item(path) => lower_item(cx, path),
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
-        ast::Expr::List(_) => todo!(),
+        ast::Expr::List(_, _, _) => todo!(),
         ast::Expr::Block(block) => lower_block(cx, block),
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
         ast::Expr::Call(func, args) => lower_call(cx, func, args),
@@ -536,7 +537,31 @@ fn lower_binary(
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
             Ok(hir::Expr { kind, ty })
         }
-        _ => todo!(),
+        ast::BinOp::Eq | ast::BinOp::Ne => {
+            cx.unit.unify(lhs.ty.clone(), rhs.ty.clone());
+
+            let ty = hir::Ty::bool();
+            let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
+            Ok(hir::Expr { kind, ty })
+        }
+        ast::BinOp::And | ast::BinOp::Or => {
+            let ty = hir::Ty::bool();
+
+            cx.unit.unify(lhs.ty.clone(), ty.clone());
+            cx.unit.unify(rhs.ty.clone(), ty.clone());
+
+            let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
+            Ok(hir::Expr { kind, ty })
+        }
+        ast::BinOp::Lt | ast::BinOp::Le | ast::BinOp::Gt | ast::BinOp::Ge => {
+            let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int));
+
+            cx.unit.unify(lhs.ty.clone(), ty.clone());
+            cx.unit.unify(rhs.ty.clone(), ty.clone());
+
+            let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
+            Ok(hir::Expr { kind, ty })
+        }
     }
 }
 
@@ -563,12 +588,6 @@ fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette:
         pats.push(lower_pat(cx, &arm.pat, &input.ty)?);
     }
 
-    let local = cx.locals.len();
-    cx.locals.push(hir::Local {
-        name: "",
-        ty: input.ty.clone(),
-    });
-
     let mut tree = Match::None;
     let ty = hir::Ty::any();
 
@@ -577,7 +596,7 @@ fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette:
 
         let arm_ty = build_match_tree(
             cx,
-            local,
+            input.clone(),
             pat,
             &mut std::iter::empty(),
             &mut tree,
@@ -588,16 +607,7 @@ fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette:
         cx.unit.unify(ty.clone(), arm_ty);
     }
 
-    let exprs = vec![
-        hir::Expr {
-            kind: hir::ExprKind::Let(local, Box::new(input)),
-            ty: hir::Ty::void(),
-        },
-        build_match_expr(cx, tree)?.unwrap(),
-    ];
-
-    let kind = hir::ExprKind::Block(exprs);
-    Ok(hir::Expr { kind, ty })
+    Ok(build_match_expr(cx, tree)?.unwrap())
 }
 
 fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pat> {
@@ -607,6 +617,11 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             cx.unit.unify(ty.clone(), hir::Ty::bool());
             Ok(Pat::Bool(b))
         }
+        ast::PatKind::Tuple(ref pats) => pats
+            .iter()
+            .map(|pat| lower_pat(cx, pat, &hir::Ty::any()))
+            .collect::<miette::Result<Vec<_>>>()
+            .map(Pat::Tuple),
         ast::PatKind::Variant(ref path, ref pats) => {
             let (adt, index) = find_variant(cx.unit, cx.module, path)?;
 
@@ -648,14 +663,15 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
 enum Pat {
     Bind(Option<&'static str>),
     Bool(bool),
+    Tuple(Vec<Pat>),
     Variant(usize, usize, Vec<(hir::Ty, Pat)>),
 }
 
 fn build_match_tree(
     cx: &mut BodyCx,
-    input: usize,
+    input: hir::Expr,
     pat: Pat,
-    pats: &mut dyn Iterator<Item = (usize, Pat)>,
+    pats: &mut dyn Iterator<Item = (hir::Expr, Pat)>,
     tree: &mut Match,
     body: &ast::Expr,
 ) -> miette::Result<hir::Ty> {
@@ -663,7 +679,7 @@ fn build_match_tree(
         Pat::Bool(value) => {
             let Match::Bool {
                 r#true, r#false, ..
-            } = tree.as_bool(input)?
+            } = tree.as_bool(&input)?
             else {
                 unreachable!()
             };
@@ -683,33 +699,46 @@ fn build_match_tree(
                 }
             }
         }
+        Pat::Tuple(items) => {
+            let items = items
+                .into_iter()
+                .enumerate()
+                .map(|(i, pat)| {
+                    let kind = hir::ExprKind::TupleField(Box::new(input.clone()), i);
+                    let ty = hir::Ty::Tuple(Box::new(input.ty.clone()), i);
+                    cx.unit.normalize(ty.clone());
+
+                    let input = hir::Expr { kind, ty };
+                    (input, pat)
+                })
+                .collect::<Vec<_>>();
+
+            let mut pats = items.into_iter().chain(pats);
+
+            let (input, pat) = pats.next().unwrap();
+            build_match_tree(cx, input, pat, &mut pats, tree, body)
+        }
         Pat::Variant(adt, variant, fields) => {
             let variants = cx.unit.adts[adt].variants.len();
-            let Match::Adt { variants, .. } = tree.as_adt(input, adt, variants)? else {
+            let Match::Adt { variants, .. } = tree.as_adt(&input, adt, variants)? else {
                 unreachable!()
             };
 
-            let (locals, subtree) = match variants[variant] {
+            let subtree = match variants[variant] {
                 Some(ref mut pair) => pair,
                 None => {
-                    let mut locals = Vec::new();
-
-                    for (ty, _) in &fields {
-                        let id = cx.locals.len();
-                        let ty = ty.clone();
-                        cx.locals.push(hir::Local { name: "", ty });
-                        locals.push(id);
-                    }
-
-                    variants[variant] = Some((locals, Match::None));
+                    variants[variant] = Some(Match::None);
                     variants[variant].as_mut().unwrap()
                 }
             };
 
-            let fields = fields
-                .into_iter()
-                .enumerate()
-                .map(move |(i, (_ty, pat))| (locals[i], pat));
+            let fields = fields.into_iter().enumerate().map(move |(i, (ty, pat))| {
+                let kind = hir::ExprKind::VariantField(Box::new(input.clone()), variant, i);
+                let ty = ty.clone();
+
+                let input = hir::Expr { kind, ty };
+                (input, pat)
+            });
 
             let mut pats = fields.chain(pats);
 
@@ -725,7 +754,20 @@ fn build_match_tree(
         }
         Pat::Bind(name) => {
             if let Some(name) = name {
-                cx.scope.push((name.to_owned(), input));
+                let id = cx.locals.len();
+                let ty = input.ty.clone();
+
+                cx.locals.push(hir::Local {
+                    name,
+                    ty: ty.clone(),
+                });
+
+                cx.scope.push((name.to_owned(), id));
+
+                let kind = hir::ExprKind::Let(id, Box::new(input));
+                let expr = hir::Expr { kind, ty };
+
+                *tree = Match::Bind(expr, Box::new(tree.clone()));
             }
 
             match pats.next() {
@@ -734,7 +776,13 @@ fn build_match_tree(
                     assert!(matches!(tree.default(), Match::None));
                     let expr = lower_expr(cx, body)?;
                     let ty = expr.ty.clone();
-                    *tree.default() = Match::Leaf(expr);
+
+                    tree.visit(&mut |tree| {
+                        if let Match::None = tree {
+                            *tree = Match::Leaf(expr.clone());
+                        }
+                    });
+
                     Ok(ty)
                 }
             }
@@ -746,6 +794,17 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
     match tree {
         Match::None => Ok(None),
         Match::Leaf(expr) => Ok(Some(expr)),
+        Match::Bind(expr, tree) => {
+            let Some(tree) = build_match_expr(cx, *tree)? else {
+                return Ok(None);
+            };
+
+            let ty = tree.ty.clone();
+            let exprs = vec![expr, tree];
+            let kind = hir::ExprKind::Block(exprs);
+
+            Ok(Some(hir::Expr { kind, ty }))
+        }
         Match::Bool {
             input,
             r#true,
@@ -759,12 +818,16 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
                 (None, None) => unreachable!(),
             };
 
+            let ty = hir::Ty::any();
+
             let r#true = build_match_expr(cx, *r#true)?.map(Box::new).unwrap();
             let r#false = build_match_expr(cx, *r#false)?.map(Box::new).unwrap();
 
+            cx.unit.unify(ty.clone(), r#true.ty.clone());
+            cx.unit.unify(ty.clone(), r#false.ty.clone());
+
             let r#match = hir::Match::Bool(r#true, r#false);
-            let kind = hir::ExprKind::Match(input, r#match);
-            let ty = hir::Ty::bool();
+            let kind = hir::ExprKind::Match(Box::new(input), r#match);
 
             Ok(Some(hir::Expr { kind, ty }))
         }
@@ -779,10 +842,10 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
 
             for variant in variants {
                 match variant {
-                    Some((locals, subtree)) => {
+                    Some(subtree) => {
                         let expr = build_match_expr(cx, subtree)?.unwrap();
                         cx.unit.unify(ty.clone(), expr.ty.clone());
-                        exprs.push(Some((locals, expr)));
+                        exprs.push(Some(expr));
                     }
                     None => exprs.push(None),
                 }
@@ -795,36 +858,37 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
             }
 
             let r#match = hir::Match::Adt(adt, exprs, default);
-            let kind = hir::ExprKind::Match(input, r#match);
+            let kind = hir::ExprKind::Match(Box::new(input), r#match);
             Ok(Some(hir::Expr { kind, ty }))
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Match {
     None,
+    Bind(hir::Expr, Box<Match>),
     Leaf(hir::Expr),
     Bool {
-        input: usize,
+        input: hir::Expr,
         r#true: Option<Box<Match>>,
         r#false: Option<Box<Match>>,
         default: Box<Match>,
     },
     Adt {
-        input: usize,
+        input: hir::Expr,
         adt: usize,
-        variants: Vec<Option<(Vec<usize>, Match)>>,
+        variants: Vec<Option<Match>>,
         default: Box<Match>,
     },
 }
 
 impl Match {
-    fn as_bool(&mut self, input: usize) -> miette::Result<&mut Match> {
+    fn as_bool(&mut self, input: &hir::Expr) -> miette::Result<&mut Match> {
         match self {
             Match::None | Match::Leaf(_) => {
                 *self = Self::Bool {
-                    input,
+                    input: input.clone(),
                     r#true: None,
                     r#false: None,
                     default: Box::new(self.clone()),
@@ -832,6 +896,7 @@ impl Match {
 
                 Ok(self)
             }
+            Match::Bind(_, tree) => tree.as_bool(input),
             Match::Bool { .. } => Ok(self),
             _ => Err(miette::miette!(
                 severity = Severity::Error,
@@ -843,14 +908,14 @@ impl Match {
 
     fn as_adt(
         &mut self,
-        input: usize,
+        input: &hir::Expr,
         index: usize,
         variants: usize,
     ) -> miette::Result<&mut Match> {
         match self {
             Match::None | Match::Leaf(_) => {
                 *self = Self::Adt {
-                    input,
+                    input: input.clone(),
                     adt: index,
                     variants: vec![None; variants],
                     default: Box::new(self.clone()),
@@ -858,6 +923,7 @@ impl Match {
 
                 Ok(self)
             }
+            Match::Bind(_, tree) => tree.as_adt(input, index, variants),
             Match::Adt { adt, .. } => {
                 if *adt != index {
                     return Err(miette::miette!(
@@ -879,10 +945,77 @@ impl Match {
         }
     }
 
+    fn visit(&mut self, f: &mut impl FnMut(&mut Match)) {
+        match self {
+            Match::None | Match::Leaf(_) => {}
+            Match::Bind(_, tree) => tree.visit(f),
+            Match::Bool {
+                r#true,
+                r#false,
+                default,
+                ..
+            } => {
+                if let Some(r#true) = r#true {
+                    r#true.visit(f);
+                }
+
+                if let Some(r#false) = r#false {
+                    r#false.visit(f);
+                }
+
+                default.visit(f);
+            }
+            Match::Adt {
+                variants, default, ..
+            } => {
+                for variant in variants.iter_mut().flatten() {
+                    variant.visit(f);
+                }
+
+                default.visit(f);
+            }
+        }
+
+        f(self);
+    }
+
     fn default(&mut self) -> &mut Match {
         match self {
             Match::None | Match::Leaf(_) => self,
+            Match::Bind(_, default) => default.default(),
             Match::Bool { default, .. } | Match::Adt { default, .. } => default,
+        }
+    }
+}
+
+impl std::fmt::Debug for Match {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Match::None => write!(f, "None"),
+            Match::Leaf(_) => write!(f, "Leaf(..)"),
+            Match::Bind(_, tree) => f.debug_tuple("Bind").field(tree).finish(),
+            Match::Bool {
+                r#true,
+                r#false,
+                default,
+                ..
+            } => f
+                .debug_struct("Bool")
+                .field("r#true", &r#true)
+                .field("r#false", &r#false)
+                .field("default", &default)
+                .finish(),
+            Match::Adt {
+                adt,
+                variants,
+                default,
+                ..
+            } => f
+                .debug_struct("Adt")
+                .field("adt", adt)
+                .field("variants", variants)
+                .field("default", default)
+                .finish(),
         }
     }
 }

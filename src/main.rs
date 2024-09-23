@@ -36,11 +36,12 @@ fn main() -> miette::Result<()> {
     infer::infer(&mut unit)?;
 
     let main = unit.modules[module].funcs["main"];
+
     let rir = rir::Unit::from_hir(unit)?;
     let mir = build::build(&rir, main)?;
 
     let interpreter = Interpreter::new(&mir);
-    let value = interpreter.run(mir.funcs.len() - 1);
+    let value = interpreter.run(0);
 
     println!("{:?}", value);
 

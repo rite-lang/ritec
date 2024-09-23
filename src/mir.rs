@@ -16,6 +16,20 @@ pub struct Func {
     pub body: Expr,
 }
 
+impl Default for Func {
+    fn default() -> Self {
+        Self {
+            input: Vec::new(),
+            output: Ty::Void,
+            locals: Vec::new(),
+            body: Expr {
+                kind: ExprKind::Const(Constant::Void),
+                ty: Ty::Void,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
     Void,
@@ -50,13 +64,14 @@ pub enum ExprKind {
     Let(usize, Box<Expr>),
     Adt(usize, Vec<Expr>),
     Field(Box<Expr>, usize),
-    Match(usize, Match),
+    VariantField(Box<Expr>, usize, usize),
+    Match(Box<Expr>, Match),
 }
 
 #[derive(Debug)]
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
-    Adt(Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
+    Adt(Vec<Option<Expr>>, Option<Box<Expr>>),
 }
 
 #[derive(Clone, Debug)]

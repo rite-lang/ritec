@@ -74,6 +74,10 @@ impl TyEnv {
                 let ty = self.use_ty(generics, ty);
                 hir::Ty::Field(Box::new(ty), field)
             }
+            hir::Ty::Tuple(ty, index) => {
+                let ty = self.use_ty(generics, ty);
+                hir::Ty::Tuple(Box::new(ty), *index)
+            }
             hir::Ty::Call(func, arguments) => {
                 let func = self.use_ty(generics, func);
                 let arguments = arguments
@@ -262,6 +266,11 @@ fn normalize(unit: &mut hir::Unit, ty: &hir::Ty) -> Result<hir::Ty, RetryOrError
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
+        hir::Ty::Tuple(base, index) => {
+            let normalized = normalize_tuple(unit, base, *index)?;
+            (unit.env.substitutions).insert(ty.clone(), normalized.clone());
+            Ok(normalized)
+        }
         hir::Ty::Call(callee, arguments) => {
             let normalized = normalize_call(unit, callee, arguments)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
@@ -298,6 +307,13 @@ fn with_func(unit: &mut hir::Unit, ty: &hir::Ty, new_func: usize) -> hir::Ty {
             unit.normalize(ty.clone());
             ty
         }
+        hir::Ty::Tuple(base, index) => {
+            let base = with_func(unit, base, new_func);
+
+            let ty = hir::Ty::Tuple(Box::new(base), *index);
+            unit.normalize(ty.clone());
+            ty
+        }
         hir::Ty::Call(callee, arguments) => {
             let callee = with_func(unit, callee, new_func);
             let arguments = arguments
@@ -331,11 +347,32 @@ fn normalize_field(
         hir::Ty::Inferred(_, _, _) => return Err(RetryOrError::Retry),
         hir::Ty::Partial(hir::Part::Adt(index), generics) => (index, generics),
         hir::Ty::Partial(_, _) => return Err(miette::miette!("expected an ADT").into()),
-        hir::Ty::Field(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => unreachable!(),
+        hir::Ty::Field(_, _) | hir::Ty::Tuple(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
+            unreachable!()
+        }
     };
 
     let (_, ty) = unit.adts[index].find_field(field)?;
     Ok(ty.specialize(&generics))
+}
+
+fn normalize_tuple(
+    unit: &mut hir::Unit,
+    base: &hir::Ty,
+    index: usize,
+) -> Result<hir::Ty, RetryOrError> {
+    let base = normalize(unit, base)?;
+
+    let (index, generics) = match base {
+        hir::Ty::Inferred(_, _, _) => return Err(RetryOrError::Retry),
+        hir::Ty::Partial(hir::Part::Tuple, generics) => (index, generics),
+        hir::Ty::Partial(_, _) => return Err(miette::miette!("expected a tuple").into()),
+        hir::Ty::Field(_, _) | hir::Ty::Tuple(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
+            unreachable!()
+        }
+    };
+
+    Ok(generics[index].clone())
 }
 
 fn normalize_call(
@@ -349,7 +386,9 @@ fn normalize_call(
         hir::Ty::Inferred(_, _, _) => return Err(RetryOrError::Retry),
         hir::Ty::Partial(hir::Part::Func, arguments) => arguments,
         hir::Ty::Partial(_, _) => return Err(miette::miette!("expected a function").into()),
-        hir::Ty::Field(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => unreachable!(),
+        hir::Ty::Field(_, _) | hir::Ty::Tuple(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
+            unreachable!()
+        }
     };
 
     let output = callee_arguments
@@ -383,7 +422,9 @@ fn normalize_pipe(
         hir::Ty::Inferred(_, _, _) => return Err(RetryOrError::Retry),
         hir::Ty::Partial(hir::Part::Func, arguments) => arguments,
         hir::Ty::Partial(_, _) => return Err(miette::miette!("expected a function").into()),
-        hir::Ty::Field(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => unreachable!(),
+        hir::Ty::Field(_, _) | hir::Ty::Tuple(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
+            unreachable!()
+        }
     };
 
     let output = rhs_arguments.pop().expect("funcs have least one argument");

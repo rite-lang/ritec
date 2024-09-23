@@ -101,6 +101,7 @@ pub enum Ty {
     Inferred(Tid, Inferred, Option<usize>),
     Partial(Part, Vec<Ty>),
     Field(Box<Ty>, &'static str),
+    Tuple(Box<Ty>, usize),
     Call(Box<Ty>, Vec<Ty>),
     Pipe(Box<Ty>, Box<Ty>),
 }
@@ -148,17 +149,19 @@ pub enum ExprKind {
     List(Vec<Expr>),
     Block(Vec<Expr>),
     Field(Box<Expr>, &'static str),
+    VariantField(Box<Expr>, usize, usize),
+    TupleField(Box<Expr>, usize),
     Call(Box<Expr>, Vec<Expr>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(usize, Box<Expr>),
-    Match(usize, Match),
+    Match(Box<Expr>, Match),
 }
 
 #[derive(Clone, Debug)]
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
-    Adt(usize, Vec<Option<(Vec<usize>, Expr)>>, Option<Box<Expr>>),
+    Adt(usize, Vec<Option<Expr>>, Option<Box<Expr>>),
 }
 
 impl Unit {
@@ -265,6 +268,10 @@ impl Ty {
                 let base = adt.specialize(generics);
                 Ty::Field(Box::new(base), field)
             }
+            Ty::Tuple(base, index) => {
+                let base = base.specialize(generics);
+                Ty::Tuple(Box::new(base), *index)
+            }
             Ty::Call(callee, arguments) => {
                 let callee = callee.specialize(generics);
                 let arguments = arguments
@@ -292,6 +299,7 @@ impl std::fmt::Display for Ty {
             },
             Ty::Partial(part, args) => write!(f, "{}", format_partial(part, args)),
             Ty::Field(ty, field) => write!(f, "{}.{}", ty, field),
+            Ty::Tuple(ty, index) => write!(f, "{}.{}", ty, index),
             Ty::Call(func, args) => {
                 let args = args
                     .iter()

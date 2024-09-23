@@ -60,6 +60,7 @@ pub enum Vis {
 #[derive(Debug)]
 pub enum Ty {
     Void,
+    Bool,
     Int(IntKind),
     Tuple(Vec<Ty>),
     Item(Path),
@@ -79,7 +80,7 @@ pub enum Expr {
     Paren(Box<Expr>, Span),
     Item(Path),
     Tuple(Vec<Expr>),
-    List(Vec<Expr>),
+    List(Vec<Expr>, Option<Box<Expr>>, Span),
     Block(Vec<Expr>),
     Field(Box<Expr>, &'static str),
     Call(Box<Expr>, Vec<Option<Expr>>),
@@ -136,6 +137,7 @@ pub struct Pat {
 pub enum PatKind {
     Bind(Option<&'static str>),
     Bool(bool),
+    Tuple(Vec<Pat>),
     Variant(Path, Vec<Pat>),
 }
 

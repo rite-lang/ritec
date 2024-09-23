@@ -1,12 +1,10 @@
-type Bool =
-  | True
-  | False
-
-type Foo =
-  | Bar(a: Bool, b: int)
-  | Baz
-
 fn main()
-  match true
-  | true -> Bar(True, 1)
-  | false -> Bar(False, 2)
+  let x = 10 |> fib
+
+fn fib(a)
+  match a == 0
+  | true -> 0
+  | false ->
+    match a == 1
+    | true -> 1
+    | false -> fib(a - 1) + fib(a - 2)
