@@ -2,17 +2,23 @@ pub type Result =
   | Ok(ok: 'a)
   | Err(err: 'b)
 
-pub fn is_ok(result: Result) -> bool
+pub fn is_ok(result: Result<'a, 'b>) -> bool
   match result
   | Ok(_) -> true
   | Err(_) -> false
 
-pub fn map(f: fn('a) -> 'b, result: Result<'a, 'e>) -> Result<'b, 'e>
+pub fn map(
+  f: fn('a) -> 'b
+  result: Result<'a, 'e>
+) -> Result<'b, 'e>
   match result
   | Ok(ok) -> Ok(f(ok))
   | Err(err) -> Err(err)
 
-pub fn try(f: fn('a) -> Result<'b, 'e>, result: Result<'a, 'e>) -> Result<'b, 'e>
+pub fn try(
+  f: fn('a) -> Result<'b, 'e>
+  result: Result<'a, 'e>
+) -> Result<'b, 'e>
   match result
   | Ok(ok) -> f(ok)
   | Err(err) -> Err(err)

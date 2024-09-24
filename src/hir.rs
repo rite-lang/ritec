@@ -68,6 +68,7 @@ pub struct Func {
 
 #[derive(Debug)]
 pub struct Local {
+    pub mutable: bool,
     pub name: &'static str,
     pub ty: Ty,
 }
@@ -136,6 +137,7 @@ pub enum Part {
     Tuple,
     Func,
     Str,
+    Mut,
     Int(IntKind),
     Generic(usize),
     Adt(usize),
@@ -168,15 +170,19 @@ pub enum ExprKind {
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
+    Mut(Box<Expr>),
+    Deref(Box<Expr>),
     Let(usize, Box<Expr>),
+    Assign(Box<Expr>, Box<Expr>),
+    Closure(usize, Vec<Expr>),
     Match(Box<Expr>, Match),
 }
 
 #[derive(Clone, Debug)]
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
-    Adt(usize, Vec<Option<Expr>>, Option<Box<Expr>>),
     List(Box<Expr>, Box<Expr>),
+    Adt(usize, Vec<Option<Expr>>, Option<Box<Expr>>),
 }
 
 impl Unit {
@@ -362,6 +368,7 @@ pub fn format_partial(part: &Part, args: &[Ty]) -> String {
             format!("fn({}) -> {}", input, output)
         }
         Part::Int(kind) => format!("{}", kind),
+        Part::Mut => format!("&{}", args[0]),
         Part::Generic(id) => format!(
             "{}<{}>",
             id,

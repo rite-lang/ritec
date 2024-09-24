@@ -8,11 +8,11 @@ mod interner;
 mod interpret;
 mod lex;
 mod lower;
-mod mir;
 mod number;
 mod parse;
 mod rir;
 mod span;
+mod specialize;
 mod token;
 
 use std::{fs, path::Path};
@@ -37,12 +37,12 @@ fn main() -> miette::Result<()> {
     let module = compiler.unit.modules[test].modules["test"];
     let main = compiler.unit.modules[module].funcs["main"];
 
-    let mir = compiler.compile(main)?;
+    let (main, rir) = compiler.compile(main)?;
 
-    let interpreter = Interpreter::new(&mir);
-    let value = interpreter.run(0);
+    let interpreter = Interpreter::new(&rir);
+    let output = interpreter.interpret(main);
 
-    println!("Output: {}", value);
+    println!("{}", output);
 
     Ok(())
 }
@@ -128,10 +128,10 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile(mut self, main: usize) -> miette::Result<mir::Mir> {
+    fn compile(mut self, main: usize) -> miette::Result<(usize, rir::Unit<rir::Specific>)> {
         infer::infer(&mut self.unit)?;
 
-        let rir = rir::Unit::from_hir(self.unit)?;
-        build::build(&rir, main)
+        let rir = build::build(&self.unit)?;
+        Ok(specialize::specialize(rir, main))
     }
 }

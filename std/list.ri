@@ -13,13 +13,27 @@ pub fn map(f: fn('a) -> 'b, xs: ['a]) -> ['b]
   | [x, ..xs] -> [f(x), ..map(f, xs)]
   | [] -> []
 
-pub fn try_map(f: fn('a) -> result:Result<'b, 'c>, xs: ['a]) -> result:Result<['b], 'c>
+pub fn try_map(
+  f: fn('a) -> result:Result<'b, 'c>
+  xs: ['a]
+) -> result:Result<['b], 'c>
   match xs
   | [] -> result:Ok([])
   | [x, ..xs] ->
     match f(x)
     | result:Err(e) -> result:Err(e)
     | result:Ok(y) -> try_map(f, xs) |> result:map(prepend(y))
+
+pub fn filter_map(
+  f: fn('a) -> result:Result<'b, 'e>
+  xs: ['a]
+) -> ['b]
+  match xs
+  | [] -> []
+  | [x, ..xs] ->
+    match f(x)
+    | result:Err(_) -> filter_map(f, xs)
+    | result:Ok(y) -> [y, ..filter_map(f, xs)]
 
 pub fn prepend(x, xs)
   [x, ..xs]

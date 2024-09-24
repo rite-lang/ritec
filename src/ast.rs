@@ -69,6 +69,7 @@ pub enum Ty {
     Void,
     Bool,
     Int(IntKind),
+    Mut(Box<Ty>),
     Tuple(Vec<Ty>),
     Item(Path, Option<Vec<Ty>>),
     List(Box<Ty>),
@@ -97,7 +98,10 @@ pub enum Expr {
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Vec<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
+    Unary(UnOp, Box<Expr>),
     Let(&'static str, Box<Expr>),
+    Mut(&'static str, Box<Expr>),
+    Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>),
     Closure(Vec<Argument>, Box<Expr>),
 }
@@ -130,6 +134,12 @@ impl BinOp {
             BinOp::Mul | BinOp::Div | BinOp::Rem => 6,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnOp {
+    Mut,
+    Deref,
 }
 
 #[derive(Debug)]

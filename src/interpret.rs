@@ -1,4 +1,12 @@
-use crate::{ast::BinOp, mir};
+use std::{cell::RefCell, iter::Peekable, rc::Rc};
+
+use crate::{
+    ast::BinOp,
+    rir::{
+        self, Block, Constant, Location, Operand, Place, Projection, ProjectionKind, Specific,
+        Statement, Unit,
+    },
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -9,6 +17,7 @@ pub enum Value {
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
     String(&'static str),
+    Mut(Rc<RefCell<Value>>),
 }
 
 impl std::fmt::Display for Value {
@@ -31,7 +40,7 @@ impl std::fmt::Display for Value {
             Value::List(None) => write!(f, "[]"),
             Value::List(Some(list)) => write!(f, "[{}]", list),
             Value::Adt(variant, fields) => {
-                write!(f, "Adt({}, [", variant)?;
+                write!(f, "{{{}|", variant)?;
 
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {
@@ -41,8 +50,9 @@ impl std::fmt::Display for Value {
                     write!(f, "{}", field)?;
                 }
 
-                write!(f, "])")
+                write!(f, "}}")
             }
+            Value::Mut(value) => write!(f, "mut {}", value.borrow()),
         }
     }
 }
@@ -73,273 +83,364 @@ struct Frame {
 }
 
 pub struct Interpreter<'a> {
-    mir: &'a mir::Mir,
+    mir: &'a Unit<Specific>,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(mir: &'a mir::Mir) -> Self {
+    pub fn new(mir: &'a Unit<Specific>) -> Self {
         Self { mir }
     }
 
-    pub fn run(&self, main: usize) -> Value {
-        let func = &self.mir.funcs[main];
-
+    pub fn interpret(&self, main: usize) -> Value {
         let mut frame = Frame {
-            locals: vec![Value::Void; func.locals.len()],
+            locals: vec![Value::Void; self.mir.funcs[main].locals.len()],
             arguments: Vec::new(),
             captured: Vec::new(),
         };
 
-        self.eval(&mut frame, &func.body)
+        self.interpret_block(&mut frame, &self.mir.funcs[main].body)
+            .unwrap()
     }
 
-    fn eval(&self, frame: &mut Frame, expr: &mir::Expr) -> Value {
-        match &expr.kind {
-            mir::ExprKind::Const(constant) => match constant {
-                mir::Constant::Void => Value::Void,
-                mir::Constant::Int(negative, base, value) => {
-                    let mut n = 0;
-
-                    for &digit in value {
-                        n = n * base.radix() as i64 + digit as i64;
-                    }
-
-                    if *negative {
-                        n = -n;
-                    }
-
-                    Value::Int(n)
+    fn interpret_block(&self, frame: &mut Frame, block: &Block<Specific>) -> Option<Value> {
+        for statement in block.statements.iter() {
+            match statement {
+                Statement::Use { value } => {
+                    self.interpret_value(frame, value);
                 }
-                mir::Constant::String(value) => Value::String(value),
-                mir::Constant::Bool(value) => Value::Bool(*value),
-            },
-            mir::ExprKind::Func(func, captured) => {
-                let captured = captured.iter().map(|expr| self.eval(frame, expr)).collect();
+                Statement::Return { value } => match value {
+                    Some(value) => return Some(self.interpret_value(frame, value)),
+                    None => return Some(Value::Void),
+                },
+                Statement::Assign { place, value } => {
+                    let value = self.interpret_value(frame, value);
+                    self.assign_place(frame, place, value);
+                }
+                Statement::MatchBool {
+                    input,
+                    r#true,
+                    r#false,
+                } => {
+                    let Value::Bool(input) = self.interpret_operand(frame, input) else {
+                        panic!("expected boolean")
+                    };
 
-                Value::Func(*func, captured)
+                    match input {
+                        true => {
+                            if let Some(value) = self.interpret_block(frame, r#true) {
+                                return Some(value);
+                            }
+                        }
+                        false => {
+                            if let Some(value) = self.interpret_block(frame, r#false) {
+                                return Some(value);
+                            }
+                        }
+                    }
+                }
+                Statement::MatchList { input, some, none } => {
+                    let Value::List(input) = self.interpret_operand(frame, input) else {
+                        panic!("expected list")
+                    };
+
+                    match input.is_some() {
+                        true => {
+                            if let Some(value) = self.interpret_block(frame, some) {
+                                return Some(value);
+                            }
+                        }
+                        false => {
+                            if let Some(value) = self.interpret_block(frame, none) {
+                                return Some(value);
+                            }
+                        }
+                    }
+                }
+                Statement::MatchAdt {
+                    input,
+                    variants,
+                    default,
+                } => {
+                    let Value::Adt(variant, _) = self.interpret_operand(frame, input) else {
+                        panic!("expected adt")
+                    };
+
+                    if let Some(block) = &variants[variant] {
+                        if let Some(value) = self.interpret_block(frame, block) {
+                            return Some(value);
+                        }
+                    } else if let Some(block) = default {
+                        if let Some(value) = self.interpret_block(frame, block) {
+                            return Some(value);
+                        }
+                    }
+                }
             }
-            mir::ExprKind::Local(index) => frame.locals[*index].clone(),
-            mir::ExprKind::Argument(index) => frame.arguments[*index].clone(),
-            mir::ExprKind::Captured(index) => frame.captured[*index].clone(),
-            mir::ExprKind::List(items, rest) => {
-                let mut values = match rest {
-                    Some(rest) => {
-                        let Value::List(rest) = self.eval(frame, rest) else {
-                            panic!("expected list");
+        }
+
+        None
+    }
+
+    fn interpret_value(&self, frame: &mut Frame, value: &rir::Value<Specific>) -> Value {
+        match value {
+            rir::Value::Use(operand) => self.interpret_operand(frame, operand),
+            rir::Value::Func(index, captures, _) => {
+                let captures = captures
+                    .iter()
+                    .map(|op| self.interpret_operand(frame, op))
+                    .collect();
+
+                Value::Func(*index, captures)
+            }
+            rir::Value::List(items, tail) => {
+                let mut list = match tail {
+                    Some(tail) => {
+                        let Value::List(tail) = self.interpret_operand(frame, tail) else {
+                            panic!("expected list")
                         };
 
-                        rest
+                        tail
                     }
                     None => None,
                 };
 
                 for item in items.iter().rev() {
-                    let value = self.eval(frame, item);
-                    values = Some(Box::new(List {
-                        head: value,
-                        tail: values,
+                    let item = self.interpret_operand(frame, item);
+                    list = Some(Box::new(List {
+                        head: item,
+                        tail: list,
                     }));
                 }
 
-                Value::List(values)
+                Value::List(list)
             }
-            mir::ExprKind::ListHead(list) => {
-                let Value::List(Some(list)) = self.eval(frame, list) else {
-                    panic!("expected list");
+            rir::Value::ListHead(list) => {
+                let Value::List(list) = self.interpret_operand(frame, list) else {
+                    panic!("expected list")
                 };
 
-                list.head.clone()
+                list.unwrap().head
             }
-            mir::ExprKind::ListTail(list) => {
-                let Value::List(Some(list)) = self.eval(frame, list) else {
-                    panic!("expected list");
+            rir::Value::ListTail(tail) => {
+                let Value::List(list) = self.interpret_operand(frame, tail) else {
+                    panic!("expected list")
                 };
 
-                Value::List(list.tail.clone())
+                Value::List(list.unwrap().tail)
             }
-            mir::ExprKind::Block(exprs) => {
-                let mut value = Value::Void;
-
-                for expr in exprs {
-                    value = self.eval(frame, expr);
-                }
-
-                value
-            }
-            mir::ExprKind::Call(func, args) => {
-                let Value::Func(func, captured) = self.eval(frame, func) else {
-                    panic!("expected function");
-                };
-
-                let func = &self.mir.funcs[func];
-
-                let mut arguments = Vec::new();
-
-                for arg in args {
-                    arguments.push(self.eval(frame, arg));
-                }
-
-                let mut frame = Frame {
-                    locals: vec![Value::Void; func.locals.len()],
-                    arguments,
-                    captured,
-                };
-
-                self.eval(&mut frame, &func.body)
-            }
-            mir::ExprKind::Binary(op, lhs, rhs) => {
-                let lhs = self.eval(frame, lhs);
-                let rhs = self.eval(frame, rhs);
+            rir::Value::Binary(op, lhs, rhs) => {
+                let lhs = self.interpret_operand(frame, lhs);
+                let rhs = self.interpret_operand(frame, rhs);
 
                 match op {
                     BinOp::Add => {
                         let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
+                            panic!("expected integers")
                         };
 
                         Value::Int(lhs + rhs)
                     }
                     BinOp::Sub => {
                         let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
+                            panic!("expected integers")
                         };
 
                         Value::Int(lhs - rhs)
                     }
                     BinOp::Mul => {
                         let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
+                            panic!("expected integers")
                         };
 
                         Value::Int(lhs * rhs)
                     }
                     BinOp::Div => {
                         let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
+                            panic!("expected integers")
                         };
 
                         Value::Int(lhs / rhs)
                     }
                     BinOp::Rem => {
                         let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
+                            panic!("expected integers")
                         };
 
                         Value::Int(lhs % rhs)
                     }
-                    BinOp::Eq => Value::Bool(lhs == rhs),
-                    BinOp::Ne => Value::Bool(lhs != rhs),
-                    BinOp::Lt => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
-                        };
-
-                        Value::Bool(lhs < rhs)
-                    }
-                    BinOp::Le => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
-                        };
-
-                        Value::Bool(lhs <= rhs)
-                    }
-                    BinOp::Gt => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
-                        };
-
-                        Value::Bool(lhs > rhs)
-                    }
-                    BinOp::Ge => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integer");
-                        };
-
-                        Value::Bool(lhs >= rhs)
-                    }
                     BinOp::And => {
                         let (Value::Bool(lhs), Value::Bool(rhs)) = (lhs, rhs) else {
-                            panic!("expected boolean");
+                            panic!("expected booleans")
                         };
 
                         Value::Bool(lhs && rhs)
                     }
                     BinOp::Or => {
                         let (Value::Bool(lhs), Value::Bool(rhs)) = (lhs, rhs) else {
-                            panic!("expected boolean");
+                            panic!("expected booleans")
                         };
 
                         Value::Bool(lhs || rhs)
                     }
+                    BinOp::Eq => Value::Bool(lhs == rhs),
+                    BinOp::Ne => Value::Bool(lhs != rhs),
+                    BinOp::Lt => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integers")
+                        };
+
+                        Value::Bool(lhs < rhs)
+                    }
+                    BinOp::Le => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integers")
+                        };
+
+                        Value::Bool(lhs <= rhs)
+                    }
+                    BinOp::Gt => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integers")
+                        };
+
+                        Value::Bool(lhs > rhs)
+                    }
+                    BinOp::Ge => {
+                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
+                            panic!("expected integers")
+                        };
+
+                        Value::Bool(lhs >= rhs)
+                    }
                 }
             }
-            mir::ExprKind::Let(index, expr) => {
-                let value = self.eval(frame, expr);
-                frame.locals[*index] = value;
-                Value::Void
-            }
-            mir::ExprKind::Adt(variant, fields) => {
-                let mut values = Vec::new();
-
-                for field in fields {
-                    values.push(self.eval(frame, field));
-                }
-
-                Value::Adt(*variant, values)
-            }
-            mir::ExprKind::Field(adt, field) => {
-                let Value::Adt(_, fields) = self.eval(frame, adt) else {
-                    panic!("expected ADT");
+            rir::Value::Call(func, args) => {
+                let Value::Func(func, captured) = self.interpret_operand(frame, func) else {
+                    panic!("expected function")
                 };
 
-                fields[*field].clone()
-            }
-            mir::ExprKind::VariantField(adt, variant, field) => {
-                let Value::Adt(tag, fields) = self.eval(frame, adt) else {
-                    panic!("expected ADT");
+                let args = args
+                    .iter()
+                    .map(|op| self.interpret_operand(frame, op))
+                    .collect();
+
+                let mut frame = Frame {
+                    locals: vec![Value::Void; self.mir.funcs[func].locals.len()],
+                    arguments: args,
+                    captured,
                 };
 
-                if tag != *variant {
-                    panic!("expected variant");
-                }
-
-                fields[*field].clone()
+                self.interpret_block(&mut frame, &self.mir.funcs[func].body)
+                    .unwrap()
             }
-            mir::ExprKind::Match(input, r#match) => match r#match {
-                mir::Match::Bool(r#true, r#false) => {
-                    let Value::Bool(value) = self.eval(frame, input) else {
-                        panic!("expected boolean");
+            rir::Value::Mut(place) => {
+                let value = self.interpret_copy_place(frame, place);
+                Value::Mut(Rc::new(RefCell::new(value)))
+            }
+            rir::Value::Tuple(items) => {
+                let items = items
+                    .iter()
+                    .map(|op| self.interpret_operand(frame, op))
+                    .collect();
+
+                Value::Adt(0, items)
+            }
+            rir::Value::Adt(variant, items) => {
+                let items = items
+                    .iter()
+                    .map(|op| self.interpret_operand(frame, op))
+                    .collect();
+
+                Value::Adt(*variant, items)
+            }
+        }
+    }
+
+    fn interpret_operand(&self, frame: &mut Frame, operand: &Operand<Specific>) -> Value {
+        match operand {
+            Operand::Copy(place) => self.interpret_copy_place(frame, place),
+            Operand::Move(place) => self.interpret_copy_place(frame, place),
+            Operand::Constant(constant) => self.interpret_constant(constant),
+        }
+    }
+
+    fn interpret_copy_place(&self, frame: &mut Frame, place: &Place<Specific>) -> Value {
+        let mut value = match place.location {
+            Location::Local(i) => frame.locals[i].clone(),
+            Location::Argument(i) => frame.arguments[i].clone(),
+            Location::Capture(i) => frame.captured[i].clone(),
+        };
+
+        for projection in place.projection.iter() {
+            match projection.kind {
+                ProjectionKind::Field { field, .. } => match &value {
+                    Value::Adt(_, fields) => value = fields[field].clone(),
+                    _ => todo!(),
+                },
+                ProjectionKind::Deref => {
+                    let Value::Mut(mut_value) = value else {
+                        panic!("expected mutable reference");
                     };
 
-                    match value {
-                        true => self.eval(frame, r#true),
-                        false => self.eval(frame, r#false),
-                    }
+                    value = mut_value.borrow().clone();
                 }
-                mir::Match::List(some, none) => {
-                    let Value::List(list) = self.eval(frame, input) else {
-                        panic!("expected list");
-                    };
+            }
+        }
 
-                    match list.is_some() {
-                        true => self.eval(frame, some),
-                        false => self.eval(frame, none),
-                    }
-                }
-                mir::Match::Adt(variants, default) => {
-                    let Value::Adt(tag, _) = self.eval(frame, input) else {
-                        panic!("expected ADT");
-                    };
+        value
+    }
 
-                    match variants[tag] {
-                        Some(ref body) => self.eval(frame, body),
-                        None => match default {
-                            Some(default) => self.eval(frame, default),
-                            None => panic!("no default branch"),
-                        },
+    fn assign_place(&self, frame: &mut Frame, place: &Place<Specific>, value: Value) {
+        let target = match place.location {
+            Location::Local(i) => &mut frame.locals[i],
+            Location::Argument(i) => &mut frame.arguments[i],
+            Location::Capture(i) => &mut frame.captured[i],
+        };
+
+        fn recurse<'a>(
+            target: &mut Value,
+            value: Value,
+            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
+        ) {
+            match projection.next() {
+                Some(proj) => match proj.kind {
+                    ProjectionKind::Field { field, .. } => match target {
+                        Value::Adt(_, fields) => recurse(&mut fields[field], value, projection),
+                        _ => todo!(),
+                    },
+                    ProjectionKind::Deref => {
+                        let Value::Mut(ref target) = target else {
+                            panic!("expected mutable reference");
+                        };
+
+                        recurse(&mut target.borrow_mut(), value, projection);
                     }
+                },
+                None => *target = value,
+            }
+        }
+
+        recurse(target, value, place.projection.iter().peekable());
+    }
+
+    fn interpret_constant(&self, constant: &Constant) -> Value {
+        match constant {
+            Constant::Void => Value::Void,
+            Constant::Bool(b) => Value::Bool(*b),
+            Constant::Int(negative, base, digits) => {
+                let mut n = 0;
+
+                for &digit in digits.iter() {
+                    n = n * base.radix() as i64 + digit as i64;
                 }
-            },
+
+                if *negative {
+                    n = -n;
+                }
+
+                Value::Int(n)
+            }
+            Constant::String(s) => Value::String(s),
         }
     }
 }
