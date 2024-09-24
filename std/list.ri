@@ -3,7 +3,31 @@ pub fn length(xs: ['a]) -> int
   | [_, ..xs] -> 1 + length(xs)
   | [] -> 0
 
-pub fn is_empty(xs: ['a]) -> bool
+pub fn concat(xs: ['a], ys: ['a]) -> ['a]
   match xs
-  | [] -> true
-  | _ -> false
+  | [x, ..xs] -> [x, ..concat(xs, ys)]
+  | [] -> ys
+
+pub fn map(f: fn('a) -> 'b, xs: ['a]) -> ['b]
+  match xs
+  | [x, ..xs] -> [f(x), ..map(f, xs)]
+  | [] -> []
+
+pub fn try_map(f: fn('a) -> result:Result<'b, 'c>, xs: ['a]) -> result:Result<['b], 'c>
+  match xs
+  | [] -> result:Ok([])
+  | [x, ..xs] ->
+    match f(x)
+    | result:Err(e) -> result:Err(e)
+    | result:Ok(y) -> try_map(f, xs) |> result:map(prepend(y))
+
+pub fn prepend(x, xs)
+  [x, ..xs]
+
+pub fn filter(f: fn('a) -> bool, xs: ['a]) -> ['a]
+  match xs
+  | [] -> []
+  | [x, ..xs] ->
+    match f(x)
+    | true -> [x, ..filter(f, xs)]
+    | false -> filter(f, xs)

@@ -68,10 +68,39 @@ pub fn type_construct_ast(
                     module,
                     generics: &mut generics,
                     new_generics: true,
+                    inferring: false,
                     func: None,
                 };
 
-                let fields = lower_arguments(&mut cx, &variant.fields)?;
+                let mut fields: Vec<hir::Argument> = Vec::new();
+
+                for field in &variant.fields {
+                    if let Some(other) = fields.iter().find(|f| f.name == field.name) {
+                        return Err(miette::miette!(
+                            severity = Severity::Error,
+                            code = "invalid::field",
+                            labels = vec![other.span.label("here"), field.span.label("and here")],
+                            "field `{}` already exists",
+                            field.name
+                        )
+                        .with_source_code(field.span));
+                    }
+
+                    let ty = match field.ty {
+                        Some(ref ty) => lower_ty(&mut cx, ty)?,
+                        None => {
+                            let index = cx.add_generic(field.name, field.span)?;
+                            hir::Ty::Partial(hir::Part::Generic(index), Vec::new())
+                        }
+                    };
+
+                    fields.push(hir::Argument {
+                        name: field.name,
+                        ty,
+                        span: field.span,
+                    });
+                }
+
                 let variant = hir::Variant {
                     name: variant.name,
                     fields,
@@ -103,9 +132,27 @@ pub fn func_register_ast(
                 module,
                 generics: &mut generics,
                 new_generics: true,
+                inferring: true,
                 func: Some(id),
             };
-            let input = lower_arguments(&mut cx, &func.input)?;
+
+            let mut input: Vec<hir::Argument> = Vec::new();
+
+            for arg in &func.input {
+                if let Some(other) = input.iter().find(|a| a.name == arg.name) {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "invalid::argument",
+                        labels = vec![other.span.label("here"), arg.span.label("and here")],
+                        "argument `{}` already exists",
+                        arg.name
+                    )
+                    .with_source_code(arg.span));
+                }
+
+                input.push(lower_argument(&mut cx, arg)?);
+            }
+
             let output = lower_output(&mut cx, &func.output)?;
 
             let vis = match func.vis {
@@ -178,7 +225,27 @@ struct TyCx<'a> {
     module: usize,
     generics: &'a mut Vec<hir::Generic>,
     new_generics: bool,
+    inferring: bool,
     func: Option<usize>,
+}
+
+impl<'a> TyCx<'a> {
+    pub fn add_generic(&mut self, name: &'static str, span: Span) -> miette::Result<usize> {
+        if let Some(generic) = self.generics.iter().find(|g| g.name == name) {
+            return Err(miette::miette!(
+                severity = Severity::Error,
+                code = "invalid::generic",
+                labels = vec![generic.span.label("here"), span.label("and here")],
+                "generic `{}` already exists",
+                name
+            )
+            .with_source_code(span));
+        }
+
+        let index = self.generics.len();
+        self.generics.push(hir::Generic { name, span });
+        Ok(index)
+    }
 }
 
 fn lower_arguments(cx: &mut TyCx, ast: &[ast::Argument]) -> miette::Result<Vec<hir::Argument>> {
@@ -230,20 +297,66 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
 
             Ok(hir::Ty::Partial(hir::Part::Tuple, args))
         }
-        ast::Ty::Item(path) => {
+        ast::Ty::Item(path, generics) => {
             let index = find_adt(cx.unit, cx.module, path)?;
 
-            let generics = cx.unit.adts[index]
-                .generics
-                .iter()
-                .map(|_| hir::Ty::Inferred(hir::Tid::new(), hir::Inferred::Any, cx.func))
-                .collect();
+            let generics = match generics {
+                Some(generics) => {
+                    if generics.len() != cx.unit.adts[index].generics.len() {
+                        return Err(miette::miette!(
+                            severity = Severity::Error,
+                            code = "invalid::generic",
+                            labels = [path.span.label("here")],
+                            "expected {} generics, found {}",
+                            cx.unit.adts[index].generics.len(),
+                            generics.len()
+                        )
+                        .with_source_code(path.span));
+                    }
+
+                    generics
+                        .iter()
+                        .map(|ty| lower_ty(cx, ty))
+                        .collect::<miette::Result<Vec<_>>>()?
+                }
+                None => {
+                    if !cx.inferring {
+                        return Err(miette::miette!(
+                            severity = Severity::Error,
+                            code = "invalid::generic",
+                            labels = [path.span.label("here")],
+                            "missing generics"
+                        )
+                        .with_source_code(path.span));
+                    }
+
+                    cx.unit.adts[index]
+                        .generics
+                        .iter()
+                        .map(|_| hir::Ty::Inferred(hir::Tid::new(), hir::Inferred::Any, cx.func))
+                        .collect()
+                }
+            };
 
             Ok(hir::Ty::Partial(hir::Part::Adt(index), generics))
         }
         ast::Ty::List(ty) => {
             let ty = lower_ty(cx, ty)?;
             Ok(hir::Ty::Partial(hir::Part::List, vec![ty]))
+        }
+        ast::Ty::Func(input, output) => {
+            let mut args = Vec::new();
+
+            for ty in input {
+                args.push(lower_ty(cx, ty)?);
+            }
+
+            match output {
+                Some(output) => args.push(lower_ty(cx, output)?),
+                None => args.push(hir::Ty::void()),
+            }
+
+            Ok(hir::Ty::Partial(hir::Part::Func, args))
         }
         ast::Ty::Generic(generic) => {
             if let Some(index) = cx.generics.iter().position(|g| g.name == generic.name) {
@@ -259,8 +372,7 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
                 ));
             }
 
-            let index = cx.generics.len();
-            cx.generics.push(hir::Generic { name: generic.name });
+            let index = cx.add_generic(generic.name, generic.span)?;
             Ok(hir::Ty::Partial(hir::Part::Generic(index), Vec::new()))
         }
     }

@@ -205,6 +205,7 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.expect(Token::RBracket)?;
             Ok(Ty::List(Box::new(ty)))
         }
+        Token::Fn => parse_fn_ty(tokens),
         Token::Void => {
             tokens.consume();
             Ok(Ty::Void)
@@ -217,7 +218,27 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.consume();
             Ok(Ty::Bool)
         }
-        Token::Snake | Token::Pascal => parse_path(tokens).map(Ty::Item),
+        Token::Snake | Token::Pascal => {
+            let path = parse_path(tokens)?;
+
+            if tokens.take(Token::Lt).is_none() {
+                return Ok(Ty::Item(path, None));
+            }
+
+            let mut args = Vec::new();
+
+            while !tokens.is(Token::Gt) {
+                args.push(parse_ty(tokens)?);
+
+                if tokens.take(Token::Comma).is_none() {
+                    break;
+                }
+            }
+
+            tokens.expect(Token::Gt)?;
+
+            Ok(Ty::Item(path, Some(args)))
+        }
         Token::Quote => parse_generic(tokens).map(Ty::Generic),
         _ => Err(miette::miette!(
             severity = Severity::Error,
@@ -252,6 +273,31 @@ fn parse_int_ty(tokens: &mut TokenStream) -> miette::Result<Ty> {
         )
         .with_source_code(span)),
     }
+}
+
+fn parse_fn_ty(tokens: &mut TokenStream) -> miette::Result<Ty> {
+    tokens.expect(Token::Fn)?;
+
+    let mut input = Vec::new();
+
+    tokens.expect(Token::LParen)?;
+
+    while !tokens.is(Token::RParen) {
+        input.push(parse_ty(tokens)?);
+
+        if tokens.take(Token::Comma).is_none() {
+            break;
+        }
+    }
+
+    tokens.expect(Token::RParen)?;
+
+    let output = match tokens.take(Token::Arrow) {
+        Some(_) => Some(Box::new(parse_ty(tokens)?)),
+        None => None,
+    };
+
+    Ok(Ty::Func(input, output))
 }
 
 fn parse_generic(tokens: &mut TokenStream) -> miette::Result<Generic> {

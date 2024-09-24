@@ -103,6 +103,7 @@ pub struct Argument {
 #[derive(Debug)]
 pub struct Generic {
     pub name: &'static str,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -310,9 +311,9 @@ impl Ty {
 impl std::fmt::Display for Ty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Ty::Inferred(tid, kind, _) => match kind {
-                Inferred::Any => write!(f, "_{}", tid.id),
-                Inferred::Int(kind) => write!(f, "{{{}}}", kind),
+            Ty::Inferred(tid, kind, func) => match kind {
+                Inferred::Any => write!(f, "_{}_{:?}", tid.id, func),
+                Inferred::Int(kind) => write!(f, "{{{}; {}; {:?}}}", kind, tid.id, func),
                 Inferred::Float(_) => write!(f, "_"),
             },
             Ty::Partial(part, args) => write!(f, "{}", format_partial(part, args)),

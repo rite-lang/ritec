@@ -131,73 +131,16 @@ fn build_ty_vec(builder: &mut Builder, tys: &[rir::Ty]) -> Vec<mir::Ty> {
     tys.iter().map(|ty| build_ty(builder, ty)).collect()
 }
 
-fn extract_generics(unit: &rir::Unit, ty: &rir::Ty, expected: &mir::Ty) -> Vec<mir::Ty> {
-    fn recurse(unit: &rir::Unit, generics: &mut Vec<Option<mir::Ty>>, ty: &rir::Ty, ex: &mir::Ty) {
-        match (ty, ex) {
-            (rir::Ty::Void, mir::Ty::Void) => {}
-            (rir::Ty::Bool, mir::Ty::Bool) => {}
-            (rir::Ty::Str, mir::Ty::Str) => {}
-            (rir::Ty::Int(kind), mir::Ty::Int(ex)) => {
-                assert_eq!(kind, ex);
-            }
-            (rir::Ty::List(item), mir::Ty::List(ex)) => {
-                recurse(unit, generics, item, ex);
-            }
-            (rir::Ty::Tuple(items), mir::Ty::Tuple(ex)) => {
-                for (ty, ex) in items.iter().zip(ex) {
-                    recurse(unit, generics, ty, ex);
-                }
-            }
-            (rir::Ty::Func(input, output), mir::Ty::Func(ex_input, ex_output)) => {
-                for (ty, ex) in input.iter().zip(ex_input) {
-                    recurse(unit, generics, ty, ex);
-                }
-
-                recurse(unit, generics, output, ex_output);
-            }
-            (rir::Ty::Adt(index, args), mir::Ty::Adt(ex)) => {
-                let mut adt_generics = Vec::new();
-
-                for (variant, ex) in unit.adts[*index].variants.iter().zip(ex) {
-                    for (field, ex) in variant.fields.iter().zip(ex.fields.iter()) {
-                        recurse(unit, &mut adt_generics, &field.ty, ex);
-                    }
-                }
-
-                for (ty, ex) in args.iter().zip(adt_generics) {
-                    let ex = ex.expect("expected generic");
-                    recurse(unit, generics, ty, &ex);
-                }
-            }
-            (rir::Ty::Generic(index), ex) => {
-                if generics.len() <= *index {
-                    generics.resize_with(*index + 1, || None);
-                }
-
-                match generics[*index] {
-                    Some(ref generic) => assert_eq!(generic, ex),
-                    None => generics[*index] = Some(ex.clone()),
-                }
-            }
-            _ => todo!(),
-        }
-    }
-
-    let mut generics = Vec::new();
-    recurse(unit, &mut generics, ty, expected);
-    generics.into_iter().map(Option::unwrap).collect()
-}
-
 fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Expr> {
     match expr.kind {
         rir::ExprKind::Void => build_void_expr(builder, &expr.ty),
         rir::ExprKind::Int(negative, base, ref value) => {
             build_int_expr(builder, &expr.ty, negative, base, value)
         }
-        rir::ExprKind::String(ref value) => build_string_expr(builder, &expr.ty, value),
+        rir::ExprKind::String(value) => build_string_expr(builder, &expr.ty, value),
         rir::ExprKind::Bool(value) => build_bool_expr(builder, &expr.ty, value),
-        rir::ExprKind::Func(index, ref captured) => {
-            build_func_expr(builder, &expr.ty, index, captured)
+        rir::ExprKind::Func(index, ref captured, ref generics) => {
+            build_func_expr(builder, &expr.ty, index, captured, generics)
         }
         rir::ExprKind::Variant(adt, variant) => build_variant_expr(builder, &expr.ty, adt, variant),
         rir::ExprKind::Local(index) => build_local_expr(builder, &expr.ty, index),
@@ -254,7 +197,7 @@ fn build_string_expr(
     ty: &rir::Ty,
     value: &'static str,
 ) -> miette::Result<mir::Expr> {
-    let kind = mir::ExprKind::Const(mir::Constant::String(value.into()));
+    let kind = mir::ExprKind::Const(mir::Constant::String(value));
     let ty = build_ty(builder, ty);
     Ok(mir::Expr { kind, ty })
 }
@@ -264,16 +207,21 @@ fn build_func_expr(
     ty: &rir::Ty,
     index: usize,
     captured: &[rir::Expr],
+    generics: &[rir::Ty],
 ) -> miette::Result<mir::Expr> {
     let ty = build_ty(builder, ty);
-    let generics = extract_generics(builder.unit, &builder.unit.funcs[index].ty(), &ty);
-
-    let index = build_func(builder.mir, builder.funcs, builder.unit, index, &generics)?;
 
     let captured = captured
         .iter()
         .map(|expr| build_expr(builder, expr))
         .collect::<miette::Result<_>>()?;
+
+    let generics = generics
+        .iter()
+        .map(|ty| build_ty(builder, ty))
+        .collect::<Vec<_>>();
+
+    let index = build_func(builder.mir, builder.funcs, builder.unit, index, &generics)?;
 
     let kind = mir::ExprKind::Func(index, captured);
     Ok(mir::Expr { kind, ty })

@@ -51,7 +51,7 @@ pub struct Variant {
     pub fields: Vec<Argument>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Generic {}
 
 #[derive(Debug)]
@@ -60,7 +60,7 @@ pub struct Argument {
     pub span: Option<Span>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Ty {
     Void,
     Bool,
@@ -85,7 +85,7 @@ pub enum ExprKind {
     Int(bool, Base, Vec<u8>),
     String(&'static str),
     Bool(bool),
-    Func(usize, Vec<Expr>),
+    Func(usize, Vec<Expr>, Vec<Ty>),
     Variant(usize, usize),
     Local(usize),
     Argument(usize),
@@ -121,8 +121,32 @@ impl Unit {
             funcs,
         };
 
+        let mut func_generics = Vec::new();
+
         for (index, func) in unit.funcs.iter().enumerate() {
-            rir.funcs[index] = Func::from_hir(&mut rir, &unit, func)?;
+            let mut generics = func.generics.iter().map(|_| (None, Generic {})).collect();
+            rir.funcs[index].input = Argument::from_hir_vec(&unit, &mut generics, &func.input)?;
+            rir.funcs[index].output = Ty::from_hir(&unit, &mut generics, &func.output)?;
+
+            rir.funcs[index].locals = func
+                .locals
+                .iter()
+                .map(|local| Ty::from_hir(&unit, &mut generics, &local.ty))
+                .collect::<miette::Result<_>>()?;
+
+            rir.funcs[index].captures = func
+                .captures
+                .iter()
+                .map(|ty| Ty::from_hir(&unit, &mut generics, ty))
+                .collect::<miette::Result<_>>()?;
+
+            func_generics.push(generics.clone());
+            rir.funcs[index].generics = generics.into_iter().map(|(_, g)| g).collect();
+        }
+
+        for (index, func) in unit.funcs.iter().enumerate() {
+            rir.funcs[index].body =
+                Expr::from_hir(&mut rir, &unit, &mut func_generics[index], &func.body)?;
         }
 
         Ok(rir)
@@ -132,52 +156,9 @@ impl Unit {
 type Generics = Vec<(Option<hir::Tid>, Generic)>;
 
 impl Func {
-    pub fn from_hir(rir: &mut Unit, unit: &hir::Unit, func: &hir::Func) -> miette::Result<Self> {
-        let mut generics = func.generics.iter().map(|_| (None, Generic {})).collect();
-        let input = Argument::from_hir_vec(unit, &mut generics, &func.input)?;
-        let output = Ty::from_hir(unit, &mut generics, &func.output)?;
-
-        let locals = func
-            .locals
-            .iter()
-            .map(|local| Ty::from_hir(unit, &mut generics, &local.ty))
-            .collect::<miette::Result<_>>()?;
-
-        let captures = func
-            .captures
-            .iter()
-            .map(|ty| Ty::from_hir(unit, &mut generics, ty))
-            .collect::<miette::Result<_>>()?;
-
-        let body = Expr::from_hir(rir, unit, &mut generics, &func.body)?;
-
-        let generics = generics.into_iter().map(|(_, g)| g).collect();
-
-        Ok(Self {
-            name: func.name.to_string(),
-            generics,
-            input,
-            output,
-            locals,
-            captures,
-            body,
-        })
-    }
-
     pub fn ty(&self) -> Ty {
         let input = self.input.iter().map(|arg| arg.ty.clone()).collect();
         Ty::Func(input, Box::new(self.output.clone()))
-    }
-
-    fn from_hir_vec(
-        rir: &mut Unit,
-        unit: &hir::Unit,
-        funcs: &[hir::Func],
-    ) -> miette::Result<Vec<Self>> {
-        funcs
-            .iter()
-            .map(|func| Func::from_hir(rir, unit, func))
-            .collect::<miette::Result<_>>()
     }
 }
 
@@ -335,6 +316,52 @@ impl Ty {
             .map(|ty| Ty::from_hir(unit, generics, ty))
             .collect::<miette::Result<_>>()
     }
+
+    fn extract_generics(&self, from: &Self, generics: &mut Vec<Option<Ty>>) {
+        match (self, from) {
+            (Ty::Void, Ty::Void) => {}
+            (Ty::Bool, Ty::Bool) => {}
+            (Ty::Str, Ty::Str) => {}
+            (Ty::Int(a), Ty::Int(b)) => {
+                assert_eq!(a, b);
+            }
+            (Ty::List(a), Ty::List(b)) => a.extract_generics(b, generics),
+            (Ty::Tuple(a), Ty::Tuple(b)) => {
+                assert_eq!(a.len(), b.len());
+
+                for (a, b) in a.iter().zip(b.iter()) {
+                    a.extract_generics(b, generics);
+                }
+            }
+            (Ty::Func(a, b), Ty::Func(c, d)) => {
+                assert_eq!(a.len(), c.len());
+
+                for (a, c) in a.iter().zip(c.iter()) {
+                    a.extract_generics(c, generics);
+                }
+
+                b.extract_generics(d, generics);
+            }
+            (Ty::Adt(a, b), Ty::Adt(c, d)) => {
+                assert_eq!(a, c);
+
+                for (a, b) in b.iter().zip(d.iter()) {
+                    a.extract_generics(b, generics);
+                }
+            }
+            (ty, Ty::Generic(index)) => {
+                if generics.len() <= *index {
+                    generics.resize_with(*index + 1, || None);
+                }
+
+                match &generics[*index] {
+                    Some(generic) => assert_eq!(ty, generic),
+                    None => generics[*index] = Some(ty.clone()),
+                }
+            }
+            (_, _) => unreachable!("unexpected type: {:?} != {:?}", self, from),
+        }
+    }
 }
 
 impl Expr {
@@ -344,10 +371,10 @@ impl Expr {
         generics: &mut Generics,
         expr: &hir::Expr,
     ) -> miette::Result<Self> {
-        Ok(Self {
-            kind: ExprKind::from_hir(rir, unit, generics, &expr.kind)?,
-            ty: Ty::from_hir(unit, generics, &expr.ty)?,
-        })
+        let ty = Ty::from_hir(unit, generics, &expr.ty)?;
+        let kind = ExprKind::from_hir(rir, unit, generics, &expr.kind, &ty)?;
+
+        Ok(Self { kind, ty })
     }
 
     fn vec_from_hir(
@@ -369,13 +396,22 @@ impl ExprKind {
         unit: &hir::Unit,
         generics: &mut Generics,
         kind: &hir::ExprKind,
+        ty: &Ty,
     ) -> miette::Result<Self> {
         match kind {
             hir::ExprKind::Void => Ok(ExprKind::Void),
             hir::ExprKind::String(s) => Ok(ExprKind::String(s)),
             hir::ExprKind::Int(n, base, bytes) => Ok(ExprKind::Int(*n, *base, bytes.clone())),
             hir::ExprKind::Bool(b) => Ok(ExprKind::Bool(*b)),
-            hir::ExprKind::Func(i) => Ok(ExprKind::Func(*i, Vec::new())),
+            hir::ExprKind::Func(i) => {
+                let mut generics = Vec::new();
+
+                ty.extract_generics(&rir.funcs[*i].ty(), &mut generics);
+
+                let generics = generics.into_iter().map(Option::unwrap).collect();
+
+                Ok(ExprKind::Func(*i, Vec::new(), generics))
+            }
             hir::ExprKind::Variant(i, j) => Ok(ExprKind::Variant(*i, *j)),
             hir::ExprKind::Local(i) => Ok(ExprKind::Local(*i)),
             hir::ExprKind::Argument(i) => Ok(ExprKind::Argument(*i)),
@@ -483,11 +519,9 @@ impl ExprKind {
                     ty: output.clone(),
                 };
 
-                let generics = generics.iter().map(|_| Generic {}).collect();
-
                 let func = Func {
                     name: String::new(),
-                    generics,
+                    generics: generics.iter().map(|_| Generic {}).collect(),
                     input: arguments,
                     output,
                     locals: Vec::new(),
@@ -495,10 +529,11 @@ impl ExprKind {
                     body,
                 };
 
-                let index = unit.funcs.len();
+                let index = rir.funcs.len();
                 rir.funcs.push(func);
 
-                Ok(ExprKind::Func(index, captured))
+                let generics = (0..generics.len()).map(|_| Ty::Generic(0)).collect();
+                Ok(ExprKind::Func(index, captured, generics))
             }
             hir::ExprKind::Field(expr, field) => {
                 let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);

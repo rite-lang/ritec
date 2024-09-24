@@ -214,18 +214,19 @@ fn unify_inferred_inferred(
             Ok(())
         }
         (Some(a_func), None) => {
-            let b = hir::Ty::Inferred(b_tid, b_kind, Some(a_func));
+            let b_with_func = hir::Ty::Inferred(b_tid, b_kind, Some(a_func));
 
             if let Some((ref index, ref table)) = unit.env.the_matrix.get(&a_func) {
                 let a_index = index.iter().position(|&i| i == a_tid).unwrap();
 
                 for a in table[a_index].clone() {
-                    let b = unit.env.use_ty(&mut HashMap::new(), &b);
+                    let b = unit.env.use_ty(&mut HashMap::new(), &b_with_func);
                     unify_ty_ty(unit, &a, &b)?;
                 }
             }
 
-            unit.env.substitutions.insert(a, b);
+            unit.env.substitutions.insert(b, b_with_func.clone());
+            unit.env.substitutions.insert(a, b_with_func);
 
             Ok(())
         }

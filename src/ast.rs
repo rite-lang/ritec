@@ -70,8 +70,9 @@ pub enum Ty {
     Bool,
     Int(IntKind),
     Tuple(Vec<Ty>),
-    Item(Path),
+    Item(Path, Option<Vec<Ty>>),
     List(Box<Ty>),
+    Func(Vec<Ty>, Option<Box<Ty>>),
     Generic(Generic),
     Str,
 }
