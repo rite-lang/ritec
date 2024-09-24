@@ -8,10 +8,20 @@ use crate::{
     span::Span,
 };
 
-pub fn lower_ast(unit: &mut hir::Unit, module: usize, ast: &ast::Module) -> miette::Result<()> {
+pub fn type_register_ast(
+    unit: &mut hir::Unit,
+    module: usize,
+    ast: &ast::Module,
+) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Type(ast::Type::Adt(adt)) = decl {
+            let vis = match adt.vis {
+                ast::Vis::Public => hir::Vis::Public,
+                ast::Vis::Private => hir::Vis::Private,
+            };
+
             let id = unit.push_adt(hir::Adt {
+                vis,
                 name: adt.name,
                 generics: Vec::new(),
                 variants: Vec::new(),
@@ -22,6 +32,31 @@ pub fn lower_ast(unit: &mut hir::Unit, module: usize, ast: &ast::Module) -> miet
         }
     }
 
+    Ok(())
+}
+
+pub fn type_resolve_ast(
+    unit: &mut hir::Unit,
+    module: usize,
+    ast: &ast::Module,
+) -> miette::Result<()> {
+    for decl in &ast.decls {
+        if let ast::Decl::Import(import) = decl {
+            let imported = find_module(unit, module, &import.path)?;
+            let name = unit.modules[imported].name;
+
+            unit.modules[module].modules.insert(name, imported);
+        }
+    }
+
+    Ok(())
+}
+
+pub fn type_construct_ast(
+    unit: &mut hir::Unit,
+    module: usize,
+    ast: &ast::Module,
+) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Type(ast::Type::Adt(adt)) = decl {
             let id = unit.modules[module].adts[adt.name];
@@ -49,6 +84,14 @@ pub fn lower_ast(unit: &mut hir::Unit, module: usize, ast: &ast::Module) -> miet
         }
     }
 
+    Ok(())
+}
+
+pub fn func_register_ast(
+    unit: &mut hir::Unit,
+    module: usize,
+    ast: &ast::Module,
+) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Func(func) = decl {
             let mut generics = Vec::new();
@@ -65,12 +108,19 @@ pub fn lower_ast(unit: &mut hir::Unit, module: usize, ast: &ast::Module) -> miet
             let input = lower_arguments(&mut cx, &func.input)?;
             let output = lower_output(&mut cx, &func.output)?;
 
+            let vis = match func.vis {
+                ast::Vis::Public => hir::Vis::Public,
+                ast::Vis::Private => hir::Vis::Private,
+            };
+
             unit.push_func(hir::Func {
+                vis,
                 name: func.name,
                 generics,
                 input,
                 output,
                 locals: Vec::new(),
+                captures: Vec::new(),
                 body: hir::Expr {
                     kind: hir::ExprKind::Void,
                     ty: hir::Ty::void(),
@@ -81,6 +131,14 @@ pub fn lower_ast(unit: &mut hir::Unit, module: usize, ast: &ast::Module) -> miet
         }
     }
 
+    Ok(())
+}
+
+pub fn func_construct_ast(
+    unit: &mut hir::Unit,
+    module: usize,
+    ast: &ast::Module,
+) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Func(func) = decl {
             let id = unit.modules[module].funcs[func.name];
@@ -213,6 +271,28 @@ enum Item {
     Variant(usize, usize),
 }
 
+fn find_module(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<usize> {
+    let mut current = module;
+
+    for segment in path.segments.iter() {
+        match unit.modules[current].modules.get(segment) {
+            Some(&next) => current = next,
+            None => {
+                return Err(miette::miette!(
+                    severity = Severity::Error,
+                    code = "invalid::path",
+                    labels = vec![path.span.label("here")],
+                    "module not found `{}`",
+                    segment
+                )
+                .with_source_code(path.span));
+            }
+        }
+    }
+
+    Ok(current)
+}
+
 fn find_adt(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<usize> {
     let mut current = module;
 
@@ -237,17 +317,19 @@ fn find_adt(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result
         .last()
         .expect("path should have at least one segment");
 
-    match unit.modules[current].adts.get(name) {
-        Some(&id) => Ok(id),
-        None => Err(miette::miette!(
-            severity = Severity::Error,
-            code = "invalid::path",
-            labels = vec![path.span.label("here")],
-            "invalid item `{}`",
-            name
-        )
-        .with_source_code(path.span)),
+    if let Some(&id) = unit.modules[current].adts.get(name) {
+        if unit.adts[id].vis == hir::Vis::Public || current == module {
+            return Ok(id);
+        }
     }
+
+    Err(miette::miette!(
+        severity = Severity::Error,
+        code = "invalid::path",
+        labels = vec![path.span.label("here")],
+        "invalid item `{}`",
+        name
+    ))
 }
 
 fn find_variant(
@@ -292,6 +374,10 @@ fn resolve_item(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Re
         .expect("path should have at least one segment");
 
     for (i, adt) in unit.adts.iter().enumerate() {
+        if adt.vis == hir::Vis::Private && current != module {
+            continue;
+        }
+
         for (j, variant) in adt.variants.iter().enumerate() {
             if variant.name == *name {
                 return Ok(Item::Variant(i, j));
@@ -299,17 +385,20 @@ fn resolve_item(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Re
         }
     }
 
-    match unit.modules[current].funcs.get(name) {
-        Some(&id) => Ok(Item::Func(id)),
-        None => Err(miette::miette!(
-            severity = Severity::Error,
-            code = "invalid::path",
-            labels = vec![path.span.label("here")],
-            "invalid item `{}`",
-            name
-        )
-        .with_source_code(path.span)),
+    if let Some(&id) = unit.modules[current].funcs.get(name) {
+        if unit.funcs[id].vis == hir::Vis::Public || current == module {
+            return Ok(Item::Func(id));
+        }
     }
+
+    Err(miette::miette!(
+        severity = Severity::Error,
+        code = "invalid::path",
+        labels = vec![path.span.label("here")],
+        "invalid item `{}`",
+        name
+    )
+    .with_source_code(path.span))
 }
 
 struct BodyCx<'a> {
@@ -337,6 +426,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Binary(op, lhs, rhs) => lower_binary(cx, *op, lhs, rhs),
         ast::Expr::Let(name, expr) => lower_let(cx, name, expr),
         ast::Expr::Match(input, arms) => lower_match(cx, input, arms),
+        ast::Expr::Closure(_, _) => todo!(),
     }
 }
 
@@ -518,11 +608,17 @@ fn lower_call(
     let mut tys = Vec::new();
 
     for argument in arguments {
-        let argument = argument.as_ref().unwrap();
-
-        let arg = lower_expr(cx, argument)?;
-        tys.push(arg.ty.clone());
-        args.push(arg);
+        match argument {
+            Some(argument) => {
+                let arg = lower_expr(cx, argument)?;
+                tys.push(Some(arg.ty.clone()));
+                args.push(Some(arg));
+            }
+            None => {
+                args.push(None);
+                tys.push(None);
+            }
+        }
     }
 
     let ty = hir::Ty::Call(Box::new(func.ty.clone()), tys);
@@ -757,7 +853,11 @@ fn build_match_tree(
                 None => {
                     let expr = lower_expr(cx, body)?;
                     let ty = expr.ty.clone();
-                    *subtree = Box::new(Match::Leaf(locals, expr));
+
+                    if matches!(subtree.as_ref(), Match::None) {
+                        *subtree = Box::new(Match::Leaf(locals, expr));
+                    }
+
                     Ok(ty)
                 }
             }
@@ -822,7 +922,11 @@ fn build_match_tree(
                 None => {
                     let expr = lower_expr(cx, body)?;
                     let ty = expr.ty.clone();
-                    *subtree = Match::Leaf(locals, expr);
+
+                    if matches!(subtree, Match::None) {
+                        *subtree = Match::Leaf(locals, expr);
+                    }
+
                     Ok(ty)
                 }
             }
@@ -883,7 +987,11 @@ fn build_match_tree(
                         None => {
                             let expr = lower_expr(cx, body)?;
                             let ty = expr.ty.clone();
-                            *none = Box::new(Match::Leaf(locals, expr));
+
+                            if matches!(none.as_ref(), Match::None) {
+                                *none = Box::new(Match::Leaf(locals, expr));
+                            }
+
                             Ok(ty)
                         }
                     }
@@ -899,13 +1007,9 @@ fn build_match_tree(
                     name,
                     ty: ty.clone(),
                 });
-
                 cx.scope.push((name.to_owned(), id));
 
-                let kind = hir::ExprKind::Let(id, Box::new(input));
-                let expr = hir::Expr { kind, ty };
-
-                locals.push((id, expr));
+                locals.push((id, input));
             }
 
             let tree = match tree {
@@ -931,7 +1035,7 @@ fn build_match_tree(
                     let ty = expr.ty.clone();
 
                     tree.visit(&mut move |tree| {
-                        if let Match::None = tree {
+                        if matches!(tree, Match::None) {
                             *tree = Match::Leaf(locals.clone(), expr.clone());
                         }
                     });

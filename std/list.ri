@@ -1,0 +1,9 @@
+pub fn length(xs: ['a]) -> int
+  match xs
+  | [_, ..xs] -> 1 + length(xs)
+  | [] -> 0
+
+pub fn is_empty(xs: ['a]) -> bool
+  match xs
+  | [] -> true
+  | _ -> false

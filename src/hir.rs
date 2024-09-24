@@ -56,11 +56,13 @@ impl Module {
 
 #[derive(Debug)]
 pub struct Func {
+    pub vis: Vis,
     pub name: &'static str,
     pub generics: Vec<Generic>,
     pub input: Vec<Argument>,
     pub output: Ty,
     pub locals: Vec<Local>,
+    pub captures: Vec<Ty>,
     pub body: Expr,
 }
 
@@ -72,10 +74,17 @@ pub struct Local {
 
 #[derive(Debug)]
 pub struct Adt {
+    pub vis: Vis,
     pub name: &'static str,
     pub generics: Vec<Generic>,
     pub variants: Vec<Variant>,
     pub span: Span,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Vis {
+    Public,
+    Private,
 }
 
 #[derive(Debug)]
@@ -102,7 +111,7 @@ pub enum Ty {
     Partial(Part, Vec<Ty>),
     Field(Box<Ty>, &'static str),
     Tuple(Box<Ty>, usize),
-    Call(Box<Ty>, Vec<Ty>),
+    Call(Box<Ty>, Vec<Option<Ty>>),
     Pipe(Box<Ty>, Box<Ty>),
 }
 
@@ -153,7 +162,7 @@ pub enum ExprKind {
     Field(Box<Expr>, &'static str),
     VariantField(Box<Expr>, usize, usize),
     TupleField(Box<Expr>, usize),
-    Call(Box<Expr>, Vec<Expr>),
+    Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(usize, Box<Expr>),
@@ -279,7 +288,7 @@ impl Ty {
                 let callee = callee.specialize(generics);
                 let arguments = arguments
                     .iter()
-                    .map(|arg| arg.specialize(generics))
+                    .map(|arg| arg.as_ref().map(|arg| arg.specialize(generics)))
                     .collect();
                 Ty::Call(Box::new(callee), arguments)
             }
@@ -306,7 +315,10 @@ impl std::fmt::Display for Ty {
             Ty::Call(func, args) => {
                 let args = args
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|arg| match arg {
+                        Some(arg) => arg.to_string(),
+                        None => "_".to_string(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
 

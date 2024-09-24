@@ -18,7 +18,25 @@ pub struct Func {
     pub input: Vec<Argument>,
     pub output: Ty,
     pub locals: Vec<Ty>,
+    pub captures: Vec<Ty>,
     pub body: Expr,
+}
+
+impl Default for Func {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            generics: Vec::new(),
+            input: Vec::new(),
+            output: Ty::Void,
+            locals: Vec::new(),
+            captures: Vec::new(),
+            body: Expr {
+                kind: ExprKind::Void,
+                ty: Ty::Void,
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -39,7 +57,7 @@ pub struct Generic {}
 #[derive(Debug)]
 pub struct Argument {
     pub ty: Ty,
-    pub span: Span,
+    pub span: Option<Span>,
 }
 
 #[derive(Clone, Debug)]
@@ -65,10 +83,11 @@ pub enum ExprKind {
     Void,
     Int(bool, Base, Vec<u8>),
     Bool(bool),
-    Func(usize),
+    Func(usize, Vec<Expr>),
     Variant(usize, usize),
     Local(usize),
     Argument(usize),
+    Captured(usize),
     Tuple(Vec<Expr>),
     List(Vec<Expr>, Option<Box<Expr>>),
     ListHead(Box<Expr>),
@@ -92,26 +111,43 @@ pub enum Match {
 
 impl Unit {
     pub fn from_hir(unit: hir::Unit) -> miette::Result<Self> {
-        let funcs = Func::from_hir_vec(&unit, &unit.funcs)?;
-        let adts = Adt::from_hir_vec(&unit, &unit.adts)?;
+        let mut funcs = Vec::new();
+        funcs.resize_with(unit.funcs.len(), Func::default);
 
-        Ok(Self { funcs, adts })
+        let mut rir = Self {
+            adts: Adt::from_hir_vec(&unit, &unit.adts)?,
+            funcs,
+        };
+
+        for (index, func) in unit.funcs.iter().enumerate() {
+            rir.funcs[index] = Func::from_hir(&mut rir, &unit, func)?;
+        }
+
+        Ok(rir)
     }
 }
 
 type Generics = Vec<(Option<hir::Tid>, Generic)>;
 
 impl Func {
-    pub fn from_hir(unit: &hir::Unit, func: &hir::Func) -> miette::Result<Self> {
+    pub fn from_hir(rir: &mut Unit, unit: &hir::Unit, func: &hir::Func) -> miette::Result<Self> {
         let mut generics = func.generics.iter().map(|_| (None, Generic {})).collect();
         let input = Argument::from_hir_vec(unit, &mut generics, &func.input)?;
         let output = Ty::from_hir(unit, &mut generics, &func.output)?;
+
         let locals = func
             .locals
             .iter()
             .map(|local| Ty::from_hir(unit, &mut generics, &local.ty))
             .collect::<miette::Result<_>>()?;
-        let body = Expr::from_hir(unit, &mut generics, &func.body)?;
+
+        let captures = func
+            .captures
+            .iter()
+            .map(|ty| Ty::from_hir(unit, &mut generics, ty))
+            .collect::<miette::Result<_>>()?;
+
+        let body = Expr::from_hir(rir, unit, &mut generics, &func.body)?;
 
         let generics = generics.into_iter().map(|(_, g)| g).collect();
 
@@ -121,6 +157,7 @@ impl Func {
             input,
             output,
             locals,
+            captures,
             body,
         })
     }
@@ -130,10 +167,14 @@ impl Func {
         Ty::Func(input, Box::new(self.output.clone()))
     }
 
-    fn from_hir_vec(unit: &hir::Unit, funcs: &[hir::Func]) -> miette::Result<Vec<Self>> {
+    fn from_hir_vec(
+        rir: &mut Unit,
+        unit: &hir::Unit,
+        funcs: &[hir::Func],
+    ) -> miette::Result<Vec<Self>> {
         funcs
             .iter()
-            .map(|func| Func::from_hir(unit, func))
+            .map(|func| Func::from_hir(rir, unit, func))
             .collect::<miette::Result<_>>()
     }
 }
@@ -189,7 +230,7 @@ impl Argument {
     ) -> miette::Result<Self> {
         Ok(Self {
             ty: Ty::from_hir(unit, generics, &arg.ty)?,
-            span: arg.span,
+            span: Some(arg.span),
         })
     }
 
@@ -292,30 +333,33 @@ impl Ty {
 
 impl Expr {
     fn from_hir(
+        rir: &mut Unit,
         unit: &hir::Unit,
         generics: &mut Generics,
         expr: &hir::Expr,
     ) -> miette::Result<Self> {
         Ok(Self {
-            kind: ExprKind::from_hir(unit, generics, &expr.kind)?,
+            kind: ExprKind::from_hir(rir, unit, generics, &expr.kind)?,
             ty: Ty::from_hir(unit, generics, &expr.ty)?,
         })
     }
 
     fn vec_from_hir(
+        rir: &mut Unit,
         unit: &hir::Unit,
         generics: &mut Generics,
         exprs: &[hir::Expr],
     ) -> miette::Result<Vec<Expr>> {
         exprs
             .iter()
-            .map(|expr| Expr::from_hir(unit, generics, expr))
+            .map(|expr| Expr::from_hir(rir, unit, generics, expr))
             .collect::<miette::Result<_>>()
     }
 }
 
 impl ExprKind {
     fn from_hir(
+        rir: &mut Unit,
         unit: &hir::Unit,
         generics: &mut Generics,
         kind: &hir::ExprKind,
@@ -324,47 +368,133 @@ impl ExprKind {
             hir::ExprKind::Void => Ok(ExprKind::Void),
             hir::ExprKind::Int(n, base, bytes) => Ok(ExprKind::Int(*n, *base, bytes.clone())),
             hir::ExprKind::Bool(b) => Ok(ExprKind::Bool(*b)),
-            hir::ExprKind::Func(i) => Ok(ExprKind::Func(*i)),
+            hir::ExprKind::Func(i) => Ok(ExprKind::Func(*i, Vec::new())),
             hir::ExprKind::Variant(i, j) => Ok(ExprKind::Variant(*i, *j)),
             hir::ExprKind::Local(i) => Ok(ExprKind::Local(*i)),
             hir::ExprKind::Argument(i) => Ok(ExprKind::Argument(*i)),
             hir::ExprKind::Tuple(exprs) => {
-                let tuple = Expr::vec_from_hir(unit, generics, exprs)?;
+                let tuple = Expr::vec_from_hir(rir, unit, generics, exprs)?;
 
                 Ok(ExprKind::Tuple(tuple))
             }
             hir::ExprKind::List(exprs, rest) => {
-                let list = Expr::vec_from_hir(unit, generics, exprs)?;
+                let list = Expr::vec_from_hir(rir, unit, generics, exprs)?;
                 let rest = match rest {
-                    Some(rest) => Some(Box::new(Expr::from_hir(unit, generics, rest)?)),
+                    Some(rest) => Some(Box::new(Expr::from_hir(rir, unit, generics, rest)?)),
                     None => None,
                 };
 
                 Ok(ExprKind::List(list, rest))
             }
             hir::ExprKind::ListHead(expr) => {
-                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+                let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);
 
                 Ok(ExprKind::ListHead(expr))
             }
             hir::ExprKind::ListTail(expr) => {
-                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+                let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);
 
                 Ok(ExprKind::ListTail(expr))
             }
             hir::ExprKind::Block(exprs) => {
-                let block = Expr::vec_from_hir(unit, generics, exprs)?;
+                let block = Expr::vec_from_hir(rir, unit, generics, exprs)?;
 
                 Ok(ExprKind::Block(block))
             }
             hir::ExprKind::Call(callee, args) => {
-                let callee = Box::new(Expr::from_hir(unit, generics, callee)?);
-                let args = Expr::vec_from_hir(unit, generics, args)?;
+                let callee = Expr::from_hir(rir, unit, generics, callee)?;
 
-                Ok(ExprKind::Call(callee, args))
+                let Ty::Func(ref input, ref output) = callee.ty else {
+                    unreachable!("unexpected callee: {:?}", callee.ty)
+                };
+
+                if !args.iter().any(Option::is_none) && args.len() == input.len() {
+                    let args = args
+                        .iter()
+                        .map(Option::as_ref)
+                        .map(Option::unwrap)
+                        .map(|arg| Expr::from_hir(rir, unit, generics, arg))
+                        .collect::<miette::Result<_>>()?;
+
+                    return Ok(ExprKind::Call(Box::new(callee), args));
+                }
+
+                let output = output.as_ref().clone();
+
+                let mut arguments = Vec::new();
+                let mut captured = Vec::new();
+
+                let mut exprs = Vec::new();
+
+                for (provided, arg) in args.iter().zip(input.iter()) {
+                    match provided {
+                        Some(arg) => {
+                            let expr = Expr::from_hir(rir, unit, generics, arg)?;
+
+                            let index = captured.len();
+                            exprs.push(Expr {
+                                kind: ExprKind::Captured(index),
+                                ty: expr.ty.clone(),
+                            });
+
+                            captured.push(expr);
+                        }
+                        None => {
+                            let index = arguments.len();
+
+                            exprs.push(Expr {
+                                kind: ExprKind::Argument(index),
+                                ty: arg.clone(),
+                            });
+
+                            arguments.push(Argument {
+                                ty: arg.clone(),
+                                span: None,
+                            });
+                        }
+                    }
+                }
+
+                for arg in input.iter().skip(args.len()) {
+                    let index = arguments.len();
+
+                    exprs.push(Expr {
+                        kind: ExprKind::Argument(index),
+                        ty: arg.clone(),
+                    });
+
+                    arguments.push(Argument {
+                        ty: arg.clone(),
+                        span: None,
+                    });
+                }
+
+                let captures = captured.iter().map(|expr| expr.ty.clone()).collect();
+
+                let body = Expr {
+                    kind: ExprKind::Call(Box::new(callee), exprs),
+                    ty: output.clone(),
+                };
+
+                let generics = generics.iter().map(|_| Generic {}).collect();
+
+                let func = Func {
+                    name: String::new(),
+                    generics,
+                    input: arguments,
+                    output,
+                    locals: Vec::new(),
+                    captures,
+                    body,
+                };
+
+                let index = unit.funcs.len();
+                rir.funcs.push(func);
+
+                Ok(ExprKind::Func(index, captured))
             }
             hir::ExprKind::Field(expr, field) => {
-                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+                let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);
 
                 let Ty::Adt(index, _) = expr.ty else {
                     unreachable!("unexpected field: {:?}", expr.ty)
@@ -375,39 +505,39 @@ impl ExprKind {
                 Ok(ExprKind::Field(expr, index))
             }
             hir::ExprKind::VariantField(expr, i, j) => {
-                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+                let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);
 
                 Ok(ExprKind::VariantField(expr, *i, *j))
             }
             hir::ExprKind::TupleField(expr, i) => {
-                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+                let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);
 
                 Ok(ExprKind::Field(expr, *i))
             }
             hir::ExprKind::Pipe(lhs, rhs) => {
-                let lhs = Box::new(Expr::from_hir(unit, generics, lhs)?);
-                let rhs = Box::new(Expr::from_hir(unit, generics, rhs)?);
+                let lhs = Box::new(Expr::from_hir(rir, unit, generics, lhs)?);
+                let rhs = Box::new(Expr::from_hir(rir, unit, generics, rhs)?);
 
                 Ok(ExprKind::Pipe(lhs, rhs))
             }
             hir::ExprKind::Binary(op, lhs, rhs) => {
-                let lhs = Box::new(Expr::from_hir(unit, generics, lhs)?);
-                let rhs = Box::new(Expr::from_hir(unit, generics, rhs)?);
+                let lhs = Box::new(Expr::from_hir(rir, unit, generics, lhs)?);
+                let rhs = Box::new(Expr::from_hir(rir, unit, generics, rhs)?);
 
                 Ok(ExprKind::Binary(*op, lhs, rhs))
             }
             hir::ExprKind::Let(local, expr) => {
-                let expr = Box::new(Expr::from_hir(unit, generics, expr)?);
+                let expr = Box::new(Expr::from_hir(rir, unit, generics, expr)?);
 
                 Ok(ExprKind::Let(*local, expr))
             }
             hir::ExprKind::Match(input, r#match) => {
-                let input = Box::new(Expr::from_hir(unit, generics, input)?);
+                let input = Box::new(Expr::from_hir(rir, unit, generics, input)?);
 
                 let r#match = match r#match {
                     hir::Match::Bool(r#true, r#false) => {
-                        let r#true = Expr::from_hir(unit, generics, r#true)?;
-                        let r#false = Expr::from_hir(unit, generics, r#false)?;
+                        let r#true = Expr::from_hir(rir, unit, generics, r#true)?;
+                        let r#false = Expr::from_hir(rir, unit, generics, r#false)?;
 
                         Match::Bool(Box::new(r#true), Box::new(r#false))
                     }
@@ -417,22 +547,22 @@ impl ExprKind {
                             .map(|variant| {
                                 variant
                                     .as_ref()
-                                    .map(|expr| Expr::from_hir(unit, generics, expr))
+                                    .map(|expr| Expr::from_hir(rir, unit, generics, expr))
                                     .transpose()
                             })
                             .collect::<miette::Result<_>>()?;
 
                         let default = default
                             .as_ref()
-                            .map(|expr| Expr::from_hir(unit, generics, expr))
+                            .map(|expr| Expr::from_hir(rir, unit, generics, expr))
                             .transpose()?
                             .map(Box::new);
 
                         Match::Adt(variants, default)
                     }
                     hir::Match::List(some, none) => {
-                        let some = Expr::from_hir(unit, generics, some)?;
-                        let none = Expr::from_hir(unit, generics, none)?;
+                        let some = Expr::from_hir(rir, unit, generics, some)?;
+                        let none = Expr::from_hir(rir, unit, generics, none)?;
 
                         Match::List(Box::new(some), Box::new(none))
                     }

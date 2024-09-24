@@ -5,7 +5,7 @@ pub enum Value {
     Void,
     Int(i64),
     Bool(bool),
-    Func(usize),
+    Func(usize, Vec<Value>),
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
 }
@@ -16,7 +16,16 @@ impl std::fmt::Display for Value {
             Value::Void => write!(f, "void"),
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
-            Value::Func(func) => write!(f, "func {}", func),
+            Value::Func(func, captured) => write!(
+                f,
+                "Func({}, [{}])",
+                func,
+                captured
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Value::List(None) => write!(f, "[]"),
             Value::List(Some(list)) => write!(f, "[{}]", list),
             Value::Adt(variant, fields) => {
@@ -58,6 +67,7 @@ impl std::fmt::Display for List {
 struct Frame {
     locals: Vec<Value>,
     arguments: Vec<Value>,
+    captured: Vec<Value>,
 }
 
 pub struct Interpreter<'a> {
@@ -75,6 +85,7 @@ impl<'a> Interpreter<'a> {
         let mut frame = Frame {
             locals: vec![Value::Void; func.locals.len()],
             arguments: Vec::new(),
+            captured: Vec::new(),
         };
 
         self.eval(&mut frame, &func.body)
@@ -98,10 +109,15 @@ impl<'a> Interpreter<'a> {
                     Value::Int(n)
                 }
                 mir::Constant::Bool(value) => Value::Bool(*value),
-                mir::Constant::Func(func) => Value::Func(*func),
             },
+            mir::ExprKind::Func(func, captured) => {
+                let captured = captured.iter().map(|expr| self.eval(frame, expr)).collect();
+
+                Value::Func(*func, captured)
+            }
             mir::ExprKind::Local(index) => frame.locals[*index].clone(),
             mir::ExprKind::Argument(index) => frame.arguments[*index].clone(),
+            mir::ExprKind::Captured(index) => frame.captured[*index].clone(),
             mir::ExprKind::List(items, rest) => {
                 let mut values = match rest {
                     Some(rest) => {
@@ -148,7 +164,7 @@ impl<'a> Interpreter<'a> {
                 value
             }
             mir::ExprKind::Call(func, args) => {
-                let Value::Func(func) = self.eval(frame, func) else {
+                let Value::Func(func, captured) = self.eval(frame, func) else {
                     panic!("expected function");
                 };
 
@@ -163,6 +179,7 @@ impl<'a> Interpreter<'a> {
                 let mut frame = Frame {
                     locals: vec![Value::Void; func.locals.len()],
                     arguments,
+                    captured,
                 };
 
                 self.eval(&mut frame, &func.body)

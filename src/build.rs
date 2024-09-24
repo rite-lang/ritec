@@ -193,10 +193,13 @@ fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Ex
             build_int_expr(builder, &expr.ty, negative, base, value)
         }
         rir::ExprKind::Bool(value) => build_bool_expr(builder, &expr.ty, value),
-        rir::ExprKind::Func(index) => build_func_expr(builder, &expr.ty, index),
+        rir::ExprKind::Func(index, ref captured) => {
+            build_func_expr(builder, &expr.ty, index, captured)
+        }
         rir::ExprKind::Variant(adt, variant) => build_variant_expr(builder, &expr.ty, adt, variant),
         rir::ExprKind::Local(index) => build_local_expr(builder, &expr.ty, index),
         rir::ExprKind::Argument(index) => build_argument_expr(builder, &expr.ty, index),
+        rir::ExprKind::Captured(index) => build_captured_expr(builder, &expr.ty, index),
         rir::ExprKind::Tuple(ref exprs) => build_tuple_expr(builder, &expr.ty, exprs),
         rir::ExprKind::List(ref items, ref rest) => build_list_expr(builder, &expr.ty, items, rest),
         rir::ExprKind::ListHead(ref expr) => build_list_head_expr(builder, &expr.ty, expr),
@@ -243,13 +246,23 @@ fn build_bool_expr(builder: &mut Builder, ty: &rir::Ty, value: bool) -> miette::
     Ok(mir::Expr { kind, ty })
 }
 
-fn build_func_expr(builder: &mut Builder, ty: &rir::Ty, index: usize) -> miette::Result<mir::Expr> {
+fn build_func_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    index: usize,
+    captured: &[rir::Expr],
+) -> miette::Result<mir::Expr> {
     let ty = build_ty(builder, ty);
     let generics = extract_generics(builder.unit, &builder.unit.funcs[index].ty(), &ty);
 
     let index = build_func(builder.mir, builder.funcs, builder.unit, index, &generics)?;
 
-    let kind = mir::ExprKind::Const(mir::Constant::Func(index));
+    let captured = captured
+        .iter()
+        .map(|expr| build_expr(builder, expr))
+        .collect::<miette::Result<_>>()?;
+
+    let kind = mir::ExprKind::Func(index, captured);
     Ok(mir::Expr { kind, ty })
 }
 
@@ -295,7 +308,7 @@ fn build_variant_expr(
     let index = builder.mir.funcs.len();
     builder.mir.funcs.push(func);
 
-    let kind = mir::ExprKind::Const(mir::Constant::Func(index));
+    let kind = mir::ExprKind::Func(index, Vec::new());
     Ok(mir::Expr { kind, ty })
 }
 
@@ -315,6 +328,16 @@ fn build_argument_expr(
     index: usize,
 ) -> miette::Result<mir::Expr> {
     let kind = mir::ExprKind::Argument(index);
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
+fn build_captured_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    index: usize,
+) -> miette::Result<mir::Expr> {
+    let kind = mir::ExprKind::Captured(index);
     let ty = build_ty(builder, ty);
     Ok(mir::Expr { kind, ty })
 }

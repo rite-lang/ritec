@@ -1,0 +1,3 @@
+pub type Result =
+  | Ok(ok: 'a)
+  | Err(err: 'b)

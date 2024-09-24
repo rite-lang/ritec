@@ -55,8 +55,10 @@ pub struct Expr {
 #[derive(Debug)]
 pub enum ExprKind {
     Const(Constant),
+    Func(usize, Vec<Expr>),
     Local(usize),
     Argument(usize),
+    Captured(usize),
     List(Vec<Expr>, Option<Box<Expr>>),
     ListHead(Box<Expr>),
     ListTail(Box<Expr>),
@@ -82,5 +84,4 @@ pub enum Constant {
     Void,
     Bool(bool),
     Int(bool, Base, Vec<u8>),
-    Func(usize),
 }

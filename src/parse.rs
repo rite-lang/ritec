@@ -2,8 +2,8 @@ use miette::Severity;
 
 use crate::{
     ast::{
-        Adt, Argument, Arm, BinOp, Decl, Expr, Func, Generic, Module, Pat, PatKind, Path, Ty, Type,
-        Variant, Vis,
+        Adt, Argument, Arm, BinOp, Decl, Expr, Func, Generic, Import, Module, Pat, PatKind, Path,
+        Ty, Type, Variant, Vis,
     },
     number::{Base, IntKind},
     span::Span,
@@ -29,7 +29,9 @@ pub fn parse(tokens: &mut TokenStream) -> miette::Result<Module> {
 }
 
 fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
-    if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
+    if tokens.is(Token::Import) {
+        parse_import(tokens).map(Decl::Import)
+    } else if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
         parse_func_decl(tokens).map(Decl::Func)
     } else if tokens.is(Token::Type) || tokens.nth_is(1, Token::Type) {
         parse_type_decl(tokens).map(Decl::Type)
@@ -45,6 +47,15 @@ fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
         )
         .with_source_code(span))
     }
+}
+
+fn parse_import(tokens: &mut TokenStream) -> miette::Result<Import> {
+    tokens.expect(Token::Import)?;
+
+    let path = parse_path(tokens)?;
+    let span = path.span;
+
+    Ok(Import { path, span })
 }
 
 fn parse_func_decl(tokens: &mut TokenStream) -> miette::Result<Func> {
@@ -615,6 +626,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
         Token::LBracket => parse_list(tokens, multiline),
+        Token::Pipe => parse_closure(tokens),
         Token::True | Token::False => parse_bool(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
         _ => Err(miette::miette!(
@@ -684,6 +696,25 @@ fn parse_list(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     let end = tokens.expect(Token::RBracket)?;
 
     Ok(Expr::List(items, rest, start.join(end)))
+}
+
+fn parse_closure(tokens: &mut TokenStream) -> miette::Result<Expr> {
+    let _start = tokens.expect(Token::Pipe)?;
+
+    let mut args = Vec::new();
+
+    while !tokens.is(Token::Pipe) {
+        args.push(parse_argument(tokens)?);
+    }
+
+    let _end = tokens.expect(Token::Pipe)?;
+
+    let body = match is_block(tokens) {
+        true => parse_block(tokens)?,
+        false => parse_expr(tokens, false)?,
+    };
+
+    Ok(Expr::Closure(args, Box::new(body)))
 }
 
 fn parse_bool(tokens: &mut TokenStream) -> miette::Result<Expr> {

@@ -78,7 +78,7 @@ impl TyEnv {
                 let func = self.use_ty(generics, func);
                 let arguments = arguments
                     .iter()
-                    .map(|arg| self.use_ty(generics, arg))
+                    .map(|arg| arg.as_ref().map(|arg| self.use_ty(generics, arg)))
                     .collect();
                 hir::Ty::Call(Box::new(func), arguments)
             }
@@ -316,7 +316,7 @@ fn with_func(unit: &mut hir::Unit, ty: &hir::Ty, new_func: usize) -> hir::Ty {
             let callee = with_func(unit, callee, new_func);
             let arguments = arguments
                 .iter()
-                .map(|arg| with_func(unit, arg, new_func))
+                .map(|arg| arg.as_ref().map(|arg| with_func(unit, arg, new_func)))
                 .collect();
 
             let ty = hir::Ty::Call(Box::new(callee), arguments);
@@ -376,7 +376,7 @@ fn normalize_tuple(
 fn normalize_call(
     unit: &mut hir::Unit,
     callee: &hir::Ty,
-    arguments: &[hir::Ty],
+    arguments: &[Option<hir::Ty>],
 ) -> Result<hir::Ty, RetryOrError> {
     let callee = normalize(unit, callee)?;
 
@@ -393,7 +393,7 @@ fn normalize_call(
         .pop()
         .expect("funcs have least one argument");
 
-    if arguments.len() != callee_arguments.len() {
+    if arguments.len() > callee_arguments.len() {
         return Err(miette::miette!(
             "wrong number of arguments: expected {} but found {}",
             callee_arguments.len(),
@@ -402,11 +402,25 @@ fn normalize_call(
         .into());
     }
 
+    let mut remaining = Vec::new();
+
     for (a, b) in callee_arguments.iter().zip(arguments) {
-        unify_ty_ty(unit, a, b)?;
+        match b {
+            Some(b) => unify_ty_ty(unit, a, b)?,
+            None => remaining.push(a.clone()),
+        }
     }
 
-    normalize(unit, &output)
+    remaining.extend(callee_arguments.iter().skip(arguments.len()).cloned());
+
+    if remaining.is_empty() {
+        return normalize(unit, &output);
+    }
+
+    remaining.push(output);
+
+    let func = hir::Ty::Partial(hir::Part::Func, remaining);
+    normalize(unit, &func)
 }
 
 fn normalize_pipe(

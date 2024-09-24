@@ -10,8 +10,15 @@ pub struct Module {
 
 #[derive(Debug)]
 pub enum Decl {
+    Import(Import),
     Func(Func),
     Type(Type),
+}
+
+#[derive(Debug)]
+pub struct Import {
+    pub path: Path,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -89,6 +96,7 @@ pub enum Expr {
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Let(&'static str, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>),
+    Closure(Vec<Argument>, Box<Expr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
