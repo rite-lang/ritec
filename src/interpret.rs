@@ -17,6 +17,7 @@ impl std::fmt::Display for Value {
             Value::Void => write!(f, "void"),
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
+            Value::String(s) => write!(f, "\"{}\"", s),
             Value::Func(func, captured) => write!(
                 f,
                 "Func({}, [{}])",

@@ -259,7 +259,12 @@ fn build_string_expr(
     Ok(mir::Expr { kind, ty })
 }
 
-fn build_func_expr(builder: &mut Builder, ty: &rir::Ty, index: usize) -> miette::Result<mir::Expr> {
+fn build_func_expr(
+    builder: &mut Builder,
+    ty: &rir::Ty,
+    index: usize,
+    captured: &[rir::Expr],
+) -> miette::Result<mir::Expr> {
     let ty = build_ty(builder, ty);
     let generics = extract_generics(builder.unit, &builder.unit.funcs[index].ty(), &ty);
 
