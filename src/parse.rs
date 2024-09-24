@@ -628,6 +628,14 @@ fn parse_tuple(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
 }
 
 fn parse_binary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let (token, _) = tokens.peek();
+
+    match token {
+        Token::Pipe => return parse_closure(tokens),
+        Token::PipePipe => return parse_empty_closure(tokens),
+        _ => {}
+    }
+
     let lhs = parse_unary(tokens, multiline)?;
 
     let Some(lop) = get_binop(tokens) else {
@@ -746,8 +754,10 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::Integer => parse_integer(tokens),
         Token::String => parse_string(tokens),
         Token::LBracket => parse_list(tokens, multiline),
-        Token::Pipe => parse_closure(tokens),
-        Token::PipePipe => parse_empty_closure(tokens),
+        Token::Void => {
+            tokens.consume();
+            Ok(Expr::Void)
+        }
         Token::True | Token::False => parse_bool(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
         _ => Err(miette::miette!(

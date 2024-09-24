@@ -167,6 +167,12 @@ fn build_place(
             ty: builder.build_ty(&expr.ty)?,
         }),
 
+        hir::ExprKind::Capture(index) => Ok(rir::Place {
+            location: rir::Location::Capture(index),
+            projection: Vec::new(),
+            ty: builder.build_ty(&expr.ty)?,
+        }),
+
         hir::ExprKind::Deref(ref expr) => {
             let mut place = build_place(builder, block, expr)?;
 
@@ -468,6 +474,7 @@ fn build_operand(
 
         hir::ExprKind::Local(_)
         | hir::ExprKind::Argument(_)
+        | hir::ExprKind::Capture(_)
         | hir::ExprKind::Field(_, _)
         | hir::ExprKind::VariantField(_, _, _)
         | hir::ExprKind::TupleField(_, _)
@@ -781,6 +788,7 @@ fn build_value(
         | hir::ExprKind::Bool(_)
         | hir::ExprKind::Local(_)
         | hir::ExprKind::Argument(_)
+        | hir::ExprKind::Capture(_)
         | hir::ExprKind::Block(_)
         | hir::ExprKind::Field(_, _)
         | hir::ExprKind::VariantField(_, _, _)

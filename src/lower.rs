@@ -203,6 +203,7 @@ pub fn func_construct_ast(
                     module,
                     locals: Vec::new(),
                     scope: Vec::new(),
+                    capture: None,
                 };
 
                 let body = lower_expr(&mut cx, body)?;
@@ -529,6 +530,7 @@ struct BodyCx<'a> {
     module: usize,
     locals: Vec<hir::Local>,
     scope: Vec<(String, usize)>,
+    capture: Option<CaptureCx>,
 }
 
 impl<'a> BodyCx<'a> {
@@ -544,8 +546,36 @@ impl<'a> BodyCx<'a> {
     }
 }
 
+struct CaptureCx {
+    arguments: Vec<hir::Argument>,
+    locals: Vec<hir::Local>,
+    scope: Vec<(String, usize)>,
+    captures: Vec<(Capture, hir::Ty)>,
+    parent: Option<Box<CaptureCx>>,
+}
+
+impl CaptureCx {
+    fn add_capture(&mut self, capture: Capture, ty: hir::Ty) -> usize {
+        if let Some(index) = self.captures.iter().position(|(c, _)| *c == capture) {
+            return index;
+        }
+
+        let index = self.captures.len();
+        self.captures.push((capture, ty));
+        index
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Capture {
+    Argument(usize),
+    Captured(usize),
+    Local(usize),
+}
+
 fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
     match ast {
+        ast::Expr::Void => lower_void(cx),
         ast::Expr::Int(negative, base, digits, span) => {
             lower_int(cx, *negative, *base, digits, *span)
         }
@@ -567,6 +597,12 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Match(input, arms) => lower_match(cx, input, arms),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
     }
+}
+
+fn lower_void(_cx: &mut BodyCx) -> miette::Result<hir::Expr> {
+    let ty = hir::Ty::void();
+    let kind = hir::ExprKind::Void;
+    Ok(hir::Expr { kind, ty })
 }
 
 fn lower_int(
@@ -614,10 +650,8 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 let expr = hir::Expr { kind, ty };
 
                 let ty = hir::Ty::any();
-                cx.unit.unify(
-                    hir::Ty::Partial(hir::Part::Mut, vec![ty.clone()]),
-                    cx.locals[*id].ty.clone(),
-                );
+                let outer = cx.locals[*id].ty.clone();
+                cx.unit.unify(hir::Ty::new_mut(ty.clone()), outer);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -628,6 +662,25 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             if argument.name == *name {
                 let ty = argument.ty.clone();
                 let kind = hir::ExprKind::Argument(i);
+                return Ok(hir::Expr { kind, ty });
+            }
+        }
+
+        if let Some(ref mut capture_cx) = cx.capture {
+            if let Some((mutable, capture, ty)) = find_item_capture(capture_cx, name) {
+                if !mutable {
+                    let kind = hir::ExprKind::Capture(capture);
+                    return Ok(hir::Expr { kind, ty });
+                }
+
+                let outer = ty.clone();
+                let kind = hir::ExprKind::Capture(capture);
+                let expr = hir::Expr { kind, ty };
+
+                let ty = hir::Ty::any();
+                cx.unit.unify(hir::Ty::new_mut(ty.clone()), outer);
+
+                let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
             }
         }
@@ -681,6 +734,33 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             Ok(hir::Expr { kind, ty })
         }
     }
+}
+
+fn find_item_capture(cx: &mut CaptureCx, name: &str) -> Option<(bool, usize, hir::Ty)> {
+    for (i, local) in cx.locals.clone().into_iter().enumerate() {
+        if local.name == name {
+            let ty = local.ty.clone();
+            let index = cx.add_capture(Capture::Local(i), ty.clone());
+            return Some((local.mutable, index, ty));
+        }
+    }
+
+    for (i, argument) in cx.arguments.clone().into_iter().enumerate() {
+        if argument.name == name {
+            let ty = argument.ty.clone();
+            let index = cx.add_capture(Capture::Argument(i), ty.clone());
+            return Some((false, index, ty));
+        }
+    }
+
+    if let Some(ref mut parent) = cx.parent {
+        if let Some((mutable, capture, ty)) = find_item_capture(parent, name) {
+            let index = cx.add_capture(Capture::Captured(capture), ty.clone());
+            return Some((mutable, index, ty));
+        }
+    }
+
+    None
 }
 
 fn lower_tuple(cx: &mut BodyCx, exprs: &[ast::Expr]) -> miette::Result<hir::Expr> {
@@ -946,18 +1026,50 @@ fn lower_closure(
 
     let mut body_cx = BodyCx {
         unit: cx.unit,
-        arguments: &input,
+        arguments: &input.clone(),
         generics: cx.generics,
         module: cx.module,
         locals: Vec::new(),
         scope: Vec::new(),
+        capture: Some(CaptureCx {
+            arguments: cx.arguments.to_vec(),
+            locals: cx.locals.to_vec(),
+            scope: cx.scope.to_vec(),
+            captures: Vec::new(),
+            parent: cx.capture.take().map(Box::new),
+        }),
     };
 
     let body = lower_expr(&mut body_cx, body)?;
 
+    let capture = body_cx.capture.take().unwrap();
+    cx.capture = capture.parent.map(|parent| *parent);
+
+    let mut captured = Vec::new();
+    let mut captures = Vec::new();
+
+    for (capture, ty) in capture.captures {
+        match capture {
+            Capture::Argument(index) => {
+                let kind = hir::ExprKind::Argument(index);
+                captures.push(ty.clone());
+                captured.push(hir::Expr { kind, ty });
+            }
+            Capture::Local(index) => {
+                let kind = hir::ExprKind::Local(index);
+                captures.push(ty.clone());
+                captured.push(hir::Expr { kind, ty });
+            }
+            Capture::Captured(index) => {
+                let kind = hir::ExprKind::Capture(index);
+                captures.push(ty.clone());
+                captured.push(hir::Expr { kind, ty });
+            }
+        }
+    }
+
     let output = body.ty.clone();
     let locals = body_cx.locals;
-    let captures = Vec::new();
 
     let parts = input
         .iter()
@@ -978,7 +1090,7 @@ fn lower_closure(
 
     let id = cx.unit.push_func(func);
 
-    let kind = hir::ExprKind::Closure(id, Vec::new());
+    let kind = hir::ExprKind::Closure(id, captured);
     let ty = hir::Ty::Partial(hir::Part::Func, parts);
     Ok(hir::Expr { kind, ty })
 }

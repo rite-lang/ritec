@@ -86,6 +86,7 @@ pub struct Generic {
 
 #[derive(Debug)]
 pub enum Expr {
+    Void,
     String(&'static str, Span),
     Int(bool, Base, Vec<u8>, Span),
     Bool(bool, Span),

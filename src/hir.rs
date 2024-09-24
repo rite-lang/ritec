@@ -66,7 +66,7 @@ pub struct Func {
     pub body: Expr,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Local {
     pub mutable: bool,
     pub name: &'static str,
@@ -159,6 +159,7 @@ pub enum ExprKind {
     Variant(usize, usize),
     Local(usize),
     Argument(usize),
+    Capture(usize),
     Tuple(Vec<Expr>),
     List(Vec<Expr>, Option<Box<Expr>>),
     ListHead(Box<Expr>),
@@ -276,6 +277,10 @@ impl Ty {
 
     pub const fn int(kind: IntKind) -> Self {
         Ty::Partial(Part::Int(kind), Vec::new())
+    }
+
+    pub fn new_mut(ty: Ty) -> Self {
+        Ty::Partial(Part::Mut, vec![ty])
     }
 
     pub fn specialize(&self, generics: &[Ty]) -> Ty {
