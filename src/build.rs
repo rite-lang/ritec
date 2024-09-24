@@ -83,6 +83,7 @@ fn build_ty(builder: &mut Builder, ty: &rir::Ty) -> mir::Ty {
     match ty {
         rir::Ty::Void => mir::Ty::Void,
         rir::Ty::Bool => mir::Ty::Bool,
+        rir::Ty::Str => mir::Ty::Str,
         rir::Ty::Int(kind) => mir::Ty::Int(*kind),
         rir::Ty::List(item) => {
             let item = Box::new(build_ty(builder, item));
@@ -135,6 +136,7 @@ fn extract_generics(unit: &rir::Unit, ty: &rir::Ty, expected: &mir::Ty) -> Vec<m
         match (ty, ex) {
             (rir::Ty::Void, mir::Ty::Void) => {}
             (rir::Ty::Bool, mir::Ty::Bool) => {}
+            (rir::Ty::Str, mir::Ty::Str) => {}
             (rir::Ty::Int(kind), mir::Ty::Int(ex)) => {
                 assert_eq!(kind, ex);
             }
@@ -192,6 +194,7 @@ fn build_expr(builder: &mut Builder, expr: &rir::Expr) -> miette::Result<mir::Ex
         rir::ExprKind::Int(negative, base, ref value) => {
             build_int_expr(builder, &expr.ty, negative, base, value)
         }
+        rir::ExprKind::String(ref value) => build_string_expr(builder, &expr.ty, value),
         rir::ExprKind::Bool(value) => build_bool_expr(builder, &expr.ty, value),
         rir::ExprKind::Func(index, ref captured) => {
             build_func_expr(builder, &expr.ty, index, captured)
@@ -246,12 +249,17 @@ fn build_bool_expr(builder: &mut Builder, ty: &rir::Ty, value: bool) -> miette::
     Ok(mir::Expr { kind, ty })
 }
 
-fn build_func_expr(
+fn build_string_expr(
     builder: &mut Builder,
     ty: &rir::Ty,
-    index: usize,
-    captured: &[rir::Expr],
+    value: &'static str,
 ) -> miette::Result<mir::Expr> {
+    let kind = mir::ExprKind::Const(mir::Constant::String(value.into()));
+    let ty = build_ty(builder, ty);
+    Ok(mir::Expr { kind, ty })
+}
+
+fn build_func_expr(builder: &mut Builder, ty: &rir::Ty, index: usize) -> miette::Result<mir::Expr> {
     let ty = build_ty(builder, ty);
     let generics = extract_generics(builder.unit, &builder.unit.funcs[index].ty(), &ty);
 

@@ -73,6 +73,7 @@ pub enum Ty {
     Item(Path),
     List(Box<Ty>),
     Generic(Generic),
+    Str,
 }
 
 #[derive(Debug)]
@@ -83,6 +84,7 @@ pub struct Generic {
 
 #[derive(Debug)]
 pub enum Expr {
+    String(&'static str, Span),
     Int(bool, Base, Vec<u8>, Span),
     Bool(bool, Span),
     Paren(Box<Expr>, Span),

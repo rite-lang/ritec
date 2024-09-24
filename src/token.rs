@@ -8,6 +8,7 @@ pub enum Token {
     Pascal,
     Integer,
     Float,
+    String,
 
     /* control */
     Newline,
@@ -52,6 +53,7 @@ pub enum Token {
     U64,
     U8,
     Void,
+    Str,
 
     /* two-character symbols */
     DotDot,
@@ -115,6 +117,7 @@ impl Token {
             "u64" => Token::U64,
             "u8" => Token::U8,
             "void" => Token::Void,
+            "str" => Token::Str,
             _ => return None,
         })
     }

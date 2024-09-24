@@ -64,6 +64,7 @@ pub struct Argument {
 pub enum Ty {
     Void,
     Bool,
+    Str,
     Int(IntKind),
     List(Box<Ty>),
     Tuple(Vec<Ty>),
@@ -82,6 +83,7 @@ pub struct Expr {
 pub enum ExprKind {
     Void,
     Int(bool, Base, Vec<u8>),
+    String(&'static str),
     Bool(bool),
     Func(usize, Vec<Expr>),
     Variant(usize, usize),
@@ -274,6 +276,10 @@ impl Ty {
                     assert!(arguments.is_empty());
                     Ok(Ty::Bool)
                 }
+                hir::Part::Str => {
+                    assert!(arguments.is_empty());
+                    Ok(Ty::Str)
+                }
                 hir::Part::List => {
                     assert_eq!(arguments.len(), 1);
                     Ok(Ty::List(Box::new(Ty::from_hir(
@@ -366,6 +372,7 @@ impl ExprKind {
     ) -> miette::Result<Self> {
         match kind {
             hir::ExprKind::Void => Ok(ExprKind::Void),
+            hir::ExprKind::String(s) => Ok(ExprKind::String(s)),
             hir::ExprKind::Int(n, base, bytes) => Ok(ExprKind::Int(*n, *base, bytes.clone())),
             hir::ExprKind::Bool(b) => Ok(ExprKind::Bool(*b)),
             hir::ExprKind::Func(i) => Ok(ExprKind::Func(*i, Vec::new())),

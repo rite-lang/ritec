@@ -8,6 +8,7 @@ pub enum Value {
     Func(usize, Vec<Value>),
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
+    String(&'static str),
 }
 
 impl std::fmt::Display for Value {
@@ -108,6 +109,7 @@ impl<'a> Interpreter<'a> {
 
                     Value::Int(n)
                 }
+                mir::Constant::String(value) => Value::String(value),
                 mir::Constant::Bool(value) => Value::Bool(*value),
             },
             mir::ExprKind::Func(func, captured) => {

@@ -219,6 +219,7 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
     match ty {
         ast::Ty::Void => Ok(hir::Ty::void()),
         ast::Ty::Bool => Ok(hir::Ty::bool()),
+        ast::Ty::Str => Ok(hir::Ty::string()),
         ast::Ty::Int(kind) => Ok(hir::Ty::Partial(hir::Part::Int(*kind), Vec::new())),
         ast::Ty::Tuple(tys) => {
             let mut args = Vec::new();
@@ -415,6 +416,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
             lower_int(cx, *negative, *base, digits, *span)
         }
         ast::Expr::Bool(value, span) => lower_bool(cx, *value, *span),
+        ast::Expr::String(value, span) => lower_string(cx, value, *span),
         ast::Expr::Paren(expr, _) => lower_expr(cx, expr),
         ast::Expr::Item(path) => lower_item(cx, path),
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
@@ -446,6 +448,12 @@ fn lower_int(
 fn lower_bool(_cx: &mut BodyCx, value: bool, _span: Span) -> miette::Result<hir::Expr> {
     let ty = hir::Ty::bool();
     let kind = hir::ExprKind::Bool(value);
+    Ok(hir::Expr { kind, ty })
+}
+
+fn lower_string(_cx: &mut BodyCx, value: &'static str, _span: Span) -> miette::Result<hir::Expr> {
+    let ty = hir::Ty::string();
+    let kind = hir::ExprKind::String(value);
     Ok(hir::Expr { kind, ty })
 }
 

@@ -254,6 +254,10 @@ fn lex_token(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
         return Ok((token, span));
     }
 
+    if c == '"' {
+        return lex_string(lexer);
+    }
+
     if c.is_alphabetic() || c == '_' {
         let (token, span) = lex_identifier(lexer)?;
 
@@ -348,4 +352,49 @@ fn lex_integer(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     };
 
     Ok((Token::Integer, span))
+}
+
+fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    let lo = lexer.lo;
+    let mut str = String::new();
+
+    _ = lexer.next().unwrap();
+
+    while let Some(c) = lexer.next() {
+        match c {
+            '"' => break,
+            '\\' => {
+                let c = lexer.next().expect("unexpected end of input");
+
+                match c {
+                    'n' => str.push('\n'),
+                    'r' => str.push('\r'),
+                    't' => str.push('\t'),
+                    '\\' => str.push('\\'),
+                    '"' => str.push('"'),
+                    _ => {
+                        return Err(miette::miette!(
+                            severity = Severity::Error,
+                            code = "invalid::escape",
+                            help = "only \\n, \\r, \\t, \\\\ and \\\" are valid escape sequences",
+                            labels = vec![LabeledSpan::at_offset(lexer.lo, "here")],
+                            "invalid escape sequence"
+                        )
+                        .with_source_code(lexer.source_code()))
+                    }
+                }
+            }
+            c => str.push(c),
+        }
+    }
+
+    Ok((
+        Token::String,
+        Span {
+            lo,
+            hi: lexer.lo,
+            file: lexer.file,
+            source: lexer.source,
+        },
+    ))
 }

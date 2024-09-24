@@ -134,6 +134,7 @@ pub enum Part {
     List,
     Tuple,
     Func,
+    Str,
     Int(IntKind),
     Generic(usize),
     Adt(usize),
@@ -148,6 +149,7 @@ pub struct Expr {
 #[derive(Clone, Debug)]
 pub enum ExprKind {
     Void,
+    String(&'static str),
     Int(bool, Base, Vec<u8>),
     Bool(bool),
     Func(usize),
@@ -261,6 +263,10 @@ impl Ty {
         Ty::Partial(Part::Bool, Vec::new())
     }
 
+    pub const fn string() -> Self {
+        Ty::Partial(Part::Str, Vec::new())
+    }
+
     pub const fn int(kind: IntKind) -> Self {
         Ty::Partial(Part::Int(kind), Vec::new())
     }
@@ -333,6 +339,7 @@ pub fn format_partial(part: &Part, args: &[Ty]) -> String {
     match part {
         Part::Void => String::from("void"),
         Part::Bool => String::from("bool"),
+        Part::Str => String::from("str"),
         Part::List => format!("[{}]", args[0]),
         Part::Tuple => {
             let args = args

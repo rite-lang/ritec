@@ -39,6 +39,7 @@ pub enum Ty {
     Tuple(Vec<Ty>),
     Func(Vec<Ty>, Box<Ty>),
     Adt(Vec<Variant>),
+    Str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -82,6 +83,7 @@ pub enum Match {
 #[derive(Clone, Debug)]
 pub enum Constant {
     Void,
+    String(&'static str),
     Bool(bool),
     Int(bool, Base, Vec<u8>),
 }
