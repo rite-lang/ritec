@@ -216,6 +216,8 @@ impl BinOp {
 pub enum UnOp {
     Mut,
     Deref,
+    Neg,
+    Not,
 }
 
 #[derive(Debug)]

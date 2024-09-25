@@ -7,7 +7,7 @@ use std::{
 use crate::{
     ast::BinOp,
     infer::TyEnv,
-    number::{Base, FloatKind, IntKind},
+    number::{Base, IntKind},
     span::Span,
 };
 
@@ -125,8 +125,9 @@ pub struct Tid {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Inferred {
     Any,
-    Int(IntKind),
-    Float(FloatKind),
+    Unsigned,
+    Signed,
+    Float,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -171,12 +172,19 @@ pub enum ExprKind {
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
+    Unary(UnOp, Box<Expr>),
     Mut(Box<Expr>),
     Deref(Box<Expr>),
     Let(usize, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
     Closure(Vec<Local>, Vec<Expr>, Box<Expr>),
     Match(Box<Expr>, Match),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UnOp {
+    Neg,
+    Not,
 }
 
 #[derive(Clone, Debug)]
@@ -326,8 +334,9 @@ impl Ty {
         match self {
             Ty::Inferred(_, kind, _, _) => match kind {
                 Inferred::Any => String::from("_"),
-                Inferred::Int(kind) => format!("{{{}}}", kind),
-                Inferred::Float(kind) => format!("{{{}}}", kind),
+                Inferred::Unsigned => String::from("{unsigned}"),
+                Inferred::Signed => String::from("{signed}"),
+                Inferred::Float => String::from("{float}"),
             },
             Ty::Partial(part, args) => Self::format_partial(unit, part, args),
             Ty::Field(_, _) => todo!(),

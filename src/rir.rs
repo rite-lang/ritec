@@ -1,6 +1,7 @@
 use crate::{
     ast::BinOp,
-    number::{Base, IntKind},
+    hir::UnOp,
+    number::{Base, FloatKind, IntKind},
     span::Span,
 };
 
@@ -101,6 +102,7 @@ pub enum Ty {
     Str,
     Mut(Box<Ty>),
     Int(IntKind),
+    Float(FloatKind),
     List(Box<Ty>),
     Tuple(Vec<Ty>),
     Func(Vec<Ty>, Box<Ty>),
@@ -121,6 +123,7 @@ pub enum Specific {
     Str,
     Mut(Box<Specific>),
     Int(IntKind),
+    Float(FloatKind),
     List(Box<Specific>),
     Tuple(Vec<Specific>),
     Func(Vec<Specific>, Box<Specific>),
@@ -177,6 +180,7 @@ pub enum Value<T = Ty> {
     ListHead(Operand<T>),
     ListTail(Operand<T>),
     Binary(BinOp, Operand<T>, Operand<T>),
+    Unary(UnOp, Operand<T>),
     Call(Operand<T>, Vec<Operand<T>>),
     Mut(Place<T>),
     Tuple(Vec<Operand<T>>),

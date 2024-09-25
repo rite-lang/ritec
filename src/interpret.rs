@@ -2,6 +2,7 @@ use std::{cell::RefCell, iter::Peekable, rc::Rc};
 
 use crate::{
     ast::BinOp,
+    hir::UnOp,
     rir::{
         self, Block, Constant, Location, Operand, Place, Projection, ProjectionKind, Specific,
         Statement, Unit,
@@ -311,6 +312,26 @@ impl<'a> Interpreter<'a> {
                         };
 
                         Value::Bool(lhs >= rhs)
+                    }
+                }
+            }
+            rir::Value::Unary(op, operand) => {
+                let operand = self.interpret_operand(frame, operand);
+
+                match op {
+                    UnOp::Neg => {
+                        let Value::Int(operand) = operand else {
+                            panic!("expected integer")
+                        };
+
+                        Value::Int(-operand)
+                    }
+                    UnOp::Not => {
+                        let Value::Bool(operand) = operand else {
+                            panic!("expected boolean")
+                        };
+
+                        Value::Bool(!operand)
                     }
                 }
             }

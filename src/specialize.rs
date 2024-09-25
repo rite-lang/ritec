@@ -157,6 +157,7 @@ fn specialize_ty(spec: &mut Specializer, ty: &Ty) -> Specific {
         Ty::Str => Specific::Str,
         Ty::Mut(ty) => Specific::Mut(Box::new(specialize_ty(spec, ty))),
         Ty::Int(kind) => Specific::Int(*kind),
+        Ty::Float(kind) => Specific::Float(*kind),
         Ty::List(ty) => Specific::List(Box::new(specialize_ty(spec, ty))),
         Ty::Tuple(items) => {
             let items = items.iter().map(|ty| specialize_ty(spec, ty)).collect();
@@ -283,6 +284,7 @@ fn specialize_value(spec: &mut Specializer, value: Value) -> Value<Specific> {
             specialize_operand(spec, lhs),
             specialize_operand(spec, rhs),
         ),
+        Value::Unary(op, operand) => Value::Unary(op, specialize_operand(spec, operand)),
         Value::Call(func, args) => {
             let func = specialize_operand(spec, func);
 

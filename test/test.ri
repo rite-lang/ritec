@@ -2,8 +2,8 @@ import std:list
 import std:result
 
 type Foo(
-  a: int
-  b: int
+  a: u8
+  b: u8
 )
 
 fn main()

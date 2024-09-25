@@ -191,16 +191,37 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
             }
 
             match kind {
-                Inferred::Int(kind) if ty != Ty::int(kind) => {
-                    return Err(miette::miette!(
-                        "expected `{}` but found `{}`",
-                        hir::Ty::int(kind).format(unit),
-                        ty.format(unit),
-                    )
-                    .into());
+                Inferred::Any => {}
+                Inferred::Unsigned => {
+                    if !matches!(ty, Ty::Partial(Part::Int(_), _)) {
+                        return Err(miette::miette!(
+                            "expected `{}` but found `{}`",
+                            inferred.format(unit),
+                            ty.format(unit),
+                        )
+                        .into());
+                    }
                 }
-                Inferred::Float(_) => todo!(),
-                _ => {}
+                Inferred::Signed => {
+                    let hir::Ty::Partial(hir::Part::Int(kind), _) = ty.clone() else {
+                        return Err(miette::miette!(
+                            "expected `{}` but found `{}`",
+                            inferred.format(unit),
+                            ty.format(unit),
+                        )
+                        .into());
+                    };
+
+                    if !kind.is_signed() {
+                        return Err(miette::miette!(
+                            "expected `{}` but found `{}`",
+                            inferred.format(unit),
+                            ty.format(unit),
+                        )
+                        .into());
+                    }
+                }
+                Inferred::Float => todo!(),
             }
 
             unit.env.substitutions.insert(inferred.clone(), ty.clone());
@@ -214,10 +235,12 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
 }
 
 fn is_sub_kind(a: &Inferred, b: &Inferred) -> bool {
+    #[allow(clippy::match_like_matches_macro)]
     match (a, b) {
         (Inferred::Any, _) => true,
-        (Inferred::Int(a), Inferred::Int(b)) => a == b,
-        (Inferred::Float(a), Inferred::Float(b)) => a == b,
+        (Inferred::Unsigned, Inferred::Unsigned | Inferred::Signed) => true,
+        (Inferred::Signed, Inferred::Signed) => true,
+        (Inferred::Float, Inferred::Float) => true,
         _ => false,
     }
 }

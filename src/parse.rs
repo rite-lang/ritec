@@ -729,6 +729,16 @@ fn parse_unary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
             let expr = parse_unary(tokens, multiline)?;
             Ok(Expr::Unary(UnOp::Deref, Box::new(expr), span))
         }
+        Token::Minus => {
+            tokens.consume();
+            let expr = parse_unary(tokens, multiline)?;
+            Ok(Expr::Unary(UnOp::Neg, Box::new(expr), span))
+        }
+        Token::Not => {
+            tokens.consume();
+            let expr = parse_unary(tokens, multiline)?;
+            Ok(Expr::Unary(UnOp::Not, Box::new(expr), span))
+        }
         _ => parse_call(tokens, multiline),
     }
 }
@@ -780,6 +790,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     match token {
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
+        Token::Minus => parse_integer(tokens),
         Token::String => parse_string(tokens),
         Token::LBracket => parse_list(tokens, multiline),
         Token::Void => {

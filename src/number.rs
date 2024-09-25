@@ -11,6 +11,15 @@ pub enum IntKind {
     Int,
 }
 
+impl IntKind {
+    pub fn is_signed(self) -> bool {
+        matches!(
+            self,
+            IntKind::I8 | IntKind::I16 | IntKind::I32 | IntKind::I64 | IntKind::Int
+        )
+    }
+}
+
 impl std::fmt::Display for IntKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

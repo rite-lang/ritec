@@ -1,6 +1,11 @@
 use miette::Severity;
 
-use crate::{hir, rir, span::Span};
+use crate::{
+    hir,
+    number::{FloatKind, IntKind},
+    rir,
+    span::Span,
+};
 
 pub fn build(hir: &hir::Unit) -> miette::Result<rir::Unit> {
     let mut rir = rir::Unit::default();
@@ -258,6 +263,7 @@ fn build_place(
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
+        | hir::ExprKind::Unary(_, _)
         | hir::ExprKind::Mut(_)
         | hir::ExprKind::Let(_, _)
         | hir::ExprKind::Assign(_, _)
@@ -460,6 +466,7 @@ fn build_operand(
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
+        | hir::ExprKind::Unary(_, _)
         | hir::ExprKind::Mut(_)
         | hir::ExprKind::Closure(_, _, _) => {
             let value = build_value(builder, block, expr)?;
@@ -538,6 +545,12 @@ fn build_value(
             let rhs = build_operand(builder, block, rhs)?;
 
             Ok(rir::Value::Binary(op, lhs, rhs))
+        }
+
+        hir::ExprKind::Unary(op, ref expr) => {
+            let expr = build_operand(builder, block, expr)?;
+
+            Ok(rir::Value::Unary(op, expr))
         }
 
         hir::ExprKind::Tuple(ref exprs) => {
@@ -890,8 +903,9 @@ fn build_ty(
 
         match kind {
             hir::Inferred::Any => Err(Ok(span)),
-            hir::Inferred::Int(kind) => Ok(rir::Ty::Int(kind)),
-            hir::Inferred::Float(_) => todo!(),
+            hir::Inferred::Unsigned => Ok(rir::Ty::Int(IntKind::Int)),
+            hir::Inferred::Signed => Ok(rir::Ty::Int(IntKind::Int)),
+            hir::Inferred::Float => Ok(rir::Ty::Float(FloatKind::F64)),
         }
     }
 

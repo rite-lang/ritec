@@ -2,11 +2,7 @@ use std::mem;
 
 use miette::Severity;
 
-use crate::{
-    ast, hir,
-    number::{Base, IntKind},
-    span::Span,
-};
+use crate::{ast, hir, number::Base, span::Span};
 
 pub fn type_register_ast(
     unit: &mut hir::Unit,
@@ -692,7 +688,12 @@ fn lower_int(
     digits: &[u8],
     span: Span,
 ) -> miette::Result<hir::Expr> {
-    let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int), span);
+    let kind = match negative {
+        true => hir::Inferred::Signed,
+        false => hir::Inferred::Unsigned,
+    };
+
+    let ty = hir::Ty::inferred(kind, span);
 
     let kind = hir::ExprKind::Int(negative, base, digits.to_vec());
     Ok(hir::Expr { kind, ty })
@@ -983,16 +984,8 @@ fn lower_binary(
     let rhs = lower_expr(cx, rhs)?;
 
     match op {
-        ast::BinOp::Add
-        | ast::BinOp::Sub
-        | ast::BinOp::Mul
-        | ast::BinOp::Div
-        | ast::BinOp::Rem
-        | ast::BinOp::Lt
-        | ast::BinOp::Le
-        | ast::BinOp::Gt
-        | ast::BinOp::Ge => {
-            let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int), span);
+        ast::BinOp::Add | ast::BinOp::Sub | ast::BinOp::Mul | ast::BinOp::Div | ast::BinOp::Rem => {
+            let ty = hir::Ty::inferred(hir::Inferred::Unsigned, span);
 
             cx.unit.unify(lhs.ty.clone(), ty.clone());
             cx.unit.unify(rhs.ty.clone(), ty.clone());
@@ -1000,6 +993,19 @@ fn lower_binary(
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
             Ok(hir::Expr { kind, ty })
         }
+
+        ast::BinOp::Lt | ast::BinOp::Le | ast::BinOp::Gt | ast::BinOp::Ge => {
+            let ty = hir::Ty::inferred(hir::Inferred::Unsigned, span);
+
+            cx.unit.unify(lhs.ty.clone(), ty.clone());
+            cx.unit.unify(rhs.ty.clone(), ty.clone());
+
+            let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
+            let ty = hir::Ty::bool();
+
+            Ok(hir::Expr { kind, ty })
+        }
+
         ast::BinOp::Eq | ast::BinOp::Ne => {
             cx.unit.unify(lhs.ty.clone(), rhs.ty.clone());
 
@@ -1039,6 +1045,20 @@ fn lower_unary(
             cx.unit.unify(expr.ty.clone(), mut_ty.clone());
 
             let kind = hir::ExprKind::Deref(Box::new(expr));
+            Ok(hir::Expr { kind, ty })
+        }
+        ast::UnOp::Neg => {
+            let ty = hir::Ty::inferred(hir::Inferred::Signed, span);
+            cx.unit.unify(expr.ty.clone(), ty.clone());
+
+            let kind = hir::ExprKind::Unary(hir::UnOp::Neg, Box::new(expr));
+            Ok(hir::Expr { kind, ty })
+        }
+        ast::UnOp::Not => {
+            let ty = hir::Ty::bool();
+            cx.unit.unify(expr.ty.clone(), ty.clone());
+
+            let kind = hir::ExprKind::Unary(hir::UnOp::Not, Box::new(expr));
             Ok(hir::Expr { kind, ty })
         }
     }
