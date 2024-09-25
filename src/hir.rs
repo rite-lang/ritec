@@ -138,7 +138,7 @@ pub enum Part {
     Tuple,
     Func,
     Str,
-    Mut,
+    Ref,
     Int(IntKind),
     Generic(usize, Option<usize>),
     Adt(usize),
@@ -173,7 +173,7 @@ pub enum ExprKind {
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Unary(UnOp, Box<Expr>),
-    Mut(Box<Expr>),
+    Ref(Box<Expr>),
     Deref(Box<Expr>),
     Let(usize, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
@@ -287,8 +287,8 @@ impl Ty {
         Ty::Partial(Part::Int(kind), Vec::new())
     }
 
-    pub fn new_mut(ty: Ty) -> Self {
-        Ty::Partial(Part::Mut, vec![ty])
+    pub fn new_ref(ty: Ty) -> Self {
+        Ty::Partial(Part::Ref, vec![ty])
     }
 
     pub fn specialize(&self, generics: &[Ty]) -> Ty {
@@ -376,7 +376,7 @@ impl Ty {
                 format!("fn({}) -> {}", input, output)
             }
             Part::Int(kind) => format!("{}", kind),
-            Part::Mut => format!("mut {}", args[0].format(unit)),
+            Part::Ref => format!("&{}", args[0].format(unit)),
             Part::Generic(id, _) => format!("<{}>", id),
             Part::Adt(id) => {
                 let name = &unit.adts[*id].name;

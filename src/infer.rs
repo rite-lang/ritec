@@ -413,6 +413,10 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
 fn normalize_field(unit: &mut Unit, adt: &Ty, field: &str) -> Result<Ty, RetryOrError> {
     let adt = normalize(unit, adt)?;
 
+    if let Ty::Partial(Part::Ref, args) = adt {
+        return normalize_field(unit, &args[0], field);
+    }
+
     let (index, generics) = match adt {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Adt(index), generics) => (index, generics),

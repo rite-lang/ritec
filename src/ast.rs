@@ -80,7 +80,7 @@ pub enum Ty {
     Str,
     Inferred,
     Int(IntKind),
-    Mut(Box<Ty>),
+    Ref(Box<Ty>),
     Tuple(Vec<Ty>),
     Item(Path, Option<Vec<Ty>>),
     List(Box<Ty>),
@@ -214,7 +214,7 @@ impl BinOp {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnOp {
-    Mut,
+    Ref,
     Deref,
     Neg,
     Not,

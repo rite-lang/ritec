@@ -2,6 +2,12 @@ pub type Result =
   | Ok(ok: 'a)
   | Err(err: 'b)
 
+pub fn some(value: 'a) -> Result<'a, void>
+  Ok(value)
+
+pub fn none() -> Result<'a, void>
+  Err(void)
+
 pub fn is_ok(result: Result<'a, 'b>) -> bool
   match result
   | Ok(_) -> true

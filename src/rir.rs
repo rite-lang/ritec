@@ -100,7 +100,7 @@ pub enum Ty {
     Void,
     Bool,
     Str,
-    Mut(Box<Ty>),
+    Ref(Box<Ty>),
     Int(IntKind),
     Float(FloatKind),
     List(Box<Ty>),
@@ -112,7 +112,7 @@ pub enum Ty {
 
 impl Ty {
     pub fn is_mut(&self) -> bool {
-        matches!(self, Ty::Mut(_))
+        matches!(self, Ty::Ref(_))
     }
 }
 
@@ -121,7 +121,7 @@ pub enum Specific {
     Void,
     Bool,
     Str,
-    Mut(Box<Specific>),
+    Ref(Box<Specific>),
     Int(IntKind),
     Float(FloatKind),
     List(Box<Specific>),
@@ -182,7 +182,7 @@ pub enum Value<T = Ty> {
     Binary(BinOp, Operand<T>, Operand<T>),
     Unary(UnOp, Operand<T>),
     Call(Operand<T>, Vec<Operand<T>>),
-    Mut(Place<T>),
+    Ref(Place<T>),
     Tuple(Vec<Operand<T>>),
     Adt(usize, Vec<Operand<T>>),
 }

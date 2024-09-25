@@ -183,11 +183,13 @@ fn build_place(
         hir::ExprKind::Deref(ref expr) => {
             let mut place = build_place(builder, block, expr)?;
 
-            assert!(matches!(place.ty, rir::Ty::Mut(_)));
+            let rir::Ty::Ref(ty) = place.ty() else {
+                unreachable!("unexpected deref: {:?}", place.ty)
+            };
 
             place.projection.push(rir::Projection {
                 kind: rir::ProjectionKind::Deref,
-                ty: builder.build_ty(&expr.ty)?,
+                ty: ty.as_ref().clone(),
                 span: None,
             });
 
@@ -197,11 +199,19 @@ fn build_place(
         hir::ExprKind::Field(ref expr, field) => {
             let mut place = build_place(builder, block, expr)?;
 
-            let rir::Ty::Adt(index, _) = place.ty else {
+            while let rir::Ty::Ref(ty) = place.ty() {
+                place.projection.push(rir::Projection {
+                    kind: rir::ProjectionKind::Deref,
+                    ty: ty.as_ref().clone(),
+                    span: None,
+                });
+            }
+
+            let rir::Ty::Adt(index, _) = place.ty() else {
                 unreachable!("unexpected field: {:?}", place.ty)
             };
 
-            let (field, _) = builder.hir.adts[index].find_field(field)?;
+            let (field, _) = builder.hir.adts[*index].find_field(field)?;
 
             place.projection.push(rir::Projection {
                 kind: rir::ProjectionKind::Field {
@@ -264,7 +274,7 @@ fn build_place(
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
         | hir::ExprKind::Unary(_, _)
-        | hir::ExprKind::Mut(_)
+        | hir::ExprKind::Ref(_)
         | hir::ExprKind::Let(_, _)
         | hir::ExprKind::Assign(_, _)
         | hir::ExprKind::Closure(_, _, _)
@@ -467,7 +477,7 @@ fn build_operand(
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
         | hir::ExprKind::Unary(_, _)
-        | hir::ExprKind::Mut(_)
+        | hir::ExprKind::Ref(_)
         | hir::ExprKind::Closure(_, _, _) => {
             let value = build_value(builder, block, expr)?;
             let ty = builder.build_ty(&expr.ty)?;
@@ -773,9 +783,9 @@ fn build_value(
             Ok(rir::Value::Call(rhs, arguments))
         }
 
-        hir::ExprKind::Mut(ref expr) => {
+        hir::ExprKind::Ref(ref expr) => {
             let place = build_place(builder, block, expr)?;
-            Ok(rir::Value::Mut(place))
+            Ok(rir::Value::Ref(place))
         }
 
         hir::ExprKind::Closure(ref locals, ref captured, ref body) => {
@@ -941,9 +951,9 @@ fn build_ty(
                     &arguments[0],
                 )?)))
             }
-            hir::Part::Mut => {
+            hir::Part::Ref => {
                 assert_eq!(arguments.len(), 1);
-                Ok(rir::Ty::Mut(Box::new(recurse(
+                Ok(rir::Ty::Ref(Box::new(recurse(
                     unit,
                     generics,
                     new_generics,
@@ -1053,7 +1063,7 @@ fn extract_generics(ty: &rir::Ty, from: &rir::Ty, generics: &mut Vec<Option<rir:
         (rir::Ty::Int(a), rir::Ty::Int(b)) => {
             assert_eq!(a, b);
         }
-        (rir::Ty::Mut(a), rir::Ty::Mut(b)) => extract_generics(a, b, generics),
+        (rir::Ty::Ref(a), rir::Ty::Ref(b)) => extract_generics(a, b, generics),
         (rir::Ty::List(a), rir::Ty::List(b)) => extract_generics(a, b, generics),
         (rir::Ty::Tuple(a), rir::Ty::Tuple(b)) => {
             assert_eq!(a.len(), b.len());

@@ -18,7 +18,7 @@ pub enum Value {
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
     String(&'static str),
-    Mut(Rc<RefCell<Value>>),
+    Ref(Rc<RefCell<Value>>),
 }
 
 impl std::fmt::Display for Value {
@@ -53,7 +53,7 @@ impl std::fmt::Display for Value {
 
                 write!(f, "}}")
             }
-            Value::Mut(value) => write!(f, "mut {}", value.borrow()),
+            Value::Ref(value) => write!(f, "&{}", value.borrow()),
         }
     }
 }
@@ -354,9 +354,9 @@ impl<'a> Interpreter<'a> {
                 self.interpret_block(&mut frame, &self.mir.funcs[func].body)
                     .unwrap()
             }
-            rir::Value::Mut(place) => {
+            rir::Value::Ref(place) => {
                 let value = self.interpret_copy_place(frame, place);
-                Value::Mut(Rc::new(RefCell::new(value)))
+                Value::Ref(Rc::new(RefCell::new(value)))
             }
             rir::Value::Tuple(items) => {
                 let items = items
@@ -399,7 +399,7 @@ impl<'a> Interpreter<'a> {
                     _ => todo!(),
                 },
                 ProjectionKind::Deref => {
-                    let Value::Mut(mut_value) = value else {
+                    let Value::Ref(mut_value) = value else {
                         panic!("expected mutable reference");
                     };
 
@@ -430,7 +430,7 @@ impl<'a> Interpreter<'a> {
                         _ => todo!(),
                     },
                     ProjectionKind::Deref => {
-                        let Value::Mut(ref target) = target else {
+                        let Value::Ref(ref target) = target else {
                             panic!("expected mutable reference");
                         };
 

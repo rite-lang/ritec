@@ -155,7 +155,7 @@ fn specialize_ty(spec: &mut Specializer, ty: &Ty) -> Specific {
         Ty::Void => Specific::Void,
         Ty::Bool => Specific::Bool,
         Ty::Str => Specific::Str,
-        Ty::Mut(ty) => Specific::Mut(Box::new(specialize_ty(spec, ty))),
+        Ty::Ref(ty) => Specific::Ref(Box::new(specialize_ty(spec, ty))),
         Ty::Int(kind) => Specific::Int(*kind),
         Ty::Float(kind) => Specific::Float(*kind),
         Ty::List(ty) => Specific::List(Box::new(specialize_ty(spec, ty))),
@@ -295,7 +295,7 @@ fn specialize_value(spec: &mut Specializer, value: Value) -> Value<Specific> {
 
             Value::Call(func, args)
         }
-        Value::Mut(place) => Value::Mut(specialize_place(spec, place)),
+        Value::Ref(place) => Value::Ref(specialize_place(spec, place)),
         Value::Tuple(items) => {
             let items = items
                 .into_iter()

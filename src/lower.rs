@@ -356,9 +356,9 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
             ))
         }
         ast::Ty::Int(kind) => Ok(hir::Ty::Partial(hir::Part::Int(*kind), Vec::new())),
-        ast::Ty::Mut(ty) => {
+        ast::Ty::Ref(ty) => {
             let ty = lower_ty(cx, ty, span)?;
-            Ok(hir::Ty::Partial(hir::Part::Mut, vec![ty]))
+            Ok(hir::Ty::Partial(hir::Part::Ref, vec![ty]))
         }
         ast::Ty::Tuple(tys) => {
             let mut args = Vec::new();
@@ -732,7 +732,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
 
                 let ty = hir::Ty::any(path.span);
                 let outer = cx.locals[*id].ty.clone();
-                cx.unit.unify(hir::Ty::new_mut(ty.clone()), outer);
+                cx.unit.unify(hir::Ty::new_ref(ty.clone()), outer);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -759,7 +759,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 let expr = hir::Expr { kind, ty };
 
                 let ty = hir::Ty::any(path.span);
-                cx.unit.unify(hir::Ty::new_mut(ty.clone()), outer);
+                cx.unit.unify(hir::Ty::new_ref(ty.clone()), outer);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -1034,14 +1034,14 @@ fn lower_unary(
     let expr = lower_expr(cx, expr)?;
 
     match op {
-        ast::UnOp::Mut => {
-            let ty = hir::Ty::Partial(hir::Part::Mut, vec![expr.ty.clone()]);
-            let kind = hir::ExprKind::Mut(Box::new(expr));
+        ast::UnOp::Ref => {
+            let ty = hir::Ty::Partial(hir::Part::Ref, vec![expr.ty.clone()]);
+            let kind = hir::ExprKind::Ref(Box::new(expr));
             Ok(hir::Expr { kind, ty })
         }
         ast::UnOp::Deref => {
             let ty = hir::Ty::any(span);
-            let mut_ty = hir::Ty::Partial(hir::Part::Mut, vec![ty.clone()]);
+            let mut_ty = hir::Ty::Partial(hir::Part::Ref, vec![ty.clone()]);
             cx.unit.unify(expr.ty.clone(), mut_ty.clone());
 
             let kind = hir::ExprKind::Deref(Box::new(expr));
@@ -1086,7 +1086,7 @@ fn lower_mut(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::R
     let value = lower_expr(cx, expr)?;
 
     let id = cx.locals.len();
-    let ty = hir::Ty::Partial(hir::Part::Mut, vec![value.ty.clone()]);
+    let ty = hir::Ty::Partial(hir::Part::Ref, vec![value.ty.clone()]);
 
     cx.locals.push(hir::Local {
         mutable: true,
@@ -1096,7 +1096,7 @@ fn lower_mut(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::R
     cx.scope.push((name.to_owned(), id));
 
     let value_ty = value.ty.clone();
-    let kind = hir::ExprKind::Mut(Box::new(value));
+    let kind = hir::ExprKind::Ref(Box::new(value));
     let expr = hir::Expr { kind, ty: value_ty };
 
     let kind = hir::ExprKind::Let(id, Box::new(expr));

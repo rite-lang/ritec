@@ -259,10 +259,10 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.consume();
             Ok(Ty::Bool)
         }
-        Token::Mut => {
+        Token::Amp => {
             tokens.consume();
             let ty = parse_ty(tokens)?;
-            Ok(Ty::Mut(Box::new(ty)))
+            Ok(Ty::Ref(Box::new(ty)))
         }
         Token::Snake | Token::Pascal => {
             let path = parse_path(tokens)?;
@@ -719,10 +719,10 @@ fn parse_unary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
     let (token, span) = tokens.peek();
 
     match token {
-        Token::Mut => {
+        Token::Amp => {
             tokens.consume();
             let expr = parse_unary(tokens, multiline)?;
-            Ok(Expr::Unary(UnOp::Mut, Box::new(expr), span))
+            Ok(Expr::Unary(UnOp::Ref, Box::new(expr), span))
         }
         Token::Star => {
             tokens.consume();
