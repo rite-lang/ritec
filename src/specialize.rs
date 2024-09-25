@@ -283,7 +283,9 @@ fn specialize_value(spec: &mut Specializer, value: Value) -> Value<Specific> {
             specialize_operand(spec, rhs),
         ),
         Value::Unary(op, operand) => Value::Unary(op, specialize_operand(spec, operand)),
-        Value::VariantTag(operand) => Value::VariantTag(specialize_operand(spec, operand)),
+        Value::IsVariant(operand, variant) => {
+            Value::IsVariant(specialize_operand(spec, operand), variant)
+        }
         Value::Call(func, args) => {
             let func = specialize_operand(spec, func);
 

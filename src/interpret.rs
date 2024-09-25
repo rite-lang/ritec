@@ -431,12 +431,12 @@ impl<'a> Interpreter<'a> {
                     }
                 }
             }
-            rir::Value::VariantTag(value) => {
-                let Value::Adt(variant, _) = self.interpret_operand(frame, value) else {
+            rir::Value::IsVariant(value, variant) => {
+                let Value::Adt(current, _) = self.interpret_operand(frame, value) else {
                     panic!("expected adt")
                 };
 
-                Value::Int(variant as i64)
+                Value::Bool(current == *variant)
             }
             rir::Value::Call(func, args) => {
                 let Value::Func(func, captured) = self.interpret_operand(frame, func) else {

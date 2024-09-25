@@ -183,7 +183,7 @@ pub enum Value<T = Ty> {
     ListEmpty(Operand<T>),
     Binary(BinOp, Operand<T>, Operand<T>),
     Unary(UnOp, Operand<T>),
-    VariantTag(Operand<T>),
+    IsVariant(Operand<T>, usize),
     Call(Operand<T>, Vec<Operand<T>>),
     Ref(Place<T>),
     Tuple(Vec<Operand<T>>),

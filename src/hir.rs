@@ -186,7 +186,7 @@ pub enum ExprKind {
     Field(Box<Expr>, &'static str),
     VariantField(Box<Expr>, usize, usize),
     TupleField(Box<Expr>, usize),
-    VariantTag(Box<Expr>),
+    IsVariant(Box<Expr>, usize),
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),

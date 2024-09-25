@@ -1177,7 +1177,51 @@ fn lower_let_assert(
     pat: &ast::Pat,
     expr: &ast::Expr,
 ) -> miette::Result<hir::Expr> {
-    todo!()
+    let input = lower_expr(cx, expr)?;
+    let pat = lower_pat(cx, pat, &input.ty)?;
+
+    let mut locals = Vec::new();
+    build_destructure(cx, input.clone(), &pat, &mut locals)?;
+    let check = build_pat_check(cx, input, pat)?;
+
+    let mut exprs = Vec::new();
+
+    for (name, expr) in locals {
+        let id = cx.locals.len();
+
+        cx.locals.push(hir::Local {
+            mutable: false,
+            name,
+            ty: expr.ty.clone(),
+        });
+        cx.scope.push((String::from(name), id));
+
+        let kind = hir::ExprKind::Let(id, Box::new(expr));
+        exprs.push(hir::Expr {
+            kind,
+            ty: hir::Ty::void(),
+        });
+    }
+
+    let kind = hir::ExprKind::Block(exprs);
+    let ty = hir::Ty::void();
+
+    let expr = hir::Expr { kind, ty };
+
+    match check {
+        Some(check) => {
+            let panic = hir::Expr {
+                kind: hir::ExprKind::Panic,
+                ty: hir::Ty::void(),
+            };
+
+            let r#match = hir::Match::Bool(Box::new(expr), Box::new(panic));
+            let kind = hir::ExprKind::Match(Box::new(check), r#match);
+            let ty = hir::Ty::void();
+            Ok(hir::Expr { kind, ty })
+        }
+        None => Ok(expr),
+    }
 }
 
 fn lower_assign(cx: &mut BodyCx, lhs: &ast::Expr, rhs: &ast::Expr) -> miette::Result<hir::Expr> {
@@ -1309,7 +1353,8 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
         }
         ast::PatKind::Tuple(ref pats) => pats
             .iter()
-            .map(|pat| lower_pat(cx, pat, &hir::Ty::any(pat.span)))
+            .enumerate()
+            .map(|(i, pat)| lower_pat(cx, pat, &hir::Ty::Tuple(Box::new(ty.clone()), i)))
             .collect::<miette::Result<Vec<_>>>()
             .map(Pat::Tuple),
         ast::PatKind::Variant(ref path, ref pats) => {
@@ -1378,15 +1423,79 @@ enum Pat {
     List(Option<Box<(Pat, Pat)>>, Span),
 }
 
+fn build_destructure(
+    cx: &mut BodyCx,
+    input: hir::Expr,
+    pat: &Pat,
+    locals: &mut Vec<(&'static str, hir::Expr)>,
+) -> miette::Result<()> {
+    match pat {
+        Pat::Bind(name) => match name {
+            Some(name) => {
+                locals.push((name, input));
+                Ok(())
+            }
+            None => Ok(()),
+        },
+        Pat::Bool(_) => Ok(()),
+        Pat::Tuple(pats) => {
+            for (i, pat) in pats.iter().enumerate() {
+                let input = hir::Expr {
+                    kind: hir::ExprKind::TupleField(Box::new(input.clone()), i),
+                    ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i),
+                };
+
+                build_destructure(cx, input, pat, locals)?;
+            }
+
+            Ok(())
+        }
+        Pat::Variant(_, variant, fields) => {
+            for (i, (ty, pat)) in fields.iter().enumerate() {
+                let input = hir::Expr {
+                    kind: hir::ExprKind::VariantField(Box::new(input.clone()), *variant, i),
+                    ty: ty.clone(),
+                };
+
+                build_destructure(cx, input, pat, locals)?;
+            }
+
+            Ok(())
+        }
+        Pat::List(pats, span) => {
+            if let Some((head, tail)) = pats.as_deref() {
+                let ty = hir::Ty::any(*span);
+
+                let expr = hir::Expr {
+                    kind: hir::ExprKind::ListHead(Box::new(input.clone())),
+                    ty: ty.clone(),
+                };
+
+                build_destructure(cx, expr, head, locals)?;
+
+                let ty = hir::Ty::Partial(hir::Part::List, vec![ty]);
+                cx.unit.unify(input.ty.clone(), ty.clone());
+
+                let expr = hir::Expr {
+                    kind: hir::ExprKind::ListTail(Box::new(input.clone())),
+                    ty,
+                };
+
+                build_destructure(cx, expr, tail, locals)?;
+            }
+
+            Ok(())
+        }
+    }
+}
+
 fn build_pat_check(
     cx: &mut BodyCx,
     input: hir::Expr,
     pat: Pat,
-    body: &ast::Expr,
-    locals: &mut Vec<(usize, hir::Expr)>,
 ) -> miette::Result<Option<hir::Expr>> {
     match pat {
-        Pat::Bind(_) => todo!(),
+        Pat::Bind(_) => Ok(None),
         Pat::Bool(value) => match value {
             true => Ok(Some(input)),
             false => Ok(Some(hir::Expr {
@@ -1395,23 +1504,139 @@ fn build_pat_check(
             })),
         },
         Pat::Tuple(pats) => {
-            let mut exprs = Vec::new();
+            let mut items = Vec::new();
 
-            for pat in pats {
+            for (i, pat) in pats.into_iter().enumerate() {
                 let input = hir::Expr {
-                    kind: hir::ExprKind::TupleField(Box::new(input.clone()), exprs.len()),
-                    ty: hir::Ty::any(body.span()),
+                    kind: hir::ExprKind::TupleField(Box::new(input.clone()), items.len()),
+                    ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i),
                 };
 
-                if let Some(expr) = build_pat_check(cx, input, pat, body, locals)? {
-                    exprs.push(expr);
+                if let Some(expr) = build_pat_check(cx, input, pat)? {
+                    items.push(expr);
                 }
             }
 
-            todo!()
+            if items.is_empty() {
+                return Ok(None);
+            }
+
+            let mut expr = items.pop().unwrap();
+
+            for item in items.into_iter().rev() {
+                expr = hir::Expr {
+                    kind: hir::ExprKind::Binary(ast::BinOp::And, Box::new(expr), Box::new(item)),
+                    ty: hir::Ty::bool(),
+                };
+            }
+
+            Ok(Some(expr))
         }
-        Pat::Variant(_, _, _) => todo!(),
-        Pat::List(_, _) => todo!(),
+        Pat::Variant(_, variant, fields) => {
+            let check = hir::Expr {
+                kind: hir::ExprKind::IsVariant(Box::new(input.clone()), variant),
+                ty: hir::Ty::bool(),
+            };
+
+            let mut items = Vec::new();
+
+            for (i, (ty, pat)) in fields.into_iter().enumerate() {
+                let input = hir::Expr {
+                    kind: hir::ExprKind::VariantField(Box::new(input.clone()), variant, i),
+                    ty: ty.clone(),
+                };
+
+                if let Some(expr) = build_pat_check(cx, input, pat)? {
+                    items.push(expr);
+                }
+            }
+
+            if items.is_empty() {
+                return Ok(Some(check));
+            }
+
+            let mut expr = hir::Expr {
+                kind: hir::ExprKind::Binary(
+                    ast::BinOp::And,
+                    Box::new(check),
+                    Box::new(items.pop().unwrap()),
+                ),
+                ty: hir::Ty::bool(),
+            };
+
+            for item in items.into_iter().rev() {
+                expr = hir::Expr {
+                    kind: hir::ExprKind::Binary(ast::BinOp::And, Box::new(expr), Box::new(item)),
+                    ty: hir::Ty::bool(),
+                };
+            }
+
+            Ok(Some(expr))
+        }
+        Pat::List(pats, span) => match pats.map(|p| *p) {
+            Some((head_pat, tail_pat)) => {
+                let ty = hir::Ty::any(span);
+
+                let head_kind = hir::ExprKind::ListHead(Box::new(input.clone()));
+                let head_expr = hir::Expr {
+                    kind: head_kind,
+                    ty: ty.clone(),
+                };
+
+                let ty = hir::Ty::Partial(hir::Part::List, vec![ty.clone()]);
+                cx.unit.unify(input.ty.clone(), ty.clone());
+
+                let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
+                let tail_expr = hir::Expr {
+                    kind: tail_kind,
+                    ty,
+                };
+
+                let empty = hir::Expr {
+                    kind: hir::ExprKind::ListEmpty(Box::new(input)),
+                    ty: hir::Ty::bool(),
+                };
+
+                let not_empty = hir::Expr {
+                    kind: hir::ExprKind::Unary(hir::UnOp::Not, Box::new(empty.clone())),
+                    ty: hir::Ty::bool(),
+                };
+
+                let head = build_pat_check(cx, head_expr, head_pat)?;
+                let tail = build_pat_check(cx, tail_expr, tail_pat)?;
+
+                let check = match (head, tail) {
+                    (Some(head), Some(tail)) => {
+                        let head = Box::new(head);
+                        let tail = Box::new(tail);
+                        Some(hir::Expr {
+                            kind: hir::ExprKind::Binary(ast::BinOp::And, head, tail),
+                            ty: hir::Ty::bool(),
+                        })
+                    }
+                    (Some(expr), None) => Some(expr),
+                    (None, Some(expr)) => Some(expr),
+                    (None, None) => None,
+                };
+
+                match check {
+                    Some(check) => Ok(Some(hir::Expr {
+                        kind: hir::ExprKind::Binary(
+                            ast::BinOp::And,
+                            Box::new(not_empty),
+                            Box::new(check),
+                        ),
+                        ty: hir::Ty::bool(),
+                    })),
+                    None => Ok(Some(empty)),
+                }
+            }
+            None => {
+                let kind = hir::ExprKind::ListEmpty(Box::new(input));
+                let ty = hir::Ty::bool();
+                Ok(Some(hir::Expr { kind, ty }))
+            }
+        },
     }
 }
 

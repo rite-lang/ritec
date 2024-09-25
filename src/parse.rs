@@ -479,6 +479,18 @@ fn parse_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
 fn parse_let(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     tokens.expect(Token::Let)?;
 
+    if tokens.take(Token::Assert).is_some() {
+        let pat = parse_pat(tokens)?;
+        tokens.expect(Token::Eq)?;
+
+        let value = match is_block(tokens) {
+            true => parse_block(tokens)?,
+            false => parse_expr(tokens, multiline)?,
+        };
+
+        return Ok(Expr::LetAssert(pat, Box::new(value)));
+    }
+
     let (name, _) = parse_snake(tokens)?;
 
     tokens.expect(Token::Eq)?;

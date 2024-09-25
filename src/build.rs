@@ -1,6 +1,7 @@
 use miette::Severity;
 
 use crate::{
+    ast::BinOp,
     hir,
     number::{FloatKind, IntKind},
     rir,
@@ -272,7 +273,7 @@ fn build_place(
         | hir::ExprKind::ListTail(_)
         | hir::ExprKind::ListEmpty(_)
         | hir::ExprKind::Block(_)
-        | hir::ExprKind::VariantTag(_)
+        | hir::ExprKind::IsVariant(_, _)
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
@@ -342,7 +343,7 @@ fn build_operand(
                 value,
             });
 
-            Ok(rir::Operand::Copy(place))
+            Ok(rir::Operand::Constant(rir::Constant::Void))
         }
 
         hir::ExprKind::Match(ref expr, ref r#match) => {
@@ -464,7 +465,7 @@ fn build_operand(
         | hir::ExprKind::ListHead(_)
         | hir::ExprKind::ListTail(_)
         | hir::ExprKind::ListEmpty(_)
-        | hir::ExprKind::VariantTag(_)
+        | hir::ExprKind::IsVariant(_, _)
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
@@ -547,12 +548,41 @@ fn build_value(
             Ok(rir::Value::ListEmpty(list))
         }
 
-        hir::ExprKind::Binary(op, ref lhs, ref rhs) => {
-            let lhs = build_operand(builder, block, lhs)?;
-            let rhs = build_operand(builder, block, rhs)?;
+        hir::ExprKind::Binary(op, ref lhs, ref rhs) => match op {
+            BinOp::And => {
+                let lhs = build_operand(builder, block, lhs)?;
 
-            Ok(rir::Value::Binary(op, lhs, rhs))
-        }
+                let mut rhs_block = rir::Block::new();
+
+                let rhs = build_value(builder, &mut rhs_block, rhs)?;
+
+                let result = builder.make_temp(rir::Ty::Bool);
+                rhs_block.statements.push(rir::Statement::Assign {
+                    place: result.clone(),
+                    value: rhs,
+                });
+
+                let mut false_block = rir::Block::new();
+                false_block.statements.push(rir::Statement::Assign {
+                    place: result.clone(),
+                    value: rir::Value::Use(rir::Operand::Constant(rir::Constant::Bool(false))),
+                });
+
+                block.statements.push(rir::Statement::MatchBool {
+                    input: lhs,
+                    r#true: rhs_block,
+                    r#false: false_block,
+                });
+
+                Ok(rir::Value::Use(rir::Operand::Move(result)))
+            }
+            _ => {
+                let lhs = build_operand(builder, block, lhs)?;
+                let rhs = build_operand(builder, block, rhs)?;
+
+                Ok(rir::Value::Binary(op, lhs, rhs))
+            }
+        },
 
         hir::ExprKind::Unary(op, ref expr) => {
             let expr = build_operand(builder, block, expr)?;
@@ -628,9 +658,9 @@ fn build_value(
             Ok(rir::Value::Func(index, Vec::new(), generics))
         }
 
-        hir::ExprKind::VariantTag(ref expr) => {
+        hir::ExprKind::IsVariant(ref expr, variant) => {
             let expr = build_operand(builder, block, expr)?;
-            Ok(rir::Value::VariantTag(expr))
+            Ok(rir::Value::IsVariant(expr, variant))
         }
 
         hir::ExprKind::Call(ref func, ref args) => {
