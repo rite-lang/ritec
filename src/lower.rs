@@ -17,14 +17,19 @@ pub fn type_register_ast(
             };
 
             let id = unit.push_adt(hir::Adt {
-                vis,
                 name: adt.name,
                 generics: Vec::new(),
                 variants: Vec::new(),
                 span: adt.span,
             });
 
-            unit.modules[module].adts.insert(adt.name, id);
+            let import = hir::Import {
+                vis,
+                kind: hir::ImportKind::Adt(id),
+                span: adt.span,
+            };
+
+            unit.modules[module].imports.insert(adt.name, import);
         }
 
         if let ast::Decl::Type(ast::Type::Single(single)) = decl {
@@ -34,14 +39,19 @@ pub fn type_register_ast(
             };
 
             let id = unit.push_adt(hir::Adt {
-                vis,
                 name: single.name,
                 generics: Vec::new(),
                 variants: Vec::new(),
                 span: single.span,
             });
 
-            unit.modules[module].adts.insert(single.name, id);
+            let import = hir::Import {
+                vis,
+                kind: hir::ImportKind::Adt(id),
+                span: single.span,
+            };
+
+            unit.modules[module].imports.insert(single.name, import);
         }
     }
 
@@ -55,10 +65,21 @@ pub fn type_resolve_ast(
 ) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Import(import) = decl {
-            let imported = find_module(unit, module, &import.path)?;
-            let name = unit.modules[imported].name;
+            let vis = match import.vis {
+                ast::Vis::Public => hir::Vis::Public,
+                ast::Vis::Private => hir::Vis::Private,
+            };
 
-            unit.modules[module].modules.insert(name, imported);
+            let name = import.path.item();
+            let imported = find_import(unit, module, &import.path)?;
+
+            let import = hir::Import {
+                vis,
+                kind: imported.kind.clone(),
+                span: import.span,
+            };
+
+            unit.modules[module].imports.insert(name, import);
         }
     }
 
@@ -72,7 +93,11 @@ pub fn type_construct_ast(
 ) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Type(ast::Type::Adt(adt)) = decl {
-            let id = unit.modules[module].adts[adt.name];
+            let import = &unit.modules[module].imports[adt.name];
+            let hir::ImportKind::Adt(id) = import.kind else {
+                unreachable!("expected adt");
+            };
+
             let mut generics = mem::take(&mut unit.adts[id].generics);
 
             for variant in &adt.variants {
@@ -99,7 +124,11 @@ pub fn type_construct_ast(
         }
 
         if let ast::Decl::Type(ast::Type::Single(single)) = decl {
-            let id = unit.modules[module].adts[single.name];
+            let import = &unit.modules[module].imports[single.name];
+            let hir::ImportKind::Adt(id) = import.kind else {
+                unreachable!("expected adt");
+            };
+
             let mut generics = mem::take(&mut unit.adts[id].generics);
 
             let mut cx = TyCx {
@@ -207,7 +236,6 @@ pub fn func_register_ast(
             };
 
             unit.push_func(hir::Func {
-                vis,
                 name: func.name,
                 generics,
                 input,
@@ -220,7 +248,13 @@ pub fn func_register_ast(
                 },
             });
 
-            unit.modules[module].funcs.insert(func.name, id);
+            let import = hir::Import {
+                vis,
+                kind: hir::ImportKind::Func(id),
+                span: func.span,
+            };
+
+            unit.modules[module].imports.insert(func.name, import);
         }
     }
 
@@ -234,7 +268,10 @@ pub fn func_construct_ast(
 ) -> miette::Result<()> {
     for decl in &ast.decls {
         if let ast::Decl::Func(func) = decl {
-            let id = unit.modules[module].funcs[func.name];
+            let import = &unit.modules[module].imports[func.name];
+            let hir::ImportKind::Func(id) = import.kind else {
+                unreachable!("expected func");
+            };
 
             // Lower the body of the function.
             if let Some(body) = &func.body {
@@ -469,35 +506,20 @@ enum Item {
     Variant(usize, usize),
 }
 
-fn find_module(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<usize> {
+fn find_import<'a>(
+    unit: &'a hir::Unit,
+    module: usize,
+    path: &ast::Path,
+) -> miette::Result<&'a hir::Import> {
     let mut current = module;
 
-    for segment in path.segments.iter() {
-        match unit.modules[current].modules.get(segment) {
-            Some(&next) => current = next,
-            None => {
-                return Err(miette::miette!(
-                    severity = Severity::Error,
-                    code = "invalid::path",
-                    labels = vec![path.span.label("here")],
-                    "module not found `{}`",
-                    segment
-                )
-                .with_source_code(path.span));
-            }
-        }
-    }
-
-    Ok(current)
-}
-
-fn find_adt(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<usize> {
-    let mut current = module;
-
-    for segment in path.segments.iter().take(path.segments.len() - 1) {
-        match unit.modules[current].modules.get(segment) {
-            Some(&next) => current = next,
-            None => {
+    for segment in path.segments[0..path.segments.len() - 1].iter() {
+        match unit.modules[current].get_import(segment, current == module) {
+            Some(hir::Import {
+                kind: hir::ImportKind::Module(next),
+                ..
+            }) => current = *next,
+            Some(_) | None => {
                 return Err(miette::miette!(
                     severity = Severity::Error,
                     code = "invalid::path",
@@ -515,19 +537,33 @@ fn find_adt(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result
         .last()
         .expect("path should have at least one segment");
 
-    if let Some(&id) = unit.modules[current].adts.get(name) {
-        if unit.adts[id].vis == hir::Vis::Public || current == module {
-            return Ok(id);
-        }
+    match unit.modules[current].get_import(name, current == module) {
+        Some(import) => Ok(import),
+        None => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::path",
+            labels = vec![path.span.label("here")],
+            "module not found `{}`",
+            name
+        )
+        .with_source_code(path.span)),
     }
+}
 
-    Err(miette::miette!(
-        severity = Severity::Error,
-        code = "invalid::path",
-        labels = vec![path.span.label("here")],
-        "invalid item `{}`",
-        name
-    ))
+fn find_adt(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<usize> {
+    match find_import(unit, module, path)? {
+        hir::Import {
+            kind: hir::ImportKind::Adt(adt),
+            ..
+        } => Ok(*adt),
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::path",
+            labels = vec![path.span.label("here")],
+            "expected adt"
+        )
+        .with_source_code(path.span)),
+    }
 }
 
 fn find_variant(
@@ -550,10 +586,30 @@ fn find_variant(
 fn resolve_item(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Result<Item> {
     let mut current = module;
 
-    for segment in path.segments.iter().take(path.segments.len() - 1) {
-        match unit.modules[current].modules.get(segment) {
-            Some(&next) => current = next,
-            None => {
+    let name = path
+        .segments
+        .last()
+        .expect("path should have at least one segment");
+
+    for (i, segment) in path
+        .segments
+        .iter()
+        .take(path.segments.len() - 1)
+        .enumerate()
+    {
+        match unit.modules[current].get_import(segment, current == module) {
+            Some(hir::Import {
+                kind: hir::ImportKind::Module(next),
+                ..
+            }) => current = *next,
+            Some(hir::Import {
+                kind: hir::ImportKind::Adt(adt),
+                ..
+            }) if i == path.segments.len() - 2 => {
+                let variant = unit.adts[*adt].find_variant(name)?;
+                return Ok(Item::Variant(*adt, variant));
+            }
+            Some(_) | None => {
                 return Err(miette::miette!(
                     severity = Severity::Error,
                     code = "invalid::path",
@@ -566,27 +622,26 @@ fn resolve_item(unit: &hir::Unit, module: usize, path: &ast::Path) -> miette::Re
         }
     }
 
-    let name = path
-        .segments
-        .last()
-        .expect("path should have at least one segment");
-
-    for (i, adt) in unit.adts.iter().enumerate() {
-        if adt.vis == hir::Vis::Private && current != module {
+    for import in unit.modules[current].imports.values() {
+        if current != module && import.vis == hir::Vis::Private {
             continue;
         }
 
-        for (j, variant) in adt.variants.iter().enumerate() {
-            if variant.name == *name {
-                return Ok(Item::Variant(i, j));
+        if let hir::ImportKind::Adt(adt) = import.kind {
+            for (j, variant) in unit.adts[adt].variants.iter().enumerate() {
+                if variant.name == *name {
+                    return Ok(Item::Variant(adt, j));
+                }
             }
         }
     }
 
-    if let Some(&id) = unit.modules[current].funcs.get(name) {
-        if unit.funcs[id].vis == hir::Vis::Public || current == module {
-            return Ok(Item::Func(id));
-        }
+    if let Some(hir::Import {
+        kind: hir::ImportKind::Func(func),
+        ..
+    }) = unit.modules[current].get_import(name, current == module)
+    {
+        return Ok(Item::Func(*func));
     }
 
     Err(miette::miette!(

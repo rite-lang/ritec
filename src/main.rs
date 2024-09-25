@@ -17,8 +17,10 @@ mod token;
 
 use std::{fs, path::Path};
 
+use hir::{Import, ImportKind, Vis};
 use interner::Interner;
 use interpret::Interpreter;
+use span::Span;
 
 fn main() -> miette::Result<()> {
     miette::set_panic_hook();
@@ -28,14 +30,28 @@ fn main() -> miette::Result<()> {
     let std = compiler.add_dir("std", Path::new("std"))?;
     let test = compiler.add_dir("test", Path::new("test"))?;
 
-    for module in compiler.unit.modules[test].modules.clone().into_values() {
-        compiler.unit.modules[module].modules.insert("std", std);
+    for import in compiler.unit.modules[test].imports.clone().into_values() {
+        if let ImportKind::Module(index) = import.kind {
+            let import = Import {
+                vis: Vis::Private,
+                kind: ImportKind::Module(std),
+                span: import.span,
+            };
+
+            compiler.unit.modules[index].imports.insert("std", import);
+        }
     }
 
     compiler.lower()?;
 
-    let module = compiler.unit.modules[test].modules["test"];
-    let main = compiler.unit.modules[module].funcs["main"];
+    let module = &compiler.unit.modules[test].imports["test"];
+    let ImportKind::Module(module) = module.kind else {
+        panic!();
+    };
+    let module = &compiler.unit.modules[module].imports["main"];
+    let ImportKind::Func(main) = module.kind else {
+        panic!();
+    };
 
     let (main, rir) = compiler.compile(main)?;
 
@@ -90,20 +106,44 @@ impl Compiler {
                 let ast = parse::parse(&mut tokens)?;
 
                 let mut submodule = hir::Module::new(subname);
-                submodule.modules.insert(name, index);
+
+                let import = Import {
+                    vis: Vis::Private,
+                    kind: ImportKind::Module(index),
+                    span: Span {
+                        lo: 0,
+                        hi: source.len(),
+                        file: subpath,
+                        source,
+                    },
+                };
+                submodule.imports.insert(name, import);
 
                 let submodule = self.unit.push_module(submodule);
                 self.modules.push((submodule, ast));
 
-                self.unit.modules[index].modules.insert(subname, submodule);
+                let import = Import {
+                    vis: Vis::Public,
+                    kind: ImportKind::Module(submodule),
+                    span: Span {
+                        lo: 0,
+                        hi: source.len(),
+                        file: subpath,
+                        source,
+                    },
+                };
+
+                self.unit.modules[index].imports.insert(subname, import);
             }
         }
 
         let module = &self.unit.modules[index];
-        let modules = module.modules.clone();
+        let modules = module.imports.clone();
 
-        for &module in modules.values() {
-            self.unit.modules[module].modules.extend(modules.clone());
+        for module in modules.values() {
+            if let ImportKind::Module(module) = module.kind {
+                self.unit.modules[module].imports.extend(modules.clone());
+            }
         }
 
         Ok(index)

@@ -33,30 +33,45 @@ pub struct Module {
     /// The name of the module.
     pub name: &'static str,
 
-    /// The submodules of the module.
-    pub modules: HashMap<&'static str, usize>,
-
-    /// The functions in the module.
-    pub funcs: HashMap<&'static str, usize>,
-
-    /// The ADTs in the module.
-    pub adts: HashMap<&'static str, usize>,
+    /// The imports in the module.
+    pub imports: HashMap<&'static str, Import>,
 }
 
 impl Module {
     pub fn new(name: &'static str) -> Self {
         Self {
             name,
-            modules: HashMap::new(),
-            funcs: HashMap::new(),
-            adts: HashMap::new(),
+            imports: HashMap::new(),
         }
     }
+
+    pub fn get_import(&self, name: &str, is_defining: bool) -> Option<&Import> {
+        let import = self.imports.get(name)?;
+
+        if !is_defining && import.vis == Vis::Private {
+            return None;
+        }
+
+        Some(import)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Import {
+    pub vis: Vis,
+    pub kind: ImportKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum ImportKind {
+    Module(usize),
+    Func(usize),
+    Adt(usize),
 }
 
 #[derive(Debug)]
 pub struct Func {
-    pub vis: Vis,
     pub name: &'static str,
     pub generics: Vec<Generic>,
     pub input: Vec<Argument>,
@@ -75,7 +90,6 @@ pub struct Local {
 
 #[derive(Debug)]
 pub struct Adt {
-    pub vis: Vis,
     pub name: &'static str,
     pub generics: Vec<Generic>,
     pub variants: Vec<Variant>,
@@ -227,6 +241,13 @@ impl Unit {
 }
 
 impl Adt {
+    pub fn find_variant(&self, name: &str) -> miette::Result<usize> {
+        self.variants
+            .iter()
+            .position(|variant| variant.name == name)
+            .ok_or_else(|| miette::miette!("variant not found `{}` in ADT `{}`", name, self.name))
+    }
+
     pub fn find_field(&self, name: &str) -> miette::Result<(usize, Ty)> {
         let mut index = None;
         let mut ty = None;

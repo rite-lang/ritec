@@ -34,7 +34,7 @@ pub fn parse(tokens: &mut TokenStream) -> miette::Result<Module> {
 }
 
 fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
-    if tokens.is(Token::Import) {
+    if tokens.is(Token::Import) || tokens.nth_is(1, Token::Import) {
         return parse_import(tokens).map(Decl::Import);
     }
 
@@ -62,12 +62,14 @@ fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
 }
 
 fn parse_import(tokens: &mut TokenStream) -> miette::Result<Import> {
+    let vis = parse_vis(tokens)?;
+
     tokens.expect(Token::Import)?;
 
     let path = parse_path(tokens)?;
     let span = path.span;
 
-    Ok(Import { path, span })
+    Ok(Import { vis, path, span })
 }
 
 fn parse_func_decl(tokens: &mut TokenStream) -> miette::Result<Func> {

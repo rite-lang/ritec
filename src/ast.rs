@@ -17,6 +17,7 @@ pub enum Decl {
 
 #[derive(Debug)]
 pub struct Import {
+    pub vis: Vis,
     pub path: Path,
     pub span: Span,
 }
@@ -246,4 +247,10 @@ pub enum PatKind {
 pub struct Path {
     pub segments: Vec<&'static str>,
     pub span: Span,
+}
+
+impl Path {
+    pub fn item(&self) -> &'static str {
+        self.segments.last().unwrap()
+    }
 }
