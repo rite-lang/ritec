@@ -139,7 +139,7 @@ pub enum Part {
     Str,
     Mut,
     Int(IntKind),
-    Generic(usize),
+    Generic(usize, Option<usize>),
     Adt(usize),
 }
 
@@ -286,7 +286,7 @@ impl Ty {
     pub fn specialize(&self, generics: &[Ty]) -> Ty {
         match self {
             Ty::Inferred(_, _, _, _) => self.clone(),
-            Ty::Partial(Part::Generic(index), args) => {
+            Ty::Partial(Part::Generic(index, _), args) => {
                 assert!(args.is_empty());
                 generics[*index].clone()
             }
@@ -368,7 +368,7 @@ impl Ty {
             }
             Part::Int(kind) => format!("{}", kind),
             Part::Mut => format!("mut {}", args[0].format(unit)),
-            Part::Generic(id) => format!("<{}>", id),
+            Part::Generic(id, _) => format!("<{}>", id),
             Part::Adt(id) => {
                 let name = &unit.adts[*id].name;
 

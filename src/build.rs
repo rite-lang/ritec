@@ -903,7 +903,7 @@ fn build_ty(
                 let generics = recurse_vec(unit, generics, new_generics, arguments)?;
                 Ok(rir::Ty::Adt(index, generics))
             }
-            hir::Part::Generic(index) => {
+            hir::Part::Generic(index, _) => {
                 assert!(arguments.is_empty());
                 Ok(rir::Ty::Generic(index))
             }
@@ -1013,7 +1013,7 @@ fn extract_generics(ty: &rir::Ty, from: &rir::Ty, generics: &mut Vec<Option<rir:
             }
 
             match &generics[*index] {
-                Some(generic) => assert_eq!(ty, generic),
+                Some(generic) => assert_eq!(ty, generic, "generics {:?}", generics),
                 None => generics[*index] = Some(ty.clone()),
             }
         }

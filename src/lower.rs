@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem};
+use std::mem;
 
 use miette::Severity;
 
@@ -152,7 +152,7 @@ fn lower_fields<'a>(
             Some(ref ty) => lower_ty(cx, ty, field.span)?,
             None => {
                 let index = cx.add_generic(field.name, field.span)?;
-                hir::Ty::Partial(hir::Part::Generic(index), Vec::new())
+                hir::Ty::Partial(hir::Part::Generic(index, None), Vec::new())
             }
         };
 
@@ -431,14 +431,22 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
 
             match output {
                 Some(output) => args.push(lower_ty(cx, output, span)?),
-                None => args.push(hir::Ty::void()),
+                None => args.push(hir::Ty::Inferred(
+                    hir::Tid::new(),
+                    hir::Inferred::Any,
+                    cx.func,
+                    span,
+                )),
             }
 
             Ok(hir::Ty::Partial(hir::Part::Func, args))
         }
         ast::Ty::Generic(generic) => {
             if let Some(index) = cx.generics.iter().position(|g| g.name == generic.name) {
-                return Ok(hir::Ty::Partial(hir::Part::Generic(index), Vec::new()));
+                return Ok(hir::Ty::Partial(
+                    hir::Part::Generic(index, cx.func),
+                    Vec::new(),
+                ));
             }
 
             if !cx.new_generics {
@@ -451,7 +459,10 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
             }
 
             let index = cx.add_generic(generic.name, generic.span)?;
-            Ok(hir::Ty::Partial(hir::Part::Generic(index), Vec::new()))
+            Ok(hir::Ty::Partial(
+                hir::Part::Generic(index, cx.func),
+                Vec::new(),
+            ))
         }
     }
 }
@@ -761,14 +772,14 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
         Item::Func(id) => {
             let mut parts = Vec::new();
 
-            let mut generics = HashMap::new();
+            let column = cx.unit.env.next_column(id);
 
             for argument in &cx.unit.funcs[id].input {
-                parts.push(cx.unit.env.use_ty(&mut generics, &argument.ty, path.span));
+                parts.push(cx.unit.env.use_ty(column, &argument.ty, path.span));
             }
 
             let output = &cx.unit.funcs[id].output;
-            parts.push(cx.unit.env.use_ty(&mut generics, output, path.span));
+            parts.push(cx.unit.env.use_ty(column, output, path.span));
 
             let kind = hir::ExprKind::Func(id);
             let ty = hir::Ty::Partial(hir::Part::Func, parts);
@@ -1424,7 +1435,7 @@ fn build_match_tree(
                     let head_ty = hir::Ty::any(span);
                     let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()]);
 
-                    cx.unit.unify(input.ty.clone(), list_ty);
+                    cx.unit.unify(input.ty.clone(), list_ty.clone());
 
                     let head_kind = hir::ExprKind::ListHead(Box::new(input.clone()));
                     let head_expr = hir::Expr {
@@ -1435,7 +1446,7 @@ fn build_match_tree(
                     let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
                     let tail_expr = hir::Expr {
                         kind: tail_kind,
-                        ty: input.ty.clone(),
+                        ty: list_ty,
                     };
 
                     let mut pats = [(head_expr, head), (tail_expr, tail)]

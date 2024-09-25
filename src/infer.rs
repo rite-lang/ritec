@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use crate::{
     hir::{self, Inferred, Part, Tid, Ty, Unit},
@@ -10,6 +10,7 @@ pub struct TyEnv {
     constraints: VecDeque<(Ty, Ty)>,
     substitutions: HashMap<Ty, Ty>,
     the_matrix: HashMap<usize, (Vec<Tid>, Vec<Vec<Ty>>)>,
+    the_gatrix: HashMap<usize, Vec<Vec<Ty>>>,
 }
 
 impl TyEnv {
@@ -32,9 +33,14 @@ impl TyEnv {
         }
     }
 
-    pub fn use_ty(&mut self, generics: &mut HashMap<usize, Ty>, ty: &Ty, span: Span) -> Ty {
+    pub fn next_column(&mut self, func: usize) -> usize {
+        let table = self.the_gatrix.entry(func).or_default();
+        table.first().map_or(0, Vec::len)
+    }
+
+    pub fn use_ty(&mut self, column: usize, ty: &Ty, span: Span) -> Ty {
         if let Some(ty) = self.substitute(ty) {
-            return self.use_ty(generics, &ty.clone(), span);
+            return self.use_ty(column, &ty.clone(), span);
         }
 
         match ty {
@@ -55,43 +61,48 @@ impl TyEnv {
 
                 ty
             }
-            Ty::Partial(Part::Generic(index), arguments) => {
+            Ty::Partial(Part::Generic(index, func), arguments) => {
                 assert!(arguments.is_empty());
 
-                match generics.entry(*index) {
-                    Entry::Occupied(entry) => entry.get().clone(),
-                    Entry::Vacant(entry) => {
-                        let ty = Ty::inferred(Inferred::Any, span);
-                        entry.insert(ty).clone()
-                    }
+                let func = func.expect("generics must have a function");
+                let table = self.the_gatrix.entry(func).or_default();
+
+                if table.len() <= *index {
+                    table.resize(index + 1, Vec::new());
                 }
+
+                if table[*index].len() <= column {
+                    table[*index].push(Ty::inferred(Inferred::Any, span));
+                }
+
+                table[*index][column].clone()
             }
             Ty::Partial(part, arguments) => {
                 let arguments = arguments
                     .iter()
-                    .map(|arg| self.use_ty(generics, arg, span))
+                    .map(|arg| self.use_ty(column, arg, span))
                     .collect();
                 Ty::Partial(*part, arguments)
             }
             Ty::Field(ty, field) => {
-                let ty = self.use_ty(generics, ty, span);
+                let ty = self.use_ty(column, ty, span);
                 Ty::Field(Box::new(ty), field)
             }
             Ty::Tuple(ty, index) => {
-                let ty = self.use_ty(generics, ty, span);
+                let ty = self.use_ty(column, ty, span);
                 Ty::Tuple(Box::new(ty), *index)
             }
             Ty::Call(func, arguments) => {
-                let func = self.use_ty(generics, func, span);
+                let func = self.use_ty(column, func, span);
                 let arguments = arguments
                     .iter()
-                    .map(|arg| arg.as_ref().map(|arg| self.use_ty(generics, arg, span)))
+                    .map(|arg| arg.as_ref().map(|arg| self.use_ty(column, arg, span)))
                     .collect();
                 Ty::Call(Box::new(func), arguments)
             }
             Ty::Pipe(lhs, rhs) => {
-                let lhs = self.use_ty(generics, lhs, span);
-                let rhs = self.use_ty(generics, rhs, span);
+                let lhs = self.use_ty(column, lhs, span);
+                let rhs = self.use_ty(column, rhs, span);
                 Ty::Pipe(Box::new(lhs), Box::new(rhs))
             }
         }
@@ -172,8 +183,8 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
 
                 if let Some((ref index, ref table)) = unit.env.the_matrix.get(&func) {
                     let index = index.iter().position(|&i| i == tid).unwrap();
-                    for used in table[index].clone().iter() {
-                        let ty = unit.env.use_ty(&mut HashMap::new(), &ty, span);
+                    for (i, used) in table[index].clone().iter().enumerate() {
+                        let ty = unit.env.use_ty(i, &ty, span);
                         unify_ty_ty(unit, used, &ty)?;
                     }
                 }
