@@ -199,7 +199,7 @@ pub enum Constant {
     Void,
     Bool(bool),
     Int(bool, Base, Vec<u8>),
-    String(&'static str),
+    StringLiteral(&'static str),
 }
 
 #[derive(Clone, Debug)]
