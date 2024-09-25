@@ -68,6 +68,8 @@ pub enum Vis {
 pub enum Ty {
     Void,
     Bool,
+    Str,
+    Inferred,
     Int(IntKind),
     Mut(Box<Ty>),
     Tuple(Vec<Ty>),
@@ -75,7 +77,6 @@ pub enum Ty {
     List(Box<Ty>),
     Func(Vec<Ty>, Option<Box<Ty>>),
     Generic(Generic),
-    Str,
 }
 
 #[derive(Debug)]
@@ -86,7 +87,7 @@ pub struct Generic {
 
 #[derive(Debug)]
 pub enum Expr {
-    Void,
+    Void(Span),
     String(&'static str, Span),
     Int(bool, Base, Vec<u8>, Span),
     Bool(bool, Span),
@@ -98,13 +99,78 @@ pub enum Expr {
     Field(Box<Expr>, &'static str),
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Vec<Expr>),
-    Binary(BinOp, Box<Expr>, Box<Expr>),
-    Unary(UnOp, Box<Expr>),
+    Binary(BinOp, Box<Expr>, Box<Expr>, Span),
+    Unary(UnOp, Box<Expr>, Span),
     Let(&'static str, Box<Expr>),
     Mut(&'static str, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
-    Match(Box<Expr>, Vec<Arm>),
+    Match(Box<Expr>, Vec<Arm>, Span),
     Closure(Vec<Argument>, Box<Expr>),
+}
+
+impl Expr {
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Void(span) => *span,
+            Expr::String(_, span) => *span,
+            Expr::Int(_, _, _, span) => *span,
+            Expr::Bool(_, span) => *span,
+            Expr::Paren(_, span) => *span,
+            Expr::Item(path) => path.span,
+            Expr::Tuple(exprs) => {
+                let start = exprs.first().unwrap().span();
+                let end = exprs.last().unwrap().span();
+                start.join(end)
+            }
+            Expr::List(_, _, span) => *span,
+            Expr::Block(exprs) => {
+                let start = exprs.first().unwrap().span();
+                let end = exprs.last().unwrap().span();
+                start.join(end)
+            }
+            Expr::Field(expr, _) => expr.span(),
+            Expr::Call(func, args) => {
+                let mut start = func.span();
+
+                for arg in args.iter().flatten() {
+                    start = start.join(arg.span());
+                }
+
+                start
+            }
+            Expr::Pipe(lhs, rhs) => {
+                let mut start = lhs.span();
+
+                for expr in rhs.iter() {
+                    start = start.join(expr.span());
+                }
+
+                start
+            }
+            Expr::Binary(_, lhs, rhs, _) => {
+                let start = lhs.span();
+                let end = rhs.span();
+                start.join(end)
+            }
+            Expr::Unary(_, expr, span) => {
+                let inner = expr.span();
+                span.join(inner)
+            }
+            Expr::Let(_, expr) => expr.span(),
+            Expr::Mut(_, expr) => expr.span(),
+            Expr::Assign(lhs, rhs) => {
+                let start = lhs.span();
+                let end = rhs.span();
+                start.join(end)
+            }
+            Expr::Match(_, _, span) => *span,
+            Expr::Closure(args, expr) => {
+                let end = expr.span();
+                let start = args.first().map_or(end, |arg| arg.span);
+                start.join(end)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

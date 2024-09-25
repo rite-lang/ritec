@@ -1,4 +1,6 @@
-use crate::{hir, rir};
+use miette::Severity;
+
+use crate::{hir, rir, span::Span};
 
 pub fn build(hir: &hir::Unit) -> miette::Result<rir::Unit> {
     let mut rir = rir::Unit::default();
@@ -810,25 +812,43 @@ fn build_ty(
     new_generics: bool,
     ty: &hir::Ty,
 ) -> miette::Result<rir::Ty> {
-    match unit.env.get(ty) {
-        hir::Ty::Inferred(tid, kind, func) => {
-            if let Some(index) = generics.iter().position(|(t, _)| *t == Some(tid)) {
-                return Ok(rir::Ty::Generic(index));
-            }
+    fn build_inferred(
+        generics: &mut Generics,
+        new_generics: bool,
+        ty: &hir::Ty,
+    ) -> Result<rir::Ty, miette::Result<Span>> {
+        let hir::Ty::Inferred(tid, kind, func, span) = *ty else {
+            unreachable!()
+        };
 
-            if func.is_some() && new_generics {
-                let index = generics.len();
-                generics.push((Some(tid), rir::Generic {}));
-                return Ok(rir::Ty::Generic(index));
-            }
-
-            match kind {
-                hir::Inferred::Any => todo!("{:?}", ty),
-                hir::Inferred::Int(kind) => Ok(rir::Ty::Int(kind)),
-                hir::Inferred::Float(_) => todo!(),
-            }
+        if let Some(index) = generics.iter().position(|(t, _)| *t == Some(tid)) {
+            return Ok(rir::Ty::Generic(index));
         }
-        hir::Ty::Partial(part, arguments) => match part {
+
+        if func.is_some() && new_generics {
+            let index = generics.len();
+            generics.push((Some(tid), rir::Generic {}));
+            return Ok(rir::Ty::Generic(index));
+        }
+
+        match kind {
+            hir::Inferred::Any => Err(Ok(span)),
+            hir::Inferred::Int(kind) => Ok(rir::Ty::Int(kind)),
+            hir::Inferred::Float(_) => todo!(),
+        }
+    }
+
+    fn build_partial(
+        unit: &hir::Unit,
+        generics: &mut Generics,
+        new_generics: bool,
+        ty: &hir::Ty,
+    ) -> Result<rir::Ty, miette::Result<Span>> {
+        let hir::Ty::Partial(part, ref arguments) = *ty else {
+            unreachable!()
+        };
+
+        match part {
             hir::Part::Void => {
                 assert!(arguments.is_empty());
                 Ok(rir::Ty::Void)
@@ -843,7 +863,7 @@ fn build_ty(
             }
             hir::Part::List => {
                 assert_eq!(arguments.len(), 1);
-                Ok(rir::Ty::List(Box::new(build_ty(
+                Ok(rir::Ty::List(Box::new(recurse(
                     unit,
                     generics,
                     new_generics,
@@ -852,7 +872,7 @@ fn build_ty(
             }
             hir::Part::Mut => {
                 assert_eq!(arguments.len(), 1);
-                Ok(rir::Ty::Mut(Box::new(build_ty(
+                Ok(rir::Ty::Mut(Box::new(recurse(
                     unit,
                     generics,
                     new_generics,
@@ -860,18 +880,18 @@ fn build_ty(
                 )?)))
             }
             hir::Part::Tuple => {
-                let tuple = build_ty_vec(unit, generics, new_generics, &arguments)?;
+                let tuple = recurse_vec(unit, generics, new_generics, arguments)?;
                 Ok(rir::Ty::Tuple(tuple))
             }
             hir::Part::Func => {
                 let input = arguments
                     .iter()
                     .take(arguments.len() - 1)
-                    .map(|ty| build_ty(unit, generics, new_generics, ty))
-                    .collect::<miette::Result<_>>()?;
+                    .map(|ty| recurse(unit, generics, new_generics, ty))
+                    .collect::<Result<_, _>>()?;
 
                 let output = arguments.last().unwrap();
-                let output = build_ty(unit, generics, new_generics, output)?;
+                let output = recurse(unit, generics, new_generics, output)?;
 
                 Ok(rir::Ty::Func(input, Box::new(output)))
             }
@@ -880,17 +900,66 @@ fn build_ty(
                 Ok(rir::Ty::Int(kind))
             }
             hir::Part::Adt(index) => {
-                let generics = build_ty_vec(unit, generics, new_generics, &arguments)?;
+                let generics = recurse_vec(unit, generics, new_generics, arguments)?;
                 Ok(rir::Ty::Adt(index, generics))
             }
             hir::Part::Generic(index) => {
                 assert!(arguments.is_empty());
                 Ok(rir::Ty::Generic(index))
             }
-        },
-        hir::Ty::Field(_, _) | hir::Ty::Tuple(_, _) | hir::Ty::Call(_, _) | hir::Ty::Pipe(_, _) => {
-            unreachable!("unexpected field, call or pipe: {}", ty)
         }
+    }
+
+    fn recurse(
+        unit: &hir::Unit,
+        generics: &mut Generics,
+        new_generics: bool,
+        ty: &hir::Ty,
+    ) -> Result<rir::Ty, miette::Result<Span>> {
+        let ty = unit.env.get(ty);
+
+        match ty {
+            hir::Ty::Inferred(..) => build_inferred(generics, new_generics, &ty),
+            hir::Ty::Partial(..) => match build_partial(unit, generics, new_generics, &ty) {
+                Ok(ty) => Ok(ty),
+                Err(err) => Err(wrap_err(unit, err, &ty)),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn recurse_vec(
+        unit: &hir::Unit,
+        generics: &mut Generics,
+        new_generics: bool,
+        tys: &[hir::Ty],
+    ) -> Result<Vec<rir::Ty>, miette::Result<Span>> {
+        tys.iter()
+            .map(|ty| recurse(unit, generics, new_generics, ty))
+            .collect::<Result<_, _>>()
+    }
+
+    fn wrap_err<T>(
+        unit: &hir::Unit,
+        result: miette::Result<Span>,
+        ty: &hir::Ty,
+    ) -> miette::Result<T> {
+        let span = result?;
+
+        Err(miette::miette!(
+            severity = Severity::Error,
+            code = "unspecified::type",
+            help = "consider adding type annotations",
+            labels = [span.label("here")],
+            "could not infer type {}",
+            ty.format(unit),
+        )
+        .with_source_code(span))
+    }
+
+    match recurse(unit, generics, new_generics, ty) {
+        Ok(ty) => Ok(ty),
+        Err(err) => wrap_err(unit, err, ty),
     }
 }
 

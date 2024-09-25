@@ -223,6 +223,10 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             tokens.expect(Token::RBracket)?;
             Ok(Ty::List(Box::new(ty)))
         }
+        Token::Under => {
+            tokens.consume();
+            Ok(Ty::Inferred)
+        }
         Token::Fn => parse_fn_ty(tokens),
         Token::Void => {
             tokens.consume();
@@ -414,21 +418,24 @@ fn parse_match(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
         .with_source_code(tokens.peek().1));
     }
 
-    tokens.expect(Token::Match)?;
+    let span = tokens.expect(Token::Match)?;
 
     let input = parse_expr(tokens, false)?;
     let mut arms = Vec::new();
 
     while is_arm(tokens) {
-        tokens.expect(Token::Newline)?;
+        if tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+
         arms.push(parse_arm(tokens)?);
     }
 
-    Ok(Expr::Match(Box::new(input), arms))
+    Ok(Expr::Match(Box::new(input), arms, span))
 }
 
 fn is_arm(tokens: &TokenStream) -> bool {
-    tokens.is(Token::Newline) && tokens.nth_is(1, Token::Pipe)
+    tokens.is(Token::Newline) && tokens.nth_is(1, Token::Pipe) || tokens.is(Token::Pipe)
 }
 
 fn parse_arm(tokens: &mut TokenStream) -> miette::Result<Arm> {
@@ -642,27 +649,29 @@ fn parse_binary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Exp
         return Ok(lhs);
     };
 
-    tokens.consume();
+    let (_, lspan) = tokens.consume();
 
     let rhs = parse_binary(tokens, multiline)?;
 
     match rhs {
-        Expr::Binary(rop, mid, rhs) => {
+        Expr::Binary(rop, mid, rhs, rspan) => {
             if lop.precedence() < rop.precedence() {
                 Ok(Expr::Binary(
                     rop,
                     mid,
-                    Box::new(Expr::Binary(lop, Box::new(lhs), rhs)),
+                    Box::new(Expr::Binary(lop, Box::new(lhs), rhs, lspan)),
+                    rspan,
                 ))
             } else {
                 Ok(Expr::Binary(
                     lop,
                     Box::new(lhs),
-                    Box::new(Expr::Binary(rop, mid, rhs)),
+                    Box::new(Expr::Binary(rop, mid, rhs, rspan)),
+                    lspan,
                 ))
             }
         }
-        rhs => Ok(Expr::Binary(lop, Box::new(lhs), Box::new(rhs))),
+        rhs => Ok(Expr::Binary(lop, Box::new(lhs), Box::new(rhs), lspan)),
     }
 }
 
@@ -688,18 +697,18 @@ fn get_binop(tokens: &TokenStream) -> Option<BinOp> {
 }
 
 fn parse_unary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let (token, _) = tokens.peek();
+    let (token, span) = tokens.peek();
 
     match token {
         Token::Mut => {
             tokens.consume();
             let expr = parse_unary(tokens, multiline)?;
-            Ok(Expr::Unary(UnOp::Mut, Box::new(expr)))
+            Ok(Expr::Unary(UnOp::Mut, Box::new(expr), span))
         }
         Token::Star => {
             tokens.consume();
             let expr = parse_unary(tokens, multiline)?;
-            Ok(Expr::Unary(UnOp::Deref, Box::new(expr)))
+            Ok(Expr::Unary(UnOp::Deref, Box::new(expr), span))
         }
         _ => parse_call(tokens, multiline),
     }
@@ -756,7 +765,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::LBracket => parse_list(tokens, multiline),
         Token::Void => {
             tokens.consume();
-            Ok(Expr::Void)
+            Ok(Expr::Void(span))
         }
         Token::True | Token::False => parse_bool(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),

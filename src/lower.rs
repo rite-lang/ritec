@@ -87,7 +87,7 @@ pub fn type_construct_ast(
                     }
 
                     let ty = match field.ty {
-                        Some(ref ty) => lower_ty(&mut cx, ty)?,
+                        Some(ref ty) => lower_ty(&mut cx, ty, field.span)?,
                         None => {
                             let index = cx.add_generic(field.name, field.span)?;
                             hir::Ty::Partial(hir::Part::Generic(index), Vec::new())
@@ -153,7 +153,7 @@ pub fn func_register_ast(
                 input.push(lower_argument(&mut cx, arg)?);
             }
 
-            let output = lower_output(&mut cx, &func.output)?;
+            let output = lower_output(&mut cx, &func.output, func.span)?;
 
             let vis = match func.vis {
                 ast::Vis::Public => hir::Vis::Public,
@@ -265,8 +265,8 @@ fn lower_arguments(cx: &mut TyCx, ast: &[ast::Argument]) -> miette::Result<Vec<h
 
 fn lower_argument(cx: &mut TyCx, ast: &ast::Argument) -> miette::Result<hir::Argument> {
     let ty = match ast.ty {
-        Some(ref ty) => lower_ty(cx, ty)?,
-        None => hir::Ty::Inferred(hir::Tid::new(), hir::Inferred::Any, cx.func),
+        Some(ref ty) => lower_ty(cx, ty, ast.span)?,
+        None => hir::Ty::Inferred(hir::Tid::new(), hir::Inferred::Any, cx.func, ast.span),
     };
 
     Ok(hir::Argument {
@@ -276,32 +276,49 @@ fn lower_argument(cx: &mut TyCx, ast: &ast::Argument) -> miette::Result<hir::Arg
     })
 }
 
-fn lower_output(cx: &mut TyCx, output: &Option<ast::Ty>) -> miette::Result<hir::Ty> {
+fn lower_output(cx: &mut TyCx, output: &Option<ast::Ty>, span: Span) -> miette::Result<hir::Ty> {
     match output {
-        Some(ty) => Ok(lower_ty(cx, ty)?),
+        Some(ty) => Ok(lower_ty(cx, ty, span)?),
         None => Ok(hir::Ty::Inferred(
             hir::Tid::new(),
             hir::Inferred::Any,
             cx.func,
+            span,
         )),
     }
 }
 
-fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
+fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> {
     match ty {
         ast::Ty::Void => Ok(hir::Ty::void()),
         ast::Ty::Bool => Ok(hir::Ty::bool()),
         ast::Ty::Str => Ok(hir::Ty::string()),
+        ast::Ty::Inferred => {
+            if !cx.inferring {
+                return Err(miette::miette!(
+                    severity = Severity::Error,
+                    code = "invalid::infer",
+                    "cannot infer type"
+                ));
+            }
+
+            Ok(hir::Ty::Inferred(
+                hir::Tid::new(),
+                hir::Inferred::Any,
+                cx.func,
+                span,
+            ))
+        }
         ast::Ty::Int(kind) => Ok(hir::Ty::Partial(hir::Part::Int(*kind), Vec::new())),
         ast::Ty::Mut(ty) => {
-            let ty = lower_ty(cx, ty)?;
+            let ty = lower_ty(cx, ty, span)?;
             Ok(hir::Ty::Partial(hir::Part::Mut, vec![ty]))
         }
         ast::Ty::Tuple(tys) => {
             let mut args = Vec::new();
 
             for ty in tys {
-                args.push(lower_ty(cx, ty)?);
+                args.push(lower_ty(cx, ty, span)?);
             }
 
             Ok(hir::Ty::Partial(hir::Part::Tuple, args))
@@ -325,7 +342,7 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
 
                     generics
                         .iter()
-                        .map(|ty| lower_ty(cx, ty))
+                        .map(|ty| lower_ty(cx, ty, span))
                         .collect::<miette::Result<Vec<_>>>()?
                 }
                 None => {
@@ -342,7 +359,9 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
                     cx.unit.adts[index]
                         .generics
                         .iter()
-                        .map(|_| hir::Ty::Inferred(hir::Tid::new(), hir::Inferred::Any, cx.func))
+                        .map(|_| {
+                            hir::Ty::Inferred(hir::Tid::new(), hir::Inferred::Any, cx.func, span)
+                        })
                         .collect()
                 }
             };
@@ -350,18 +369,18 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty) -> miette::Result<hir::Ty> {
             Ok(hir::Ty::Partial(hir::Part::Adt(index), generics))
         }
         ast::Ty::List(ty) => {
-            let ty = lower_ty(cx, ty)?;
+            let ty = lower_ty(cx, ty, span)?;
             Ok(hir::Ty::Partial(hir::Part::List, vec![ty]))
         }
         ast::Ty::Func(input, output) => {
             let mut args = Vec::new();
 
             for ty in input {
-                args.push(lower_ty(cx, ty)?);
+                args.push(lower_ty(cx, ty, span)?);
             }
 
             match output {
-                Some(output) => args.push(lower_ty(cx, output)?),
+                Some(output) => args.push(lower_ty(cx, output, span)?),
                 None => args.push(hir::Ty::void()),
             }
 
@@ -575,7 +594,7 @@ enum Capture {
 
 fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
     match ast {
-        ast::Expr::Void => lower_void(cx),
+        ast::Expr::Void(_) => lower_void(cx),
         ast::Expr::Int(negative, base, digits, span) => {
             lower_int(cx, *negative, *base, digits, *span)
         }
@@ -584,17 +603,17 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Paren(expr, _) => lower_expr(cx, expr),
         ast::Expr::Item(path) => lower_item(cx, path),
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
-        ast::Expr::List(exprs, rest, _) => lower_list(cx, exprs, rest),
+        ast::Expr::List(exprs, rest, span) => lower_list(cx, exprs, rest, *span),
         ast::Expr::Block(block) => lower_block(cx, block),
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
         ast::Expr::Call(func, args) => lower_call(cx, func, args),
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
-        ast::Expr::Binary(op, lhs, rhs) => lower_binary(cx, *op, lhs, rhs),
-        ast::Expr::Unary(op, expr) => lower_unary(cx, *op, expr),
+        ast::Expr::Binary(op, lhs, rhs, span) => lower_binary(cx, *op, lhs, rhs, *span),
+        ast::Expr::Unary(op, expr, span) => lower_unary(cx, *op, expr, *span),
         ast::Expr::Let(name, expr) => lower_let(cx, name, expr),
         ast::Expr::Mut(name, expr) => lower_mut(cx, name, expr),
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
-        ast::Expr::Match(input, arms) => lower_match(cx, input, arms),
+        ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
     }
 }
@@ -610,9 +629,9 @@ fn lower_int(
     negative: bool,
     base: Base,
     digits: &[u8],
-    _span: Span,
+    span: Span,
 ) -> miette::Result<hir::Expr> {
-    let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int));
+    let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int), span);
 
     let kind = hir::ExprKind::Int(negative, base, digits.to_vec());
     Ok(hir::Expr { kind, ty })
@@ -649,7 +668,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 let kind = hir::ExprKind::Local(*id);
                 let expr = hir::Expr { kind, ty };
 
-                let ty = hir::Ty::any();
+                let ty = hir::Ty::any(path.span);
                 let outer = cx.locals[*id].ty.clone();
                 cx.unit.unify(hir::Ty::new_mut(ty.clone()), outer);
 
@@ -677,7 +696,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 let kind = hir::ExprKind::Capture(capture);
                 let expr = hir::Expr { kind, ty };
 
-                let ty = hir::Ty::any();
+                let ty = hir::Ty::any(path.span);
                 cx.unit.unify(hir::Ty::new_mut(ty.clone()), outer);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
@@ -695,13 +714,15 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             let mut generics = HashMap::new();
 
             for argument in &cx.unit.funcs[id].input {
-                parts.push(cx.unit.env.use_ty(&mut generics, &argument.ty));
+                parts.push(cx.unit.env.use_ty(&mut generics, &argument.ty, path.span));
             }
 
-            parts.push(cx.unit.env.use_ty(&mut generics, &cx.unit.funcs[id].output));
+            let output = &cx.unit.funcs[id].output;
+            parts.push(cx.unit.env.use_ty(&mut generics, output, path.span));
 
             let kind = hir::ExprKind::Func(id);
             let ty = hir::Ty::Partial(hir::Part::Func, parts);
+
             Ok(hir::Expr { kind, ty })
         }
         Item::Variant(adt, index) => {
@@ -710,7 +731,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             let generics = cx.unit.adts[adt]
                 .generics
                 .iter()
-                .map(|_| hir::Ty::inferred(hir::Inferred::Any))
+                .map(|_| hir::Ty::inferred(hir::Inferred::Any, path.span))
                 .collect();
 
             if variant.fields.is_empty() {
@@ -782,9 +803,10 @@ fn lower_list(
     cx: &mut BodyCx,
     exprs: &[ast::Expr],
     rest: &Option<Box<ast::Expr>>,
+    span: Span,
 ) -> miette::Result<hir::Expr> {
     let mut args = Vec::new();
-    let ty = hir::Ty::any();
+    let ty = hir::Ty::any(span);
 
     for expr in exprs {
         let arg = lower_expr(cx, expr)?;
@@ -894,6 +916,7 @@ fn lower_binary(
     op: ast::BinOp,
     lhs: &ast::Expr,
     rhs: &ast::Expr,
+    span: Span,
 ) -> miette::Result<hir::Expr> {
     let lhs = lower_expr(cx, lhs)?;
     let rhs = lower_expr(cx, rhs)?;
@@ -908,7 +931,7 @@ fn lower_binary(
         | ast::BinOp::Le
         | ast::BinOp::Gt
         | ast::BinOp::Ge => {
-            let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int));
+            let ty = hir::Ty::inferred(hir::Inferred::Int(IntKind::Int), span);
 
             cx.unit.unify(lhs.ty.clone(), ty.clone());
             cx.unit.unify(rhs.ty.clone(), ty.clone());
@@ -935,7 +958,12 @@ fn lower_binary(
     }
 }
 
-fn lower_unary(cx: &mut BodyCx, op: ast::UnOp, expr: &ast::Expr) -> miette::Result<hir::Expr> {
+fn lower_unary(
+    cx: &mut BodyCx,
+    op: ast::UnOp,
+    expr: &ast::Expr,
+    span: Span,
+) -> miette::Result<hir::Expr> {
     let expr = lower_expr(cx, expr)?;
 
     match op {
@@ -945,7 +973,7 @@ fn lower_unary(cx: &mut BodyCx, op: ast::UnOp, expr: &ast::Expr) -> miette::Resu
             Ok(hir::Expr { kind, ty })
         }
         ast::UnOp::Deref => {
-            let ty = hir::Ty::any();
+            let ty = hir::Ty::any(span);
             let mut_ty = hir::Ty::Partial(hir::Part::Mut, vec![ty.clone()]);
             cx.unit.unify(expr.ty.clone(), mut_ty.clone());
 
@@ -1013,8 +1041,8 @@ fn lower_closure(
 
     for arg in args {
         let ty = match arg.ty {
-            Some(ref ty) => lower_ty(&mut cx.as_ty_cx(), ty)?,
-            None => hir::Ty::any(),
+            Some(ref ty) => lower_ty(&mut cx.as_ty_cx(), ty, arg.span)?,
+            None => hir::Ty::any(arg.span),
         };
 
         input.push(hir::Argument {
@@ -1095,7 +1123,12 @@ fn lower_closure(
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette::Result<hir::Expr> {
+fn lower_match(
+    cx: &mut BodyCx,
+    input: &ast::Expr,
+    arms: &[ast::Arm],
+    span: Span,
+) -> miette::Result<hir::Expr> {
     let input = lower_expr(cx, input)?;
 
     let mut pats = Vec::new();
@@ -1105,7 +1138,7 @@ fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette:
     }
 
     let mut tree = Match::None;
-    let ty = hir::Ty::any();
+    let ty = hir::Ty::any(span);
 
     for (pat, arm) in pats.into_iter().zip(arms.iter()) {
         let scope = cx.scope.len();
@@ -1124,7 +1157,7 @@ fn lower_match(cx: &mut BodyCx, input: &ast::Expr, arms: &[ast::Arm]) -> miette:
         cx.unit.unify(ty.clone(), arm_ty);
     }
 
-    Ok(build_match_expr(cx, tree)?.unwrap())
+    Ok(build_match_expr(cx, tree, span)?.unwrap())
 }
 
 fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pat> {
@@ -1136,7 +1169,7 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
         }
         ast::PatKind::Tuple(ref pats) => pats
             .iter()
-            .map(|pat| lower_pat(cx, pat, &hir::Ty::any()))
+            .map(|pat| lower_pat(cx, pat, &hir::Ty::any(pat.span)))
             .collect::<miette::Result<Vec<_>>>()
             .map(Pat::Tuple),
         ast::PatKind::Variant(ref path, ref pats) => {
@@ -1145,7 +1178,7 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             let generics: Vec<_> = cx.unit.adts[adt]
                 .generics
                 .iter()
-                .map(|_| hir::Ty::any())
+                .map(|_| hir::Ty::any(pat.span))
                 .collect();
 
             let variant = &cx.unit.adts[adt].variants[index];
@@ -1174,18 +1207,21 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             Ok(Pat::Variant(adt, index, hir))
         }
         ast::PatKind::List(ref pats, ref rest) => {
+            let span = pat.span;
+
             let mut rest = match rest {
-                Some(Some(rest)) => lower_pat(cx, rest, &hir::Ty::any())?,
+                Some(Some(rest)) => lower_pat(cx, rest, &hir::Ty::any(span))?,
                 Some(None) => Pat::Bind(None),
-                None => Pat::List(None),
+                None => Pat::List(None, span),
             };
 
             for pat in pats.iter().rev() {
-                let pat = lower_pat(cx, pat, &hir::Ty::any())?;
-                rest = Pat::List(Some(Box::new((pat, rest))));
+                let span = pat.span;
+                let pat = lower_pat(cx, pat, &hir::Ty::any(pat.span))?;
+                rest = Pat::List(Some(Box::new((pat, rest))), span);
             }
 
-            let ty = hir::Ty::Partial(hir::Part::List, vec![hir::Ty::any()]);
+            let ty = hir::Ty::Partial(hir::Part::List, vec![hir::Ty::any(span)]);
             cx.unit.unify(ty.clone(), ty);
 
             Ok(rest)
@@ -1199,7 +1235,7 @@ enum Pat {
     Bool(bool),
     Tuple(Vec<Pat>),
     Variant(usize, usize, Vec<(hir::Ty, Pat)>),
-    List(Option<Box<(Pat, Pat)>>),
+    List(Option<Box<(Pat, Pat)>>, Span),
 }
 
 fn build_match_tree(
@@ -1317,7 +1353,7 @@ fn build_match_tree(
                 }
             }
         }
-        Pat::List(pat) => {
+        Pat::List(pat, span) => {
             let Match::List {
                 some,
                 none,
@@ -1335,7 +1371,7 @@ fn build_match_tree(
                         None => some.get_or_insert_with(|| Box::new(Match::None)),
                     };
 
-                    let head_ty = hir::Ty::any();
+                    let head_ty = hir::Ty::any(span);
                     let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()]);
 
                     cx.unit.unify(input.ty.clone(), list_ty);
@@ -1433,7 +1469,7 @@ fn build_match_tree(
     }
 }
 
-fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::Expr>> {
+fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<Option<hir::Expr>> {
     match tree {
         Match::None => Ok(None),
         Match::Leaf(locals, expr) => {
@@ -1452,7 +1488,7 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
             let kind = hir::ExprKind::Block(exprs);
             Ok(Some(hir::Expr { kind, ty }))
         }
-        Match::Bind(tree) => build_match_expr(cx, *tree),
+        Match::Bind(tree) => build_match_expr(cx, *tree, span),
         Match::Bool {
             input,
             r#true,
@@ -1466,10 +1502,10 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
                 (None, None) => unreachable!(),
             };
 
-            let ty = hir::Ty::any();
+            let ty = hir::Ty::any(span);
 
-            let r#true = build_match_expr(cx, *r#true)?.map(Box::new).unwrap();
-            let r#false = build_match_expr(cx, *r#false)?.map(Box::new).unwrap();
+            let r#true = build_match_expr(cx, *r#true, span)?.map(Box::new).unwrap();
+            let r#false = build_match_expr(cx, *r#false, span)?.map(Box::new).unwrap();
 
             cx.unit.unify(ty.clone(), r#true.ty.clone());
             cx.unit.unify(ty.clone(), r#false.ty.clone());
@@ -1486,12 +1522,12 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
             default,
         } => {
             let mut exprs = Vec::new();
-            let ty = hir::Ty::any();
+            let ty = hir::Ty::any(span);
 
             for variant in variants {
                 match variant {
                     Some(subtree) => {
-                        let expr = build_match_expr(cx, subtree)?.unwrap();
+                        let expr = build_match_expr(cx, subtree, span)?.unwrap();
                         cx.unit.unify(ty.clone(), expr.ty.clone());
                         exprs.push(Some(expr));
                     }
@@ -1499,7 +1535,7 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
                 }
             }
 
-            let default = build_match_expr(cx, *default)?.map(Box::new);
+            let default = build_match_expr(cx, *default, span)?.map(Box::new);
 
             if let Some(ref default) = default {
                 cx.unit.unify(ty.clone(), default.ty.clone());
@@ -1522,10 +1558,10 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match) -> miette::Result<Option<hir::
                 (None, None) => unreachable!(),
             };
 
-            let ty = hir::Ty::any();
+            let ty = hir::Ty::any(span);
 
-            let some = build_match_expr(cx, *some)?.map(Box::new).unwrap();
-            let none = build_match_expr(cx, *none)?.map(Box::new).unwrap();
+            let some = build_match_expr(cx, *some, span)?.map(Box::new).unwrap();
+            let none = build_match_expr(cx, *none, span)?.map(Box::new).unwrap();
 
             cx.unit.unify(ty.clone(), some.ty.clone());
             cx.unit.unify(ty.clone(), none.ty.clone());

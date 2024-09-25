@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use miette::{LabeledSpan, MietteError, MietteSpanContents, SourceCode, SourceSpan, SpanContents};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,

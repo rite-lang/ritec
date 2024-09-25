@@ -109,7 +109,7 @@ pub struct Generic {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
-    Inferred(Tid, Inferred, Option<usize>),
+    Inferred(Tid, Inferred, Option<usize>, Span),
     Partial(Part, Vec<Ty>),
     Field(Box<Ty>, &'static str),
     Tuple(Box<Ty>, usize),
@@ -255,12 +255,12 @@ impl Adt {
 }
 
 impl Ty {
-    pub fn any() -> Self {
-        Ty::Inferred(Tid::new(), Inferred::Any, None)
+    pub fn any(span: Span) -> Self {
+        Ty::Inferred(Tid::new(), Inferred::Any, None, span)
     }
 
-    pub fn inferred(inferred: Inferred) -> Self {
-        Ty::Inferred(Tid::new(), inferred, None)
+    pub fn inferred(inferred: Inferred, span: Span) -> Self {
+        Ty::Inferred(Tid::new(), inferred, None, span)
     }
 
     pub const fn void() -> Self {
@@ -285,7 +285,7 @@ impl Ty {
 
     pub fn specialize(&self, generics: &[Ty]) -> Ty {
         match self {
-            Ty::Inferred(_, _, _) => self.clone(),
+            Ty::Inferred(_, _, _, _) => self.clone(),
             Ty::Partial(Part::Generic(index), args) => {
                 assert!(args.is_empty());
                 generics[*index].clone()
@@ -317,72 +317,74 @@ impl Ty {
             }
         }
     }
-}
 
-impl std::fmt::Display for Ty {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    pub fn format(&self, unit: &Unit) -> String {
+        if let Some(ty) = unit.env.substitute(self) {
+            return ty.format(unit);
+        }
+
         match self {
-            Ty::Inferred(tid, kind, func) => match kind {
-                Inferred::Any => write!(f, "_{}_{:?}", tid.id, func),
-                Inferred::Int(kind) => write!(f, "{{{}; {}; {:?}}}", kind, tid.id, func),
-                Inferred::Float(_) => write!(f, "_"),
+            Ty::Inferred(_, kind, _, _) => match kind {
+                Inferred::Any => String::from("_"),
+                Inferred::Int(kind) => format!("{{{}}}", kind),
+                Inferred::Float(kind) => format!("{{{}}}", kind),
             },
-            Ty::Partial(part, args) => write!(f, "{}", format_partial(part, args)),
-            Ty::Field(ty, field) => write!(f, "{}.{}", ty, field),
-            Ty::Tuple(ty, index) => write!(f, "{}.{}", ty, index),
-            Ty::Call(func, args) => {
+            Ty::Partial(part, args) => Self::format_partial(unit, part, args),
+            Ty::Field(_, _) => todo!(),
+            Ty::Tuple(_, _) => todo!(),
+            Ty::Call(_, _) => String::from("call"),
+            Ty::Pipe(_, _) => String::from("pipe"),
+        }
+    }
+
+    pub fn format_partial(unit: &Unit, part: &Part, args: &[Ty]) -> String {
+        match part {
+            Part::Void => String::from("void"),
+            Part::Bool => String::from("bool"),
+            Part::Str => String::from("str"),
+            Part::List => format!("[{}]", args[0].format(unit)),
+            Part::Tuple => {
                 let args = args
                     .iter()
-                    .map(|arg| match arg {
-                        Some(arg) => arg.to_string(),
-                        None => "_".to_string(),
-                    })
+                    .map(|arg| arg.format(unit))
+                    .collect::<Vec<_>>()
+                    .join(" * ");
+
+                format!("({})", args)
+            }
+            Part::Func => {
+                let input = args
+                    .iter()
+                    .take(args.len().saturating_sub(1))
+                    .map(|arg| arg.format(unit))
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                write!(f, "({})<{}>", func, args)
+                let output = args
+                    .last()
+                    .map_or(String::from("wat"), |arg| arg.format(unit));
+
+                format!("fn({}) -> {}", input, output)
             }
-            Ty::Pipe(a, b) => write!(f, "{} |> {}", a, b),
-        }
-    }
-}
+            Part::Int(kind) => format!("{}", kind),
+            Part::Mut => format!("mut {}", args[0].format(unit)),
+            Part::Generic(id) => format!("<{}>", id),
+            Part::Adt(id) => {
+                let name = &unit.adts[*id].name;
 
-pub fn format_partial(part: &Part, args: &[Ty]) -> String {
-    match part {
-        Part::Void => String::from("void"),
-        Part::Bool => String::from("bool"),
-        Part::Str => String::from("str"),
-        Part::List => format!("[{}]", args[0]),
-        Part::Tuple => {
-            let args = args
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" * ");
+                if args.is_empty() {
+                    return name.to_string();
+                }
 
-            format!("({})", args)
+                let args = args
+                    .iter()
+                    .map(|arg| arg.format(unit))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                format!("{}<{}>", name, args)
+            }
         }
-        Part::Func => {
-            let input = args
-                .iter()
-                .take(args.len() - 1)
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            let output = args.last().unwrap().to_string();
-            format!("fn({}) -> {}", input, output)
-        }
-        Part::Int(kind) => format!("{}", kind),
-        Part::Mut => format!("&{}", args[0]),
-        Part::Generic(id) => format!(
-            "{}<{}>",
-            id,
-            args.iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Part::Adt(id) => format!("Type<{}>", id),
     }
 }
 

@@ -51,3 +51,12 @@ pub enum FloatKind {
     F32,
     F64,
 }
+
+impl std::fmt::Display for FloatKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FloatKind::F32 => write!(f, "f32"),
+            FloatKind::F64 => write!(f, "f64"),
+        }
+    }
+}
