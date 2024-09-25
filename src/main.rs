@@ -64,7 +64,7 @@ impl Compiler {
 
     fn add_dir(&mut self, name: &str, path: &Path) -> miette::Result<usize> {
         let name = self.interner.intern(name);
-        let mut module = hir::Module::new(name);
+        let index = self.unit.push_module(hir::Module::new(name));
 
         for entry in fs::read_dir(path).map_err(|err| miette::miette!("{}", err.to_string()))? {
             let entry = entry.map_err(|err| miette::miette!("{}", err.to_string()))?;
@@ -81,27 +81,32 @@ impl Compiler {
                     .map_err(|err| miette::miette!("{}", err.to_string()))?;
                 let source = self.interner.intern(source);
 
-                let name = entry.path();
-                let name = name.file_stem().unwrap();
-                let name = self.interner.intern(name.to_str().unwrap());
+                let subpath = entry.path();
+                let subname = subpath.file_stem().unwrap();
+                let subpath = self.interner.intern(subpath.to_str().unwrap());
+                let subname = self.interner.intern(subname.to_str().unwrap());
 
-                let mut tokens = lex::lex(name, source)?;
+                let mut tokens = lex::lex(subpath, source)?;
                 let ast = parse::parse(&mut tokens)?;
 
-                let submodule = self.unit.push_module(hir::Module::new(name));
+                let mut submodule = hir::Module::new(subname);
+                submodule.modules.insert(name, index);
+
+                let submodule = self.unit.push_module(submodule);
                 self.modules.push((submodule, ast));
 
-                module.modules.insert(name, submodule);
+                self.unit.modules[index].modules.insert(subname, submodule);
             }
         }
 
+        let module = &self.unit.modules[index];
         let modules = module.modules.clone();
 
-        for &module in module.modules.values() {
-            self.unit.modules[module].modules = modules.clone();
+        for &module in modules.values() {
+            self.unit.modules[module].modules.extend(modules.clone());
         }
 
-        Ok(self.unit.push_module(module))
+        Ok(index)
     }
 
     fn lower(&mut self) -> miette::Result<()> {
