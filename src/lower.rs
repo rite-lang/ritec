@@ -724,6 +724,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Unary(op, expr, span) => lower_unary(cx, *op, expr, *span),
         ast::Expr::Let(name, expr) => lower_let(cx, name, expr),
         ast::Expr::Mut(name, expr) => lower_mut(cx, name, expr),
+        ast::Expr::LetAssert(pat, expr) => lower_let_assert(cx, pat, expr),
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
         ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
@@ -1159,6 +1160,14 @@ fn lower_mut(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::R
     Ok(hir::Expr { kind, ty })
 }
 
+fn lower_let_assert(
+    cx: &mut BodyCx,
+    pat: &ast::Pat,
+    expr: &ast::Expr,
+) -> miette::Result<hir::Expr> {
+    todo!()
+}
+
 fn lower_assign(cx: &mut BodyCx, lhs: &ast::Expr, rhs: &ast::Expr) -> miette::Result<hir::Expr> {
     let lhs = lower_expr(cx, lhs)?;
     let rhs = lower_expr(cx, rhs)?;
@@ -1355,6 +1364,43 @@ enum Pat {
     Tuple(Vec<Pat>),
     Variant(usize, usize, Vec<(hir::Ty, Pat)>),
     List(Option<Box<(Pat, Pat)>>, Span),
+}
+
+fn build_pat_check(
+    cx: &mut BodyCx,
+    input: hir::Expr,
+    pat: Pat,
+    body: &ast::Expr,
+    locals: &mut Vec<(usize, hir::Expr)>,
+) -> miette::Result<Option<hir::Expr>> {
+    match pat {
+        Pat::Bind(_) => todo!(),
+        Pat::Bool(value) => match value {
+            true => Ok(Some(input)),
+            false => Ok(Some(hir::Expr {
+                kind: hir::ExprKind::Unary(hir::UnOp::Not, Box::new(input)),
+                ty: hir::Ty::bool(),
+            })),
+        },
+        Pat::Tuple(pats) => {
+            let mut exprs = Vec::new();
+
+            for pat in pats {
+                let input = hir::Expr {
+                    kind: hir::ExprKind::TupleField(Box::new(input.clone()), exprs.len()),
+                    ty: hir::Ty::any(body.span()),
+                };
+
+                if let Some(expr) = build_pat_check(cx, input, pat, body, locals)? {
+                    exprs.push(expr);
+                }
+            }
+
+            todo!()
+        }
+        Pat::Variant(_, _, _) => todo!(),
+        Pat::List(_, _) => todo!(),
+    }
 }
 
 fn build_match_tree(
@@ -1685,8 +1731,13 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<
             cx.unit.unify(ty.clone(), some.ty.clone());
             cx.unit.unify(ty.clone(), none.ty.clone());
 
-            let r#match = hir::Match::List(some, none);
-            let kind = hir::ExprKind::Match(Box::new(input), r#match);
+            let empty = hir::Expr {
+                kind: hir::ExprKind::ListEmpty(Box::new(input.clone())),
+                ty: hir::Ty::bool(),
+            };
+
+            let r#match = hir::Match::Bool(none, some);
+            let kind = hir::ExprKind::Match(Box::new(empty), r#match);
             Ok(Some(hir::Expr { kind, ty }))
         }
     }

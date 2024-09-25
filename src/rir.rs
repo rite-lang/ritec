@@ -151,6 +151,9 @@ pub enum Statement<T = Ty> {
     Return {
         value: Option<Value<T>>,
     },
+    Panic {
+        message: &'static str,
+    },
     Assign {
         place: Place<T>,
         value: Value<T>,
@@ -159,11 +162,6 @@ pub enum Statement<T = Ty> {
         input: Operand<T>,
         r#true: Block<T>,
         r#false: Block<T>,
-    },
-    MatchList {
-        input: Operand<T>,
-        some: Block<T>,
-        none: Block<T>,
     },
     MatchAdt {
         input: Operand<T>,
@@ -179,8 +177,10 @@ pub enum Value<T = Ty> {
     List(Vec<Operand<T>>, Option<Operand<T>>),
     ListHead(Operand<T>),
     ListTail(Operand<T>),
+    ListEmpty(Operand<T>),
     Binary(BinOp, Operand<T>, Operand<T>),
     Unary(UnOp, Operand<T>),
+    VariantTag(Operand<T>),
     Call(Operand<T>, Vec<Operand<T>>),
     Ref(Place<T>),
     Tuple(Vec<Operand<T>>),

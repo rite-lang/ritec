@@ -179,10 +179,12 @@ pub enum ExprKind {
     List(Vec<Expr>, Option<Box<Expr>>),
     ListHead(Box<Expr>),
     ListTail(Box<Expr>),
+    ListEmpty(Box<Expr>),
     Block(Vec<Expr>),
     Field(Box<Expr>, &'static str),
     VariantField(Box<Expr>, usize, usize),
     TupleField(Box<Expr>, usize),
+    VariantTag(Box<Expr>),
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
@@ -193,6 +195,7 @@ pub enum ExprKind {
     Assign(Box<Expr>, Box<Expr>),
     Closure(Vec<Local>, Vec<Expr>, Box<Expr>),
     Match(Box<Expr>, Match),
+    Panic,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -204,7 +207,6 @@ pub enum UnOp {
 #[derive(Clone, Debug)]
 pub enum Match {
     Bool(Box<Expr>, Box<Expr>),
-    List(Box<Expr>, Box<Expr>),
     Adt(usize, Vec<Option<Expr>>, Option<Box<Expr>>),
 }
 

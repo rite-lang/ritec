@@ -113,6 +113,7 @@ pub enum Expr {
     Unary(UnOp, Box<Expr>, Span),
     Let(&'static str, Box<Expr>),
     Mut(&'static str, Box<Expr>),
+    LetAssert(Pat, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>, Span),
     Closure(Vec<Argument>, Box<Expr>),
@@ -168,6 +169,7 @@ impl Expr {
             }
             Expr::Let(_, expr) => expr.span(),
             Expr::Mut(_, expr) => expr.span(),
+            Expr::LetAssert(_, expr) => expr.span(),
             Expr::Assign(lhs, rhs) => {
                 let start = lhs.span();
                 let end = rhs.span();

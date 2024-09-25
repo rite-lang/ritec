@@ -269,7 +269,9 @@ fn build_place(
         | hir::ExprKind::List(_, _)
         | hir::ExprKind::ListHead(_)
         | hir::ExprKind::ListTail(_)
+        | hir::ExprKind::ListEmpty(_)
         | hir::ExprKind::Block(_)
+        | hir::ExprKind::VariantTag(_)
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
@@ -278,7 +280,8 @@ fn build_place(
         | hir::ExprKind::Let(_, _)
         | hir::ExprKind::Assign(_, _)
         | hir::ExprKind::Closure(_, _, _)
-        | hir::ExprKind::Match(_, _) => {
+        | hir::ExprKind::Match(_, _)
+        | hir::ExprKind::Panic => {
             let value = build_value(builder, block, expr)?;
             let ty = builder.build_ty(&expr.ty)?;
             let place = builder.make_temp(ty);
@@ -379,28 +382,6 @@ fn build_operand(
                         r#false: false_block,
                     });
                 }
-                hir::Match::List(some, none) => {
-                    let mut some_block = rir::Block::new();
-                    let mut none_block = rir::Block::new();
-
-                    let some_value = build_value(builder, &mut some_block, some)?;
-                    let none_value = build_value(builder, &mut none_block, none)?;
-
-                    some_block.statements.push(rir::Statement::Assign {
-                        place: place.clone(),
-                        value: some_value,
-                    });
-                    none_block.statements.push(rir::Statement::Assign {
-                        place: place.clone(),
-                        value: none_value,
-                    });
-
-                    block.statements.push(rir::Statement::MatchList {
-                        input,
-                        some: some_block,
-                        none: none_block,
-                    });
-                }
                 hir::Match::Adt(_, variants, default) => {
                     let mut blocks = Vec::new();
 
@@ -467,12 +448,22 @@ fn build_operand(
             Ok(rir::Operand::Copy(place))
         }
 
+        hir::ExprKind::Panic => {
+            block.statements.push(rir::Statement::Panic {
+                message: "panicked at 'panic'",
+            });
+
+            Ok(rir::Operand::Constant(rir::Constant::Void))
+        }
+
         hir::ExprKind::Func(_)
         | hir::ExprKind::Variant(_, _)
         | hir::ExprKind::Tuple(_)
         | hir::ExprKind::List(_, _)
         | hir::ExprKind::ListHead(_)
         | hir::ExprKind::ListTail(_)
+        | hir::ExprKind::ListEmpty(_)
+        | hir::ExprKind::VariantTag(_)
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
@@ -548,6 +539,11 @@ fn build_value(
             let list = build_operand(builder, block, list)?;
 
             Ok(rir::Value::ListTail(list))
+        }
+
+        hir::ExprKind::ListEmpty(ref list) => {
+            let list = build_operand(builder, block, list)?;
+            Ok(rir::Value::ListEmpty(list))
         }
 
         hir::ExprKind::Binary(op, ref lhs, ref rhs) => {
@@ -628,6 +624,11 @@ fn build_value(
             let generics = (0..builder.generics.len()).map(rir::Ty::Generic).collect();
 
             Ok(rir::Value::Func(index, Vec::new(), generics))
+        }
+
+        hir::ExprKind::VariantTag(ref expr) => {
+            let expr = build_operand(builder, block, expr)?;
+            Ok(rir::Value::VariantTag(expr))
         }
 
         hir::ExprKind::Call(ref func, ref args) => {
@@ -878,7 +879,8 @@ fn build_value(
         | hir::ExprKind::Deref(_)
         | hir::ExprKind::Let(_, _)
         | hir::ExprKind::Assign(_, _)
-        | hir::ExprKind::Match(_, _) => {
+        | hir::ExprKind::Match(_, _)
+        | hir::ExprKind::Panic => {
             let operand = build_operand(builder, block, expr)?;
 
             Ok(rir::Value::Use(operand))

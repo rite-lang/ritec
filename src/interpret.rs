@@ -113,6 +113,9 @@ impl<'a> Interpreter<'a> {
                     Some(value) => return Some(self.interpret_value(frame, value)),
                     None => return Some(Value::Void),
                 },
+                Statement::Panic { message } => {
+                    panic!("{}", message);
+                }
                 Statement::Assign { place, value } => {
                     let value = self.interpret_value(frame, value);
                     self.assign_place(frame, place, value);
@@ -134,24 +137,6 @@ impl<'a> Interpreter<'a> {
                         }
                         false => {
                             if let Some(value) = self.interpret_block(frame, r#false) {
-                                return Some(value);
-                            }
-                        }
-                    }
-                }
-                Statement::MatchList { input, some, none } => {
-                    let Value::List(input) = self.interpret_operand(frame, input) else {
-                        panic!("expected list")
-                    };
-
-                    match input.is_some() {
-                        true => {
-                            if let Some(value) = self.interpret_block(frame, some) {
-                                return Some(value);
-                            }
-                        }
-                        false => {
-                            if let Some(value) = self.interpret_block(frame, none) {
                                 return Some(value);
                             }
                         }
@@ -228,6 +213,13 @@ impl<'a> Interpreter<'a> {
                 };
 
                 Value::List(list.unwrap().tail)
+            }
+            rir::Value::ListEmpty(tail) => {
+                let Value::List(list) = self.interpret_operand(frame, tail) else {
+                    panic!("expected list")
+                };
+
+                Value::Bool(list.is_none())
             }
             rir::Value::Binary(op, lhs, rhs) => {
                 let lhs = self.interpret_operand(frame, lhs);
@@ -334,6 +326,13 @@ impl<'a> Interpreter<'a> {
                         Value::Bool(!operand)
                     }
                 }
+            }
+            rir::Value::VariantTag(value) => {
+                let Value::Adt(variant, _) = self.interpret_operand(frame, value) else {
+                    panic!("expected adt")
+                };
+
+                Value::Int(variant as i64)
             }
             rir::Value::Call(func, args) => {
                 let Value::Func(func, captured) = self.interpret_operand(frame, func) else {

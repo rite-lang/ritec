@@ -196,6 +196,7 @@ fn specialize_block(spec: &mut Specializer, block: Block) -> Block<Specific> {
             Statement::Return { value } => Statement::Return {
                 value: value.map(|value| specialize_value(spec, value)),
             },
+            Statement::Panic { message } => Statement::Panic { message },
             Statement::Assign { place, value } => Statement::Assign {
                 place: specialize_place(spec, place),
                 value: specialize_value(spec, value),
@@ -208,11 +209,6 @@ fn specialize_block(spec: &mut Specializer, block: Block) -> Block<Specific> {
                 input: specialize_operand(spec, input),
                 r#true: specialize_block(spec, r#true),
                 r#false: specialize_block(spec, r#false),
-            },
-            Statement::MatchList { input, some, none } => Statement::MatchList {
-                input: specialize_operand(spec, input),
-                some: specialize_block(spec, some),
-                none: specialize_block(spec, none),
             },
             Statement::MatchAdt {
                 input,
@@ -279,12 +275,14 @@ fn specialize_value(spec: &mut Specializer, value: Value) -> Value<Specific> {
         }
         Value::ListHead(list) => Value::ListHead(specialize_operand(spec, list)),
         Value::ListTail(list) => Value::ListTail(specialize_operand(spec, list)),
+        Value::ListEmpty(list) => Value::ListEmpty(specialize_operand(spec, list)),
         Value::Binary(op, lhs, rhs) => Value::Binary(
             op,
             specialize_operand(spec, lhs),
             specialize_operand(spec, rhs),
         ),
         Value::Unary(op, operand) => Value::Unary(op, specialize_operand(spec, operand)),
+        Value::VariantTag(operand) => Value::VariantTag(specialize_operand(spec, operand)),
         Value::Call(func, args) => {
             let func = specialize_operand(spec, func);
 
