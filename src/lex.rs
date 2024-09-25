@@ -99,14 +99,16 @@ pub fn lex(file: &'static str, source: &'static str) -> miette::Result<TokenStre
             tokens.push(lex_token(&mut lexer)?);
         }
 
-        let span = Span {
-            lo,
-            hi: lexer.lo,
-            file,
-            source,
-        };
-
-        tokens.push((Token::Newline, span));
+        // Only add a newline if the line doesn't already end with one
+        if tokens.last().map(|(t, _)| *t) != Some(Token::Newline) {
+            let span = Span {
+                lo: lexer.lo,
+                hi: lexer.lo,
+                file,
+                source,
+            };
+            tokens.push((Token::Newline, span));
+        }
 
         lo += line.len() + '\n'.len_utf8();
     }
@@ -224,6 +226,10 @@ fn skip_whitespace(lexer: &mut Lexer) {
 
 fn lex_token(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let c = lexer.peek().expect("lex_token called on empty input");
+
+    if lexer.rest().starts_with("//") {
+        return lex_comment(lexer);
+    }
 
     if lexer.rest().len() >= 2 {
         if let Some(token) = Token::symbol_from_str(&lexer.rest()[..2]) {
@@ -392,6 +398,43 @@ fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
         Token::String,
         Span {
             lo,
+            hi: lexer.lo,
+            file: lexer.file,
+            source: lexer.source,
+        },
+    ))
+}
+
+fn lex_comment(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    let lo = lexer.lo;
+
+    _ = lexer.next();
+    _ = lexer.next();
+
+    let token = match lexer.peek() {
+        Some('/') => {
+            _ = lexer.next();
+            Token::DocComment
+        }
+        Some('!') => {
+            _ = lexer.next();
+            Token::ModDocComment
+        }
+        _ => Token::Newline,
+    };
+
+    while lexer.peek() != Some('\n') {
+        _ = lexer.next();
+    }
+
+    Ok((
+        token,
+        Span {
+            lo: if token == Token::Newline {
+                lexer.lo
+            } else {
+                lo
+            },
             hi: lexer.lo,
             file: lexer.file,
             source: lexer.source,

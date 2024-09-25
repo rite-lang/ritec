@@ -17,6 +17,11 @@ pub fn parse(tokens: &mut TokenStream) -> miette::Result<Module> {
 
     let mut decls = Vec::new();
 
+    // TODO: Add to decl
+    while tokens.is(Token::ModDocComment) || tokens.is(Token::Newline) {
+        tokens.consume();
+    }
+
     while !tokens.is_eof() {
         decls.push(parse_decl(tokens)?);
 
@@ -30,8 +35,15 @@ pub fn parse(tokens: &mut TokenStream) -> miette::Result<Module> {
 
 fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
     if tokens.is(Token::Import) {
-        parse_import(tokens).map(Decl::Import)
-    } else if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
+        return parse_import(tokens).map(Decl::Import);
+    }
+
+    // TODO: Add to function and types so LSP can extract comments
+    while tokens.is(Token::DocComment) || tokens.is(Token::Newline) {
+        tokens.consume();
+    }
+
+    if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
         parse_func_decl(tokens).map(Decl::Func)
     } else if tokens.is(Token::Type) || tokens.nth_is(1, Token::Type) {
         parse_type_decl(tokens).map(Decl::Type)

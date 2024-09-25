@@ -10,6 +10,10 @@ pub enum Token {
     Float,
     String,
 
+    /* comments */
+    DocComment,
+    ModDocComment,
+
     /* control */
     Newline,
     Indent,
