@@ -101,7 +101,7 @@ pub struct Argument {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Generic {
     pub name: &'static str,
     pub span: Span,
@@ -175,7 +175,7 @@ pub enum ExprKind {
     Deref(Box<Expr>),
     Let(usize, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
-    Closure(usize, Vec<Expr>),
+    Closure(Vec<Local>, Vec<Expr>, Box<Expr>),
     Match(Box<Expr>, Match),
 }
 

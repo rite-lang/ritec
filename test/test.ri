@@ -11,3 +11,4 @@ fn main()
   |> list:concat
   |> list:filter(|x| x % 2 == 0)
   |> list:map(|x| Foo(x, x * 2 + 1))
+  |> list:reverse

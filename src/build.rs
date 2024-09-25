@@ -261,7 +261,7 @@ fn build_place(
         | hir::ExprKind::Mut(_)
         | hir::ExprKind::Let(_, _)
         | hir::ExprKind::Assign(_, _)
-        | hir::ExprKind::Closure(_, _)
+        | hir::ExprKind::Closure(_, _, _)
         | hir::ExprKind::Match(_, _) => {
             let value = build_value(builder, block, expr)?;
             let ty = builder.build_ty(&expr.ty)?;
@@ -461,7 +461,7 @@ fn build_operand(
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
         | hir::ExprKind::Mut(_)
-        | hir::ExprKind::Closure(_, _) => {
+        | hir::ExprKind::Closure(_, _, _) => {
             let value = build_value(builder, block, expr)?;
             let ty = builder.build_ty(&expr.ty)?;
             let place = builder.make_temp(ty);
@@ -765,23 +765,80 @@ fn build_value(
             Ok(rir::Value::Mut(place))
         }
 
-        hir::ExprKind::Closure(index, ref captures) => {
+        hir::ExprKind::Closure(ref locals, ref captured, ref body) => {
             let ty = builder.build_ty(&expr.ty)?;
-            let func = &builder.rir.funcs[index];
 
-            let mut generics = Vec::new();
+            let rir::Ty::Func(ref input, ref output) = ty else {
+                unreachable!("unexpected closure: {:?}", ty)
+            };
 
-            extract_generics(&ty, &func.ty(), &mut generics);
-            let generics = generics.into_iter().map(Option::unwrap).collect();
+            let generics = builder.generics.iter().map(|(_, g)| g.clone()).collect();
 
-            let mut operands = Vec::new();
+            let input = input
+                .iter()
+                .map(|arg| rir::Argument {
+                    ty: arg.clone(),
+                    span: None,
+                })
+                .collect();
 
-            for capture in captures {
-                let operand = build_operand(builder, block, capture)?;
-                operands.push(operand);
+            let output = output.as_ref().clone();
+
+            let locals = locals
+                .iter()
+                .map(|local| {
+                    Ok(rir::Local {
+                        ty: builder.build_ty(&local.ty)?,
+                    })
+                })
+                .collect::<miette::Result<_>>()?;
+
+            let captures = captured
+                .iter()
+                .map(|capture| {
+                    Ok(rir::Capture {
+                        ty: builder.build_ty(&capture.ty)?,
+                    })
+                })
+                .collect::<miette::Result<_>>()?;
+
+            let func = rir::Func {
+                name: String::from("closure"),
+                generics,
+                input,
+                output,
+                locals,
+                captures,
+                body: rir::Block::new(),
+            };
+
+            let index = builder.rir.funcs.len();
+            builder.rir.funcs.push(func);
+
+            {
+                let mut builder = Builder {
+                    hir: builder.hir,
+                    rir: builder.rir,
+                    generics: builder.generics,
+                    func: index,
+                };
+
+                let mut block = rir::Block::new();
+
+                let value = build_value(&mut builder, &mut block, body)?;
+                (block.statements).push(rir::Statement::Return { value: Some(value) });
+
+                builder.rir.funcs[index].body = block;
             }
 
-            Ok(rir::Value::Func(index, operands, generics))
+            let captured = captured
+                .iter()
+                .map(|capture| build_operand(builder, block, capture))
+                .collect::<miette::Result<_>>()?;
+
+            let generics = (0..builder.generics.len()).map(rir::Ty::Generic).collect();
+
+            Ok(rir::Value::Func(index, captured, generics))
         }
 
         hir::ExprKind::Void

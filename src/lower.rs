@@ -1129,29 +1129,25 @@ fn lower_closure(
         }),
     };
 
-    let body = lower_expr(&mut body_cx, body)?;
+    let body = Box::new(lower_expr(&mut body_cx, body)?);
 
     let capture = body_cx.capture.take().unwrap();
     cx.capture = capture.parent.map(|parent| *parent);
 
     let mut captured = Vec::new();
-    let mut captures = Vec::new();
 
     for (capture, ty) in capture.captures {
         match capture {
             Capture::Argument(index) => {
                 let kind = hir::ExprKind::Argument(index);
-                captures.push(ty.clone());
                 captured.push(hir::Expr { kind, ty });
             }
             Capture::Local(index) => {
                 let kind = hir::ExprKind::Local(index);
-                captures.push(ty.clone());
                 captured.push(hir::Expr { kind, ty });
             }
             Capture::Captured(index) => {
                 let kind = hir::ExprKind::Capture(index);
-                captures.push(ty.clone());
                 captured.push(hir::Expr { kind, ty });
             }
         }
@@ -1166,20 +1162,7 @@ fn lower_closure(
         .chain([output.clone()])
         .collect();
 
-    let func = hir::Func {
-        vis: hir::Vis::Private,
-        name: "closure",
-        generics: Vec::new(),
-        input,
-        output,
-        locals,
-        captures,
-        body,
-    };
-
-    let id = cx.unit.push_func(func);
-
-    let kind = hir::ExprKind::Closure(id, captured);
+    let kind = hir::ExprKind::Closure(locals, captured, body);
     let ty = hir::Ty::Partial(hir::Part::Func, parts);
     Ok(hir::Expr { kind, ty })
 }
