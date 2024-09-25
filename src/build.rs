@@ -304,7 +304,9 @@ fn build_operand(
     match expr.kind {
         hir::ExprKind::Void => Ok(rir::Operand::Constant(rir::Constant::Void)),
 
-        hir::ExprKind::StringLiteral(s) => Ok(rir::Operand::Constant(rir::Constant::StringLiteral(s))),
+        hir::ExprKind::StringLiteral(s) => {
+            Ok(rir::Operand::Constant(rir::Constant::StringLiteral(s)))
+        }
 
         hir::ExprKind::Int(negative, base, ref value) => Ok(rir::Operand::Constant(
             rir::Constant::Int(negative, base, value.clone()),

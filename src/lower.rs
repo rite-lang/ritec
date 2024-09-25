@@ -762,7 +762,11 @@ fn lower_bool(_cx: &mut BodyCx, value: bool, _span: Span) -> miette::Result<hir:
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_string_literal(_cx: &mut BodyCx, value: &'static str, _span: Span) -> miette::Result<hir::Expr> {
+fn lower_string_literal(
+    _cx: &mut BodyCx,
+    value: &'static str,
+    _span: Span,
+) -> miette::Result<hir::Expr> {
     let ty = hir::Ty::string();
     let kind = hir::ExprKind::StringLiteral(value);
     Ok(hir::Expr { kind, ty })
