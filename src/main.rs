@@ -2,6 +2,7 @@
 
 mod ast;
 mod build;
+mod decorator;
 mod hir;
 mod infer;
 mod interner;

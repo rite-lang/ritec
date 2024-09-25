@@ -1,3 +1,4 @@
+use crate::decorator::Decorator;
 use crate::{
     ast::BinOp,
     hir::UnOp,
@@ -22,6 +23,7 @@ impl<T> Default for Unit<T> {
 
 #[derive(Clone, Debug)]
 pub struct Func<T = Ty> {
+    pub decorators: Vec<Decorator>,
     pub name: String,
     pub generics: Vec<Generic>,
     pub input: Vec<Argument<T>>,
@@ -34,6 +36,7 @@ pub struct Func<T = Ty> {
 impl Default for Func {
     fn default() -> Self {
         Self {
+            decorators: Vec::new(),
             name: String::new(),
             generics: Vec::new(),
             input: Vec::new(),
@@ -199,7 +202,7 @@ pub enum Constant {
     Void,
     Bool(bool),
     Int(bool, Base, Vec<u8>),
-    StringLiteral(&'static str),
+    String(&'static str),
 }
 
 #[derive(Clone, Debug)]

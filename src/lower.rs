@@ -236,6 +236,7 @@ pub fn func_register_ast(
             };
 
             unit.push_func(hir::Func {
+                decorators: func.decorators.clone(),
                 name: func.name,
                 generics,
                 input,

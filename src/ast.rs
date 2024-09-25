@@ -1,3 +1,4 @@
+use crate::decorator::Decorator;
 use crate::{
     number::{Base, IntKind},
     span::Span,
@@ -24,6 +25,7 @@ pub struct Import {
 
 #[derive(Debug)]
 pub struct Func {
+    pub decorators: Vec<Decorator>,
     pub vis: Vis,
     pub name: &'static str,
     pub input: Vec<Argument>,

@@ -89,6 +89,7 @@ pub enum Token {
     Percent,
     Quote,
     Under,
+    Pound,
 }
 
 impl Token {
@@ -167,6 +168,7 @@ impl Token {
             "%" => Token::Percent,
             "'" => Token::Quote,
             "_" => Token::Under,
+            "#" => Token::Pound,
             _ => return None,
         })
     }

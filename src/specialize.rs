@@ -89,6 +89,7 @@ fn specialize_func(
 
     let index = spec.specific.funcs.len();
     spec.specific.funcs.push(Func {
+        decorators: func.decorators.clone(),
         name: func.name.clone(),
         generics: func.generics.clone(),
         input,

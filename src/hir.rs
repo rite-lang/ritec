@@ -4,6 +4,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use crate::decorator::Decorator;
 use crate::{
     ast::BinOp,
     infer::TyEnv,
@@ -72,6 +73,7 @@ pub enum ImportKind {
 
 #[derive(Debug)]
 pub struct Func {
+    pub decorators: Vec<Decorator>,
     pub name: &'static str,
     pub generics: Vec<Generic>,
     pub input: Vec<Argument>,

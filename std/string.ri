@@ -1,0 +1,19 @@
+pub fn join(sep: str, list: [str]) -> str
+    match list
+    | [] -> ""
+    | [s] -> s
+    | [s, ..rest] ->
+        concat(s, sep) |> concat(_, join(sep, rest))
+
+#[extern("intrinsic", "string_concat")]
+pub fn concat(a: str, b: str) -> str
+   bytes(a), bytes(b) |> std:list:concat |> from_bytes
+
+#[extern("intrinsic", "string_to_bytes")]
+pub fn bytes(a: str) -> [u8]
+    panic
+
+#[extern("intrinsic", "string_from_bytes")]
+pub fn from_bytes(a: [u8]) -> str
+    panic
+

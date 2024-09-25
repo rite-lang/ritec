@@ -1,5 +1,6 @@
 use miette::Severity;
 
+use crate::decorator::Decorator;
 use crate::{
     ast::{
         Adt, Argument, Arm, BinOp, Decl, Expr, Func, Generic, Import, Module, Pat, PatKind, Path,
@@ -43,8 +44,10 @@ fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
         tokens.consume();
     }
 
+    let decorators = parse_decorators(tokens)?;
+
     if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
-        parse_func_decl(tokens).map(Decl::Func)
+        parse_func_decl(tokens, decorators).map(Decl::Func)
     } else if tokens.is(Token::Type) || tokens.nth_is(1, Token::Type) {
         parse_type_decl(tokens).map(Decl::Type)
     } else {
@@ -72,7 +75,69 @@ fn parse_import(tokens: &mut TokenStream) -> miette::Result<Import> {
     Ok(Import { vis, path, span })
 }
 
-fn parse_func_decl(tokens: &mut TokenStream) -> miette::Result<Func> {
+fn parse_decorators(tokens: &mut TokenStream) -> miette::Result<Vec<Decorator>> {
+    let mut decorators = Vec::new();
+
+    while tokens.is(Token::Pound) {
+        decorators.push(parse_decorator(tokens)?);
+        tokens.expect(Token::Newline)?;
+    }
+
+    Ok(decorators)
+}
+
+/// Parse decorator with the syntax
+/// #[name]
+/// #[name()]
+/// #[name("arg0", "arg1")]
+fn parse_decorator(tokens: &mut TokenStream) -> miette::Result<Decorator> {
+    tokens.expect(Token::Pound)?;
+    tokens.expect(Token::LBracket)?;
+
+    let (name, _) = parse_snake(tokens)?;
+
+    let mut args = Vec::new();
+
+    if tokens.is(Token::RBracket) {
+        tokens.consume();
+
+        return Ok(Decorator {
+            name: name.to_string(),
+            args,
+        });
+    }
+
+    tokens.expect(Token::LParen)?;
+
+    while !tokens.is(Token::RParen) {
+        match parse_string_literal(tokens)? {
+            Expr::StringLiteral(value, _) => args.push(value.to_string()),
+            _ => {
+                return Err(miette::miette!(
+                    severity = Severity::Error,
+                    code = "expected::string_literal",
+                    labels = vec![tokens.peek().1.label("here")],
+                    "expected string literal",
+                )
+                .with_source_code(tokens.peek().1))?
+            }
+        }
+
+        if tokens.take(Token::Comma).is_none() {
+            break;
+        }
+    }
+
+    tokens.expect(Token::RParen)?;
+    tokens.expect(Token::RBracket)?;
+
+    Ok(Decorator {
+        name: name.to_string(),
+        args,
+    })
+}
+
+fn parse_func_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miette::Result<Func> {
     let vis = parse_vis(tokens)?;
     tokens.expect(Token::Fn)?;
     let (name, span) = parse_snake(tokens)?;
@@ -81,6 +146,7 @@ fn parse_func_decl(tokens: &mut TokenStream) -> miette::Result<Func> {
     let body = parse_body(tokens)?;
 
     Ok(Func {
+        decorators,
         vis,
         name,
         input,
@@ -863,7 +929,10 @@ fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
 }
 
 fn parse_string_literal(tokens: &mut TokenStream) -> miette::Result<Expr> {
-    let (token, span) = tokens.consume();
+    let (token, mut span) = tokens.consume();
+
+    span.lo += 1;
+    span.hi -= 1;
 
     match token {
         Token::StringLiteral => Ok(Expr::StringLiteral(span.as_str(), span)),

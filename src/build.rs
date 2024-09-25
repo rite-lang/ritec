@@ -92,6 +92,7 @@ pub fn build(hir: &hir::Unit) -> miette::Result<rir::Unit> {
             .collect::<Vec<_>>();
 
         rir.funcs.push(rir::Func {
+            decorators: func.decorators.clone(),
             name: func.name.to_string(),
             generics,
             input,
@@ -304,9 +305,7 @@ fn build_operand(
     match expr.kind {
         hir::ExprKind::Void => Ok(rir::Operand::Constant(rir::Constant::Void)),
 
-        hir::ExprKind::StringLiteral(s) => {
-            Ok(rir::Operand::Constant(rir::Constant::StringLiteral(s)))
-        }
+        hir::ExprKind::StringLiteral(s) => Ok(rir::Operand::Constant(rir::Constant::String(s))),
 
         hir::ExprKind::Int(negative, base, ref value) => Ok(rir::Operand::Constant(
             rir::Constant::Int(negative, base, value.clone()),
@@ -611,6 +610,7 @@ fn build_value(
             let output = output.as_ref().clone();
 
             let func = rir::Func {
+                decorators: Vec::new(),
                 name: String::new(),
                 generics: builder.generics.iter().map(|(_, g)| g.clone()).collect(),
                 input,
@@ -734,6 +734,7 @@ fn build_value(
             };
 
             let func = rir::Func {
+                decorators: Vec::new(),
                 name: String::new(),
                 generics: builder.generics.iter().map(|(_, g)| g.clone()).collect(),
                 input: arguments,
@@ -829,6 +830,7 @@ fn build_value(
                 .collect::<miette::Result<_>>()?;
 
             let func = rir::Func {
+                decorators: Vec::new(),
                 name: String::from("closure"),
                 generics,
                 input,

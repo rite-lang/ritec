@@ -1,5 +1,3 @@
-use std::{cell::RefCell, iter::Peekable, rc::Rc};
-
 use crate::{
     ast::BinOp,
     hir::UnOp,
@@ -8,6 +6,8 @@ use crate::{
         Statement, Unit,
     },
 };
+use std::collections::HashMap;
+use std::{cell::RefCell, iter::Peekable, rc::Rc};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -17,8 +17,23 @@ pub enum Value {
     Func(usize, Vec<Value>),
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
-    StringLiteral(&'static str),
+    String(String),
     Ref(Rc<RefCell<Value>>),
+}
+
+impl Value {
+    pub fn list_from_vec(values: Vec<Value>) -> Value {
+        let mut list = None;
+
+        for value in values.into_iter().rev() {
+            list = Some(Box::new(List {
+                head: value,
+                tail: list,
+            }));
+        }
+
+        Value::List(list)
+    }
 }
 
 impl std::fmt::Display for Value {
@@ -27,7 +42,7 @@ impl std::fmt::Display for Value {
             Value::Void => write!(f, "void"),
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
-            Value::StringLiteral(s) => write!(f, "\"{}\"", s),
+            Value::String(s) => write!(f, "\"{}\"", s),
             Value::Func(func, captured) => write!(
                 f,
                 "Func({}, [{}])",
@@ -83,13 +98,100 @@ struct Frame {
     captured: Vec<Value>,
 }
 
+// Standard library bindings.
+fn string_to_bytes(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string literal")
+    };
+
+    let bytes = s
+        .as_bytes()
+        .iter()
+        .map(|&b| Value::Int(b as i64))
+        .collect::<Vec<_>>();
+
+    Value::list_from_vec(bytes)
+}
+
+fn string_from_bytes(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::List(list) = args.pop().unwrap() else {
+        panic!("expected list")
+    };
+
+    let mut s = String::new();
+
+    let mut list = list;
+
+    while let Some(l) = list {
+        let Value::Int(b) = l.head else {
+            panic!("expected integer")
+        };
+
+        s.push(b as u8 as char);
+        list = l.tail;
+    }
+
+    Value::String(s)
+}
+
+fn string_concat(mut args: Vec<Value>) -> Value {
+    let mut s = String::new();
+
+    for arg in args {
+        match arg {
+            Value::String(s2) => s.push_str(&s2),
+            _ => panic!("expected string"),
+        }
+    }
+
+    Value::String(s)
+}
+
 pub struct Interpreter<'a> {
     mir: &'a Unit<Specific>,
+    builtins: HashMap<usize, fn(Vec<Value>) -> Value>,
 }
 
 impl<'a> Interpreter<'a> {
     pub fn new(mir: &'a Unit<Specific>) -> Self {
-        Self { mir }
+        Self {
+            mir,
+            builtins: Self::find_builtins(mir),
+        }
+    }
+
+    /// Find builtin functions in the MIR based on the `extern intrinsic` decorator.
+    fn find_builtins(mir: &'a Unit<Specific>) -> HashMap<usize, fn(Vec<Value>) -> Value> {
+        let mut builtins = HashMap::new();
+        for (index, value) in mir.funcs.iter().enumerate() {
+            // Find extern intrinsic decorator.
+            let extern_decorator = value
+                .decorators
+                .iter()
+                .find(|d| d.name == "extern" && d.args.len() == 2 && d.args[0] == "intrinsic");
+
+            match extern_decorator {
+                Some(extern_decorator) => {
+                    let name = extern_decorator.args[1].as_str();
+                    let func = match name {
+                        "string_to_bytes" => string_to_bytes,
+                        "string_from_bytes" => string_from_bytes,
+                        "string_concat" => string_concat,
+                        // We allow intrinsics to have pure rite fallbacks.
+                        _ => continue,
+                    };
+
+                    builtins.insert(index, func);
+                }
+                None => {}
+            }
+        }
+
+        builtins
     }
 
     pub fn interpret(&self, main: usize) -> Value {
@@ -109,10 +211,12 @@ impl<'a> Interpreter<'a> {
                 Statement::Use { value } => {
                     self.interpret_value(frame, value);
                 }
-                Statement::Return { value } => match value {
-                    Some(value) => return Some(self.interpret_value(frame, value)),
-                    None => return Some(Value::Void),
-                },
+                Statement::Return { value } => {
+                    return match value {
+                        Some(value) => Some(self.interpret_value(frame, value)),
+                        None => Some(Value::Void),
+                    }
+                }
                 Statement::Panic { message } => {
                     panic!("{}", message);
                 }
@@ -350,6 +454,10 @@ impl<'a> Interpreter<'a> {
                     captured,
                 };
 
+                if let Some(builtin_func) = self.builtins.get(&func) {
+                    return builtin_func(frame.arguments);
+                }
+
                 self.interpret_block(&mut frame, &self.mir.funcs[func].body)
                     .unwrap()
             }
@@ -420,7 +528,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {
@@ -460,7 +568,7 @@ impl<'a> Interpreter<'a> {
 
                 Value::Int(n)
             }
-            Constant::StringLiteral(s) => Value::StringLiteral(s),
+            Constant::String(s) => Value::String(s.to_string()),
         }
     }
 }
