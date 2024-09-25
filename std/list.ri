@@ -8,6 +8,11 @@ pub fn concat(xs: ['a], ys: ['a]) -> ['a]
   | [x, ..xs] -> [x, ..concat(xs, ys)]
   | [] -> ys
 
+pub fn reverse(xs: ['a]) -> ['a]
+  match xs
+  | [x, ..xs] -> concat(reverse(xs), [x])
+  | [] -> []
+
 pub fn map(f: fn('a) -> 'b, xs: ['a]) -> ['b]
   match xs
   | [x, ..xs] -> [f(x), ..map(f, xs)]

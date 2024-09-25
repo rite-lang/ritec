@@ -30,6 +30,23 @@ pub fn type_register_ast(
 
             unit.modules[module].adts.insert(adt.name, id);
         }
+
+        if let ast::Decl::Type(ast::Type::Single(single)) = decl {
+            let vis = match single.vis {
+                ast::Vis::Public => hir::Vis::Public,
+                ast::Vis::Private => hir::Vis::Private,
+            };
+
+            let id = unit.push_adt(hir::Adt {
+                vis,
+                name: single.name,
+                generics: Vec::new(),
+                variants: Vec::new(),
+                span: single.span,
+            });
+
+            unit.modules[module].adts.insert(single.name, id);
+        }
     }
 
     Ok(())
@@ -72,34 +89,7 @@ pub fn type_construct_ast(
                     func: None,
                 };
 
-                let mut fields: Vec<hir::Argument> = Vec::new();
-
-                for field in &variant.fields {
-                    if let Some(other) = fields.iter().find(|f| f.name == field.name) {
-                        return Err(miette::miette!(
-                            severity = Severity::Error,
-                            code = "invalid::field",
-                            labels = vec![other.span.label("here"), field.span.label("and here")],
-                            "field `{}` already exists",
-                            field.name
-                        )
-                        .with_source_code(field.span));
-                    }
-
-                    let ty = match field.ty {
-                        Some(ref ty) => lower_ty(&mut cx, ty, field.span)?,
-                        None => {
-                            let index = cx.add_generic(field.name, field.span)?;
-                            hir::Ty::Partial(hir::Part::Generic(index), Vec::new())
-                        }
-                    };
-
-                    fields.push(hir::Argument {
-                        name: field.name,
-                        ty,
-                        span: field.span,
-                    });
-                }
+                let fields = lower_fields(&mut cx, variant.fields.iter())?;
 
                 let variant = hir::Variant {
                     name: variant.name,
@@ -111,9 +101,69 @@ pub fn type_construct_ast(
 
             unit.adts[id].generics = generics;
         }
+
+        if let ast::Decl::Type(ast::Type::Single(single)) = decl {
+            let id = unit.modules[module].adts[single.name];
+            let mut generics = mem::take(&mut unit.adts[id].generics);
+
+            let mut cx = TyCx {
+                unit,
+                module,
+                generics: &mut generics,
+                new_generics: true,
+                inferring: false,
+                func: None,
+            };
+
+            let fields = lower_fields(&mut cx, single.fields.iter())?;
+
+            let variant = hir::Variant {
+                name: single.name,
+                fields,
+            };
+
+            unit.adts[id].variants.push(variant);
+            unit.adts[id].generics = generics;
+        }
     }
 
     Ok(())
+}
+
+fn lower_fields<'a>(
+    cx: &mut TyCx,
+    iter: impl Iterator<Item = &'a ast::Argument>,
+) -> miette::Result<Vec<hir::Argument>> {
+    let mut fields: Vec<hir::Argument> = Vec::new();
+
+    for field in iter {
+        if let Some(other) = fields.iter().find(|f| f.name == field.name) {
+            return Err(miette::miette!(
+                severity = Severity::Error,
+                code = "invalid::field",
+                labels = vec![other.span.label("here"), field.span.label("and here")],
+                "field `{}` already exists",
+                field.name
+            )
+            .with_source_code(field.span));
+        }
+
+        let ty = match field.ty {
+            Some(ref ty) => lower_ty(cx, ty, field.span)?,
+            None => {
+                let index = cx.add_generic(field.name, field.span)?;
+                hir::Ty::Partial(hir::Part::Generic(index), Vec::new())
+            }
+        };
+
+        fields.push(hir::Argument {
+            name: field.name,
+            ty,
+            span: field.span,
+        });
+    }
+
+    Ok(fields)
 }
 
 pub fn func_register_ast(

@@ -1,10 +1,13 @@
 import std:list
 import std:result
 
+type Foo(
+  a: int
+  b: int
+)
+
 fn main()
   [1, 2, 3], [4, 5, 6]
   |> list:concat
-  |> list:filter_map(ok)
-
-fn ok(x: 'a) -> result:Result<'a, 'b>
-  result:Ok(x)
+  |> list:filter(|x| x % 2 == 0)
+  |> list:map(|x| Foo(x, x * 2 + 1))

@@ -34,6 +34,7 @@ pub struct Func {
 #[derive(Debug)]
 pub enum Type {
     Adt(Adt),
+    Single(Single),
 }
 
 #[derive(Debug)]
@@ -41,6 +42,14 @@ pub struct Adt {
     pub vis: Vis,
     pub name: &'static str,
     pub variants: Vec<Variant>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Single {
+    pub vis: Vis,
+    pub name: &'static str,
+    pub fields: Vec<Argument>,
     pub span: Span,
 }
 

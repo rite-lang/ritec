@@ -3,7 +3,7 @@ use miette::Severity;
 use crate::{
     ast::{
         Adt, Argument, Arm, BinOp, Decl, Expr, Func, Generic, Import, Module, Pat, PatKind, Path,
-        Ty, Type, UnOp, Variant, Vis,
+        Single, Ty, Type, UnOp, Variant, Vis,
     },
     number::{Base, IntKind},
     span::Span,
@@ -82,6 +82,17 @@ fn parse_type_decl(tokens: &mut TokenStream) -> miette::Result<Type> {
 
     let (name, span) = parse_pascal(tokens)?;
 
+    if tokens.is(Token::LParen) {
+        let fields = parse_arguments(tokens)?;
+
+        return Ok(Type::Single(Single {
+            vis,
+            name,
+            fields,
+            span,
+        }));
+    }
+
     tokens.expect(Token::Eq)?;
 
     let mut variants = Vec::new();
@@ -121,22 +132,8 @@ fn parse_arguments(tokens: &mut TokenStream) -> miette::Result<Vec<Argument>> {
 
     tokens.expect(Token::LParen)?;
 
-    if is_block(tokens) {
-        tokens.expect(Token::Newline)?;
-        tokens.expect(Token::Indent)?;
-
-        while !tokens.is(Token::Dedent) {
-            arguments.push(parse_argument(tokens)?);
-
-            while tokens.is(Token::Newline) {
-                tokens.consume();
-            }
-        }
-
-        tokens.expect(Token::Dedent)?;
-        tokens.expect(Token::RParen)?;
-
-        return Ok(arguments);
+    if tokens.is(Token::Newline) {
+        return parse_arguments_multiline(tokens);
     }
 
     while !tokens.is(Token::RParen) {
@@ -147,6 +144,28 @@ fn parse_arguments(tokens: &mut TokenStream) -> miette::Result<Vec<Argument>> {
         }
     }
 
+    tokens.expect(Token::RParen)?;
+
+    Ok(arguments)
+}
+
+fn parse_arguments_multiline(tokens: &mut TokenStream) -> miette::Result<Vec<Argument>> {
+    let mut arguments = Vec::new();
+
+    tokens.expect(Token::Newline)?;
+    tokens.expect(Token::Indent)?;
+
+    while !tokens.is(Token::Dedent) {
+        arguments.push(parse_argument(tokens)?);
+
+        tokens.take(Token::Comma);
+
+        while tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+    }
+
+    tokens.expect(Token::Dedent)?;
     tokens.expect(Token::RParen)?;
 
     Ok(arguments)
@@ -655,11 +674,11 @@ fn parse_binary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Exp
 
     match rhs {
         Expr::Binary(rop, mid, rhs, rspan) => {
-            if lop.precedence() < rop.precedence() {
+            if lop.precedence() > rop.precedence() {
                 Ok(Expr::Binary(
                     rop,
-                    mid,
-                    Box::new(Expr::Binary(lop, Box::new(lhs), rhs, lspan)),
+                    Box::new(Expr::Binary(lop, Box::new(lhs), mid, lspan)),
+                    rhs,
                     rspan,
                 ))
             } else {
