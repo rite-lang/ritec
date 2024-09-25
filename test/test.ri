@@ -8,11 +8,7 @@ type Foo(
 )
 
 fn main()
-  let a = result:some(10)
-
-  let assert Ok(a) = a
-
-  [a, 1, 3], [4, 5, 6]
+  [1, 2, 3], [4, 5, 6]
   |> list:concat
   |> list:filter(|x| x % 2 == 0)
   |> list:map(|x| Foo(x, x * 2 + 1))

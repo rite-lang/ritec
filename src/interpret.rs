@@ -174,20 +174,17 @@ impl<'a> Interpreter<'a> {
                 .iter()
                 .find(|d| d.name == "extern" && d.args.len() == 2 && d.args[0] == "intrinsic");
 
-            match extern_decorator {
-                Some(extern_decorator) => {
-                    let name = extern_decorator.args[1].as_str();
-                    let func = match name {
-                        "string_to_bytes" => string_to_bytes,
-                        "string_from_bytes" => string_from_bytes,
-                        "string_concat" => string_concat,
-                        // We allow intrinsics to have pure rite fallbacks.
-                        _ => continue,
-                    };
+            if let Some(extern_decorator) = extern_decorator {
+                let name = extern_decorator.args[1].as_str();
+                let func = match name {
+                    "string_to_bytes" => string_to_bytes,
+                    "string_from_bytes" => string_from_bytes,
+                    "string_concat" => string_concat,
+                    // We allow intrinsics to have pure rite fallbacks.
+                    _ => continue,
+                };
 
-                    builtins.insert(index, func);
-                }
-                None => {}
+                builtins.insert(index, func);
             }
         }
 
