@@ -1315,16 +1315,12 @@ fn lower_match(
 ) -> miette::Result<hir::Expr> {
     let input = lower_expr(cx, input)?;
 
-    let mut pats = Vec::new();
-
-    for arm in arms {
-        pats.push(lower_pat(cx, &arm.pat, &input.ty)?);
-    }
-
     let mut tree = Match::None;
     let ty = hir::Ty::any(span);
 
-    for (pat, arm) in pats.into_iter().zip(arms.iter()) {
+    for arm in arms {
+        let pat = lower_pat(cx, &arm.pat, &input.ty)?;
+
         let scope = cx.scope.len();
 
         let arm_ty = build_match_tree(
@@ -1339,6 +1335,17 @@ fn lower_match(
 
         cx.scope.truncate(scope);
         cx.unit.unify(ty.clone(), arm_ty);
+    }
+
+    if tree.missing_patterns() {
+        return Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::pattern",
+            labels = vec![span.label("here")],
+            help = "consider adding a catch-all pattern `_ -> panic`",
+            "match expression doesn't cover all possible patterns"
+        )
+        .with_source_code(span));
     }
 
     Ok(build_match_expr(cx, tree, span)?.unwrap())
@@ -2095,6 +2102,65 @@ impl Match {
                 code = "invalid::match",
                 "expected list"
             )),
+        }
+    }
+
+    fn missing_patterns(&self) -> bool {
+        match self {
+            Match::None => true,
+            Match::Bind(tree) => tree.missing_patterns(),
+            Match::Leaf(_, _) => false,
+            Match::Bool {
+                r#true,
+                r#false,
+                default,
+                ..
+            } => {
+                if let Some(r#true) = r#true {
+                    if r#true.missing_patterns() {
+                        return true;
+                    }
+                }
+
+                if let Some(r#false) = r#false {
+                    if r#false.missing_patterns() {
+                        return true;
+                    }
+                }
+
+                (r#true.is_none() || r#false.is_none()) && default.missing_patterns()
+            }
+            Match::Adt {
+                variants, default, ..
+            } => {
+                for variant in variants.iter().flatten() {
+                    if variant.missing_patterns() {
+                        return true;
+                    }
+                }
+
+                variants.iter().any(Option::is_none) && default.missing_patterns()
+            }
+            Match::List {
+                some,
+                none,
+                default,
+                ..
+            } => {
+                if let Some(some) = some {
+                    if some.missing_patterns() {
+                        return true;
+                    }
+                }
+
+                if let Some(none) = none {
+                    if none.missing_patterns() {
+                        return true;
+                    }
+                }
+
+                (some.is_none() || none.is_none()) && default.missing_patterns()
+            }
         }
     }
 

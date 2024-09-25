@@ -3,8 +3,8 @@ import std:result
 import std:result:Result
 
 type Foo(
-  a: u8
-  b: u8
+  a: int
+  b: int
 )
 
 fn main()
