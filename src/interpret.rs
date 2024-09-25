@@ -17,7 +17,7 @@ pub enum Value {
     Func(usize, Vec<Value>),
     List(Option<Box<List>>),
     Adt(usize, Vec<Value>),
-    String(&'static str),
+    StringLiteral(&'static str),
     Ref(Rc<RefCell<Value>>),
 }
 
@@ -27,7 +27,7 @@ impl std::fmt::Display for Value {
             Value::Void => write!(f, "void"),
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
-            Value::String(s) => write!(f, "\"{}\"", s),
+            Value::StringLiteral(s) => write!(f, "\"{}\"", s),
             Value::Func(func, captured) => write!(
                 f,
                 "Func({}, [{}])",
@@ -460,7 +460,7 @@ impl<'a> Interpreter<'a> {
 
                 Value::Int(n)
             }
-            Constant::String(s) => Value::String(s),
+            Constant::StringLiteral(s) => Value::StringLiteral(s),
         }
     }
 }

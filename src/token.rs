@@ -8,7 +8,7 @@ pub enum Token {
     Pascal,
     Integer,
     Float,
-    String,
+    StringLiteral,
 
     /* comments */
     DocComment,
@@ -58,6 +58,7 @@ pub enum Token {
     U8,
     Void,
     Str,
+    Panic,
 
     /* two-character symbols */
     DotDot,
@@ -122,6 +123,7 @@ impl Token {
             "u8" => Token::U8,
             "void" => Token::Void,
             "str" => Token::Str,
+            "panic" => Token::Panic,
             _ => return None,
         })
     }

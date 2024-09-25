@@ -260,7 +260,7 @@ fn build_place(
         }
 
         hir::ExprKind::Void
-        | hir::ExprKind::String(_)
+        | hir::ExprKind::StringLiteral(_)
         | hir::ExprKind::Int(_, _, _)
         | hir::ExprKind::Bool(_)
         | hir::ExprKind::Func(_)
@@ -304,7 +304,7 @@ fn build_operand(
     match expr.kind {
         hir::ExprKind::Void => Ok(rir::Operand::Constant(rir::Constant::Void)),
 
-        hir::ExprKind::String(s) => Ok(rir::Operand::Constant(rir::Constant::String(s))),
+        hir::ExprKind::StringLiteral(s) => Ok(rir::Operand::Constant(rir::Constant::StringLiteral(s))),
 
         hir::ExprKind::Int(negative, base, ref value) => Ok(rir::Operand::Constant(
             rir::Constant::Int(negative, base, value.clone()),
@@ -866,7 +866,7 @@ fn build_value(
         }
 
         hir::ExprKind::Void
-        | hir::ExprKind::String(_)
+        | hir::ExprKind::StringLiteral(_)
         | hir::ExprKind::Int(_, _, _)
         | hir::ExprKind::Bool(_)
         | hir::ExprKind::Local(_)

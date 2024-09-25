@@ -167,7 +167,7 @@ pub struct Expr {
 #[derive(Clone, Debug)]
 pub enum ExprKind {
     Void,
-    String(&'static str),
+    StringLiteral(&'static str),
     Int(bool, Base, Vec<u8>),
     Bool(bool),
     Func(usize),

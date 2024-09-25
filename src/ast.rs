@@ -98,7 +98,7 @@ pub struct Generic {
 #[derive(Debug)]
 pub enum Expr {
     Void(Span),
-    String(&'static str, Span),
+    StringLiteral(&'static str, Span),
     Int(bool, Base, Vec<u8>, Span),
     Bool(bool, Span),
     Paren(Box<Expr>, Span),
@@ -117,13 +117,16 @@ pub enum Expr {
     Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>, Span),
     Closure(Vec<Argument>, Box<Expr>),
+
+    /* builtin */
+    Panic(Span),
 }
 
 impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Void(span) => *span,
-            Expr::String(_, span) => *span,
+            Expr::StringLiteral(_, span) => *span,
             Expr::Int(_, _, _, span) => *span,
             Expr::Bool(_, span) => *span,
             Expr::Paren(_, span) => *span,
@@ -181,6 +184,7 @@ impl Expr {
                 let start = args.first().map_or(end, |arg| arg.span);
                 start.join(end)
             }
+            Expr::Panic(span) => *span,
         }
     }
 }

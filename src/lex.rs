@@ -395,7 +395,7 @@ fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     }
 
     Ok((
-        Token::String,
+        Token::StringLiteral,
         Span {
             lo,
             hi: lexer.lo,
