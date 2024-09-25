@@ -773,7 +773,7 @@ fn lower_string_literal(
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_panic(cx: &mut BodyCx, _span: Span) -> miette::Result<hir::Expr> {
+fn lower_panic(_cx: &mut BodyCx, _span: Span) -> miette::Result<hir::Expr> {
     let ty = hir::Ty::inferred(hir::Inferred::Any, _span);
     let kind = hir::ExprKind::Panic;
     Ok(hir::Expr { kind, ty })

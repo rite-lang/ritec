@@ -138,7 +138,7 @@ fn string_from_bytes(mut args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
-fn string_concat(mut args: Vec<Value>) -> Value {
+fn string_concat(args: Vec<Value>) -> Value {
     let mut s = String::new();
 
     for arg in args {
@@ -528,7 +528,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {
