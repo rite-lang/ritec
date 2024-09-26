@@ -99,7 +99,7 @@ struct Frame {
 }
 
 // Standard library bindings.
-fn string_to_bytes(mut args: Vec<Value>) -> Value {
+fn string_bytes(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::String(s) = args.pop().unwrap() else {
@@ -151,15 +151,17 @@ fn string_concat(args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
-fn debug_println(args: Vec<Value>) -> Value {
-    for arg in args {
-        println!("{}", arg);
-    }
+fn io_print(mut args: Vec<Value>) -> Value {
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    print!("{}", s);
 
     Value::Void
 }
 
-fn debug_repr(mut args: Vec<Value>) -> Value {
+fn debug_format(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let arg = args.pop().unwrap();
@@ -193,11 +195,11 @@ impl<'a> Interpreter<'a> {
             if let Some(extern_decorator) = extern_decorator {
                 let name = extern_decorator.args[1].as_str();
                 let func = match name {
-                    "string_to_bytes" => string_to_bytes,
+                    "string_bytes" => string_bytes,
                     "string_from_bytes" => string_from_bytes,
                     "string_concat" => string_concat,
-                    "debug_println" => debug_println,
-                    "debug_repr" => debug_repr,
+                    "debug_format" => debug_format,
+                    "io_print" => io_print,
                     // We allow intrinsics to have pure rite fallbacks.
                     _ => continue,
                 };

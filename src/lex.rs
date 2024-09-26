@@ -7,26 +7,18 @@ use crate::{
     token::{Token, TokenStream},
 };
 
-#[derive(Clone, Debug, PartialEq)]
-enum LexerFormatStringState {
-    Idle,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum FormatState {
     ParseString,
     StartParseExpr,
     ParseExpr,
-    Stop,
+    End,
 }
 
-#[derive(Clone, Debug)]
-struct LexerState {
-    f_string: LexerFormatStringState,
-}
-
-impl Default for LexerState {
-    fn default() -> Self {
-        Self {
-            f_string: LexerFormatStringState::Idle,
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum LexerState {
+    Idle,
+    Format(FormatState),
 }
 
 struct Lexer {
@@ -85,7 +77,7 @@ pub fn lex(file: &'static str, source: &'static str) -> miette::Result<TokenStre
             file,
             source,
             lo,
-            state: Default::default(),
+            state: LexerState::Idle,
         };
 
         let line_indents = lex_indents(&mut lexer, indents.iter())?;
@@ -124,22 +116,19 @@ pub fn lex(file: &'static str, source: &'static str) -> miette::Result<TokenStre
             }
 
             // Only skip whitespace if we are not in a special context.
-            if lexer.state.f_string == LexerFormatStringState::Idle {
+            if matches!(lexer.state, LexerState::Idle) {
                 skip_whitespace(&mut lexer);
             }
 
             tokens.push(lex_token(&mut lexer)?);
         }
 
-        // Cleanup LexerFormatStringState::stop if there are no more characters on the line
-        if lexer.state.f_string != LexerFormatStringState::Idle {
+        // cleanup LexerFormatStringState::stop if there are no more characters on the line
+        if !matches!(lexer.state, LexerState::Idle) {
             return Err(miette::miette!(
                 severity = Severity::Error,
                 code = "unexpected::brace",
-                help = format!(
-                    "Invalid format string current state: {:?}",
-                    lexer.state.f_string
-                ),
+                help = format!("Invalid format string current state: {:?}", lexer.state),
                 labels = vec![LabeledSpan::at_offset(lexer.lo, "here")],
                 "unexpected brace"
             )
@@ -274,12 +263,13 @@ fn skip_whitespace(lexer: &mut Lexer) {
 fn lex_token(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let c = lexer.peek().expect("lex_token called on empty input");
 
-    match lexer.state.f_string {
-        LexerFormatStringState::ParseString => return lex_format_string(lexer),
-        LexerFormatStringState::StartParseExpr => return lex_format_string_expr_start(lexer),
-        LexerFormatStringState::ParseExpr => return lex_format_string_expr(lexer),
-        LexerFormatStringState::Stop => return lex_format_string_stop(lexer),
-        _ => {}
+    if let LexerState::Format(state) = lexer.state {
+        return match state {
+            FormatState::ParseString => lex_format(lexer),
+            FormatState::StartParseExpr => lex_format_expr_start(lexer),
+            FormatState::ParseExpr => lex_format_expr(lexer),
+            FormatState::End => lex_format_end(lexer),
+        };
     }
 
     if lexer.rest().starts_with("//") {
@@ -287,7 +277,7 @@ fn lex_token(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     }
 
     if lexer.rest().starts_with("f\"") {
-        return lex_format_string_start(lexer);
+        return lex_format_start(lexer);
     }
 
     if lexer.rest().len() >= 2 {
@@ -439,7 +429,7 @@ fn lex_escaped_character(lexer: &Lexer, c: char) -> miette::Result<char> {
 /// Lex simple string literal
 fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let lo = lexer.lo;
-    let mut str = String::new();
+    let mut string = String::new();
 
     _ = lexer.next().unwrap();
 
@@ -448,14 +438,14 @@ fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
             '"' => break,
             '\\' => {
                 let c = lexer.next().expect("unexpected end of input");
-                str.push(lex_escaped_character(lexer, c)?);
+                string.push(lex_escaped_character(lexer, c)?);
             }
-            c => str.push(c),
+            c => string.push(c),
         }
     }
 
     Ok((
-        Token::StringLiteral,
+        Token::String,
         Span {
             lo,
             hi: lexer.lo,
@@ -467,16 +457,16 @@ fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
 
 /// Start lexing a format string
 /// Sets next state to ParseString and emits a FormatStringStart token
-fn lex_format_string_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+fn lex_format_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let lo = lexer.lo;
 
     lexer.next();
     lexer.next();
 
-    lexer.state.f_string = LexerFormatStringState::ParseString;
+    lexer.state = LexerState::Format(FormatState::ParseString);
 
     Ok((
-        Token::FormatStringStart,
+        Token::FormatStart,
         Span {
             lo,
             hi: lexer.lo,
@@ -486,14 +476,14 @@ fn lex_format_string_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     ))
 }
 
-fn lex_format_string_stop(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
-    // Consume last '"'
+fn lex_format_end(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    // consume last '"'
     lexer.next();
 
-    lexer.state.f_string = LexerFormatStringState::Idle;
+    lexer.state = LexerState::Idle;
 
     Ok((
-        Token::FormatStringEnd,
+        Token::FormatEnd,
         Span {
             lo: lexer.lo,
             hi: lexer.lo,
@@ -504,19 +494,19 @@ fn lex_format_string_stop(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
 }
 
 /// Lex a format string
-fn lex_format_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+fn lex_format(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let lo = lexer.lo;
 
-    let mut str = String::new();
+    let mut string = String::new();
 
     while let Some(c) = lexer.peek() {
         if c == '"' {
-            lexer.state.f_string = LexerFormatStringState::Stop;
+            lexer.state = LexerState::Format(FormatState::End);
 
-            // If there is no content in the format string we do
+            // if there is no content in the format string we do
             // not need to emit a StringLiteral token
-            if str.len() == 0 {
-                return lex_format_string_stop(lexer);
+            if string.is_empty() {
+                return lex_format_end(lexer);
             }
 
             break;
@@ -528,14 +518,14 @@ fn lex_format_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
             '{' => {
                 if lexer.peek() == Some('{') {
                     _ = lexer.next();
-                    str.push('{');
+                    string.push('{');
                 } else {
-                    lexer.state.f_string = LexerFormatStringState::StartParseExpr;
+                    lexer.state = LexerState::Format(FormatState::StartParseExpr);
 
-                    // If there is no content in the format string we do
+                    // if there is no content in the format string we do
                     // not need to emit a ParseExpr token
-                    if str.len() == 0 {
-                        return lex_format_string_expr_start(lexer);
+                    if string.is_empty() {
+                        return lex_format_expr_start(lexer);
                     }
 
                     break;
@@ -544,7 +534,7 @@ fn lex_format_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
             '}' => {
                 if lexer.peek() == Some('}') {
                     _ = lexer.next();
-                    str.push('}');
+                    string.push('}');
                 } else {
                     return Err(miette::miette!(
                         severity = Severity::Error,
@@ -558,9 +548,9 @@ fn lex_format_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
             }
             '\\' => {
                 let c = lexer.next().expect("unexpected end of input");
-                str.push(lex_escaped_character(lexer, c)?);
+                string.push(lex_escaped_character(lexer, c)?);
             }
-            c => str.push(c),
+            c => string.push(c),
         }
     }
 
@@ -571,14 +561,14 @@ fn lex_format_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
         source: lexer.source,
     };
 
-    Ok((Token::StringLiteral, span))
+    Ok((Token::String, span))
 }
 
-fn lex_format_string_expr_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
-    lexer.state.f_string = LexerFormatStringState::ParseExpr;
+fn lex_format_expr_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    lexer.state = LexerState::Format(FormatState::ParseExpr);
 
     Ok((
-        Token::FormatStringExprStart,
+        Token::FormatExprStart,
         Span {
             lo: lexer.lo,
             hi: lexer.lo,
@@ -588,16 +578,16 @@ fn lex_format_string_expr_start(lexer: &mut Lexer) -> miette::Result<(Token, Spa
     ))
 }
 
-fn lex_format_string_expr(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
-    lexer.state.f_string = LexerFormatStringState::Idle;
+fn lex_format_expr(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    lexer.state = LexerState::Idle;
 
     let (token, span) = lex_token(lexer)?;
 
-    lexer.state.f_string = LexerFormatStringState::ParseExpr;
+    lexer.state = LexerState::Format(FormatState::ParseExpr);
 
     if token == Token::RBrace {
-        lexer.state.f_string = LexerFormatStringState::ParseString;
-        return Ok((Token::FormatStringExprEnd, span));
+        lexer.state = LexerState::Format(FormatState::ParseString);
+        return Ok((Token::FormatExprEnd, span));
     }
 
     Ok((token, span))

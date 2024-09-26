@@ -1,9 +1,3 @@
-import std:string
-
-#[extern("intrinsic", "debug_println")]
-pub fn println(a) -> void
-    panic
-
-#[extern("intrinsic", "debug_repr")]
-pub fn repr(a) -> str
-    panic
+#[extern("intrinsic", "debug_format")]
+pub fn format(a) -> str
+  panic

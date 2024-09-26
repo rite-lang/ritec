@@ -10,11 +10,11 @@ pub enum Token {
     Float,
 
     /* strings */
-    StringLiteral,
-    FormatStringStart,
-    FormatStringEnd,
-    FormatStringExprStart,
-    FormatStringExprEnd,
+    String,
+    FormatStart,
+    FormatEnd,
+    FormatExprStart,
+    FormatExprEnd,
 
     /* comments */
     DocComment,

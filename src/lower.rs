@@ -712,7 +712,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
             lower_int(cx, *negative, *base, digits, *span)
         }
         ast::Expr::Bool(value, span) => lower_bool(cx, *value, *span),
-        ast::Expr::StringLiteral(value, span) => lower_string_literal(cx, value, *span),
+        ast::Expr::String(value, span) => lower_string(cx, value, *span),
         ast::Expr::Paren(expr, _) => lower_expr(cx, expr),
         ast::Expr::Item(path) => lower_item(cx, path),
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
@@ -763,11 +763,7 @@ fn lower_bool(_cx: &mut BodyCx, value: bool, _span: Span) -> miette::Result<hir:
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_string_literal(
-    _cx: &mut BodyCx,
-    value: &'static str,
-    _span: Span,
-) -> miette::Result<hir::Expr> {
+fn lower_string(_cx: &mut BodyCx, value: &'static str, _span: Span) -> miette::Result<hir::Expr> {
     let ty = hir::Ty::string();
     let kind = hir::ExprKind::StringLiteral(value);
     Ok(hir::Expr { kind, ty })

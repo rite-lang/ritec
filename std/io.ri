@@ -1,0 +1,9 @@
+import std:string
+
+#[extern("intrinsic", "io_print")]
+pub fn print(a: str) -> void
+  panic
+
+pub fn println(a: str) -> void
+  let newline = string:from_bytes([10])
+  print(string:concat(a, newline))

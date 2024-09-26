@@ -10,7 +10,7 @@ pub fn join(sep: str, list: [str]) -> str
 pub fn concat(a: str, b: str) -> str
   bytes(a), bytes(b) |> list:concat |> from_bytes
 
-#[extern("intrinsic", "string_to_bytes")]
+#[extern("intrinsic", "string_bytes")]
 pub fn bytes(a: str) -> [u8]
   panic
 

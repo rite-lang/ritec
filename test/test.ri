@@ -1,3 +1,5 @@
+import std:io
+
 fn main()
-    1 |> (|x| f"{x} {x} {x}") |> std:debug:println
-    f"Hello World {1}!"
+  1 |> (|x| f"{x} {x} {x}") |> io:println
+  f"Hello World {1}!"

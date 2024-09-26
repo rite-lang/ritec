@@ -60,7 +60,7 @@ fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
             "expected function or type declaration, found {:?}",
             tokens.peek().0,
         )
-            .with_source_code(span))
+        .with_source_code(span))
     }
 }
 
@@ -111,7 +111,7 @@ fn parse_decorator(tokens: &mut TokenStream) -> miette::Result<Decorator> {
 
     while !tokens.is(Token::RParen) {
         match parse_string_literal(tokens)? {
-            Expr::StringLiteral(value, _) => args.push(value.to_string()),
+            Expr::String(value, _) => args.push(value.to_string()),
             _ => {
                 return Err(miette::miette!(
                     severity = Severity::Error,
@@ -119,7 +119,7 @@ fn parse_decorator(tokens: &mut TokenStream) -> miette::Result<Decorator> {
                     labels = vec![tokens.peek().1.label("here")],
                     "expected string literal",
                 )
-                    .with_source_code(tokens.peek().1))?
+                .with_source_code(tokens.peek().1))?
             }
         }
 
@@ -373,7 +373,7 @@ fn parse_ty_term(tokens: &mut TokenStream) -> miette::Result<Ty> {
             "expected type, found {:?}",
             token,
         )
-            .with_source_code(span)),
+        .with_source_code(span)),
     }
 }
 
@@ -397,7 +397,7 @@ fn parse_int_ty(tokens: &mut TokenStream) -> miette::Result<Ty> {
             "expected integer type, found {:?}",
             token,
         )
-            .with_source_code(span)),
+        .with_source_code(span)),
     }
 }
 
@@ -526,7 +526,7 @@ fn parse_match(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
             labels = vec![tokens.peek().1.label("here")],
             "expected match expression",
         )
-            .with_source_code(tokens.peek().1));
+        .with_source_code(tokens.peek().1));
     }
 
     let span = tokens.expect(Token::Match)?;
@@ -676,7 +676,7 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
             "expected pattern, found {:?}",
             token,
         )
-            .with_source_code(tokens.peek().1)),
+        .with_source_code(tokens.peek().1)),
     }
 }
 
@@ -883,8 +883,8 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::LParen => parse_paren(tokens, multiline),
         Token::Integer => parse_integer(tokens),
         Token::Minus => parse_integer(tokens),
-        Token::FormatStringStart => parse_format_string(tokens),
-        Token::StringLiteral => parse_string_literal(tokens),
+        Token::FormatStart => parse_format_string(tokens),
+        Token::String => parse_string_literal(tokens),
         Token::LBracket => parse_list(tokens, multiline),
         Token::Void => {
             tokens.consume();
@@ -903,7 +903,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
             "expected term, found {:?}",
             token,
         )
-            .with_source_code(span)),
+        .with_source_code(span)),
     }
 }
 
@@ -928,7 +928,7 @@ fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
             "expected integer, found {:?}",
             token,
         )
-            .with_source_code(span)
+        .with_source_code(span)
     })?;
 
     let base = Base::Dec;
@@ -948,15 +948,15 @@ fn parse_string_literal(tokens: &mut TokenStream) -> miette::Result<Expr> {
     span.hi -= 1;
 
     match token {
-        Token::StringLiteral => Ok(Expr::StringLiteral(span.as_str(), span)),
+        Token::String => Ok(Expr::String(span.as_str(), span)),
         _ => unreachable!(),
     }
 }
 
 fn parse_format_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
-    tokens.expect(Token::FormatStringStart)?;
+    tokens.expect(Token::FormatStart)?;
 
-    let mut total_span = tokens.peek().1.clone();
+    let (_, mut total_span) = tokens.peek();
 
     let mut parts = Vec::new();
 
@@ -965,26 +965,26 @@ fn parse_format_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
         total_span.hi = span.hi;
 
         match token {
-            Token::FormatStringEnd => break,
-            Token::FormatStringExprStart => {
+            Token::FormatEnd => break,
+            Token::FormatExprStart => {
                 tokens.consume();
                 let expr = parse_expr(tokens, false)?;
-                tokens.expect(Token::FormatStringExprEnd)?;
+                tokens.expect(Token::FormatExprEnd)?;
 
                 // Wrap expression in call to `std:debug:repr`
                 let repr = Expr::Item(Path {
-                    segments: vec!["std", "debug", "repr"],
-                    span: span.clone(),
+                    segments: vec!["std", "debug", "format"],
+                    span,
                 });
 
                 let args = vec![Some(expr)];
 
                 parts.push(Expr::Call(Box::new(repr), args));
             }
-            Token::StringLiteral => {
+            Token::String => {
                 tokens.consume();
                 let string = span.as_str();
-                parts.push(Expr::StringLiteral(string, span));
+                parts.push(Expr::String(string, span));
             }
             _ => {
                 return Err(miette::miette!(
@@ -994,12 +994,12 @@ fn parse_format_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
                     "expected format string, found {:?}",
                     token,
                 )
-                    .with_source_code(span))
+                .with_source_code(span))
             }
         }
     }
 
-    tokens.expect(Token::FormatStringEnd)?;
+    tokens.expect(Token::FormatEnd)?;
 
     // Generate big expression that chains all parts together
     // with std:string:concat start from the end
@@ -1011,7 +1011,7 @@ fn parse_format_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
     while let Some(part) = parts.pop() {
         let concat = Expr::Item(Path {
             segments: concat_segments.clone(),
-            span: total_span.clone(),
+            span: total_span,
         });
 
         let args = vec![Some(part), Some(expr)];
@@ -1114,7 +1114,7 @@ fn parse_segment(tokens: &mut TokenStream) -> miette::Result<(&'static str, Span
             "expected snake_case identifier, found {:?}",
             token,
         )
-            .with_source_code(span)),
+        .with_source_code(span)),
     }
 }
 
@@ -1128,7 +1128,7 @@ fn parse_snake(tokens: &mut TokenStream) -> miette::Result<(&'static str, Span)>
             "expected snake_case identifier, found {:?}",
             token,
         )
-            .with_source_code(span)),
+        .with_source_code(span)),
     }
 }
 
@@ -1142,7 +1142,7 @@ fn parse_pascal(tokens: &mut TokenStream) -> miette::Result<(&'static str, Span)
             "expected PascalCase identifier, found {:?}",
             token,
         )
-            .with_source_code(span)),
+        .with_source_code(span)),
     }
 }
 
