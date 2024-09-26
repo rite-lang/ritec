@@ -523,6 +523,13 @@ fn normalize_pipe(unit: &mut Unit, lhs: &Ty, rhs: &Ty) -> Result<Ty, RetryOrErro
     }
 }
 
+fn part_eq(a_part: &Part, b_part: &Part) -> bool {
+    match (a_part, b_part) {
+        (Part::Generic(a, _), Part::Generic(b, _)) => a == b,
+        _ => a_part == b_part,
+    }
+}
+
 fn unify_partial_partial(
     unit: &mut Unit,
     a_part: &Part,
@@ -530,7 +537,7 @@ fn unify_partial_partial(
     b_part: &Part,
     b_args: &[Ty],
 ) -> Result<(), RetryOrError> {
-    if a_part != b_part || a_args.len() != b_args.len() {
+    if !part_eq(a_part, b_part) || a_args.len() != b_args.len() {
         return Err(miette::miette!(
             "expected `{}` but found `{}`",
             Ty::format_partial(unit, a_part, a_args),

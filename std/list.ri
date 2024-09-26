@@ -20,6 +20,47 @@ pub fn reverse(xs: ['a]) -> ['a]
   | [x, ..xs] -> concat(reverse(xs), [x])
   | [] -> []
 
+/// Check if all elements of a list satisfy a predicate.
+pub fn all(f: fn('a) -> bool, xs: ['a]) -> bool
+  match xs
+  | [x, ..xs] -> f(x) && all(f, xs)
+  | [] -> true
+
+/// Check if any elements of a list satisfy a predicate.
+pub fn any(f: fn('a) -> bool, xs: ['a]) -> bool
+  match xs
+  | [x, ..xs] -> f(x) || any(f, xs)
+  | [] -> false
+
+/// Check if a list contains an element.
+pub fn contains(x: 'a, xs: ['a]) -> bool
+  match xs
+  | [y, ..xs] -> x == y || contains(x, xs)
+  | [] -> false
+
+/// Count the number of elements in a list that satisfy a predicate.
+pub fn count(f: fn('a) -> bool, xs: ['a]) -> int
+  match xs
+  | [x, ..xs] ->
+    match f(x)
+    | true -> 1 + count(f, xs)
+    | false -> count(f, xs)
+  | [] -> 0
+
+/// Find the first element of a list that satisfies a predicate.
+pub fn find(f: fn('a) -> bool, xs: ['a]) -> Result<'a, void>
+  match xs
+  | [x, ..xs] ->
+    match f(x)
+    | true -> Ok(x)
+    | false -> find(f, xs)
+  | [] -> Err(void)
+
+pub fn fold(f: fn('a, 'b) -> 'b, acc: 'b, xs: ['a]) -> 'b
+  match xs
+  | [x, ..xs] -> fold(f, f(x, acc), xs)
+  | [] -> acc
+
 /// Take the first n elements of a list.
 pub fn take(n: int, xs: ['a]) -> ['a]
   match xs
@@ -37,6 +78,21 @@ pub fn drop(n: int, xs: ['a]) -> ['a]
     | true -> drop(n - 1, xs)
     | false -> xs
   | [] -> []
+
+/// Split a list into chunks of size n.
+pub fn chunk(n: int, xs: ['a]) -> [['a]]
+  match xs
+  | [x, ..xs] ->
+    let ys = take(n, xs)
+    let zs = drop(n, xs)
+    [[x, ..ys], ..chunk(n, zs)]
+  | [] -> []
+
+/// Split a list into pairs of adjacent elements.
+pub fn chunk_pairs(xs: ['a]) -> ['a * 'a]
+  match xs
+  | [x, y, ..xs] -> [(x, y), ..chunk_pairs(xs)]
+  | _ -> []
 
 /// Map a function over a list.
 pub fn map(f: fn('a) -> 'b, xs: ['a]) -> ['b]

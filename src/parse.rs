@@ -1,5 +1,6 @@
 use miette::Severity;
 
+use crate::ast::Field;
 use crate::decorator::Decorator;
 use crate::{
     ast::{
@@ -110,7 +111,7 @@ fn parse_decorator(tokens: &mut TokenStream) -> miette::Result<Decorator> {
     tokens.expect(Token::LParen)?;
 
     while !tokens.is(Token::RParen) {
-        match parse_string_literal(tokens)? {
+        match parse_string_expr(tokens)? {
             Expr::String(value, _) => args.push(value.to_string()),
             _ => {
                 return Err(miette::miette!(
@@ -162,24 +163,45 @@ fn parse_type_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
 
     let (name, span) = parse_pascal(tokens)?;
 
+    let generics = match tokens.take(Token::Lt) {
+        Some(_) => {
+            let mut generics = Vec::new();
+
+            while !tokens.is(Token::Gt) {
+                generics.push(parse_generic(tokens)?);
+
+                if tokens.take(Token::Comma).is_none() {
+                    break;
+                }
+            }
+
+            tokens.expect(Token::Gt)?;
+
+            Some(generics)
+        }
+        None => None,
+    };
+
     if tokens.is(Token::LParen) {
-        let fields = parse_arguments(tokens)?;
+        let fields = parse_fields(tokens)?;
 
         return Ok(Type::Single(Single {
             decorators,
             vis,
             name,
+            generics,
             fields,
             span,
         }));
     }
 
     if tokens.is(Token::Newline) {
-        return Ok(Type::Single(Single {
+        return Ok(Type::Adt(Adt {
             decorators,
             vis,
             name,
-            fields: Vec::new(),
+            generics,
+            variants: Vec::new(),
             span,
         }));
     }
@@ -197,7 +219,7 @@ fn parse_type_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
         let (name, span) = parse_pascal(tokens)?;
 
         let fields = match tokens.is(Token::LParen) {
-            true => parse_arguments(tokens)?,
+            true => parse_fields(tokens)?,
             false => Vec::new(),
         };
 
@@ -214,6 +236,7 @@ fn parse_type_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
         decorators,
         vis,
         name,
+        generics,
         variants,
         span,
     }))
@@ -280,6 +303,61 @@ fn parse_argument(tokens: &mut TokenStream) -> miette::Result<Argument> {
     };
 
     Ok(Argument { name, ty, span })
+}
+
+fn parse_fields(tokens: &mut TokenStream) -> miette::Result<Vec<Field>> {
+    let mut fields = Vec::new();
+
+    tokens.expect(Token::LParen)?;
+
+    if tokens.is(Token::Newline) {
+        return parse_fields_multiline(tokens);
+    }
+
+    while !tokens.is(Token::RParen) {
+        fields.push(parse_field(tokens)?);
+
+        if tokens.take(Token::Comma).is_none() {
+            break;
+        }
+    }
+
+    tokens.expect(Token::RParen)?;
+
+    Ok(fields)
+}
+
+fn parse_fields_multiline(tokens: &mut TokenStream) -> miette::Result<Vec<Field>> {
+    let mut fields = Vec::new();
+
+    tokens.expect(Token::Newline)?;
+    tokens.expect(Token::Indent)?;
+
+    while !tokens.is(Token::Dedent) {
+        fields.push(parse_field(tokens)?);
+
+        tokens.take(Token::Comma);
+
+        while tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+    }
+
+    tokens.expect(Token::Dedent)?;
+    tokens.expect(Token::RParen)?;
+
+    Ok(fields)
+}
+
+fn parse_field(tokens: &mut TokenStream) -> miette::Result<Field> {
+    let (name, span) = parse_snake(tokens)?;
+
+    let ty = match tokens.take(Token::Colon) {
+        Some(_) => Some(parse_ty(tokens)?),
+        None => None,
+    };
+
+    Ok(Field { name, ty, span })
 }
 
 fn parse_vis(tokens: &mut TokenStream) -> miette::Result<Vis> {
@@ -481,14 +559,14 @@ fn parse_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     let (token, _) = tokens.peek();
 
     match token {
-        Token::Let => parse_let(tokens, multiline),
-        Token::Mut => parse_mut(tokens, multiline),
-        Token::Match => parse_match(tokens, multiline),
-        _ => parse_assign(tokens, multiline),
+        Token::Let => parse_let_expr(tokens, multiline),
+        Token::Mut => parse_mut_expr(tokens, multiline),
+        Token::Match => parse_match_expr(tokens, multiline),
+        _ => parse_assign_expr(tokens, multiline),
     }
 }
 
-fn parse_let(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_let_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     tokens.expect(Token::Let)?;
 
     if tokens.take(Token::Assert).is_some() {
@@ -503,22 +581,32 @@ fn parse_let(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> 
         return Ok(Expr::LetAssert(pat, Box::new(value)));
     }
 
-    let (name, _) = parse_snake(tokens)?;
+    let pat = parse_pat(tokens)?;
+
+    let ty = match tokens.take(Token::Colon) {
+        Some(_) => Some(parse_ty(tokens)?),
+        None => None,
+    };
 
     tokens.expect(Token::Eq)?;
 
     let value = match is_block(tokens) {
         true => parse_block(tokens)?,
-        false => parse_pipe(tokens, multiline)?,
+        false => parse_pipe_expr(tokens, multiline)?,
     };
 
-    Ok(Expr::Let(name, Box::new(value)))
+    Ok(Expr::Let(pat, ty, Box::new(value)))
 }
 
-fn parse_mut(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_mut_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     tokens.expect(Token::Mut)?;
 
     let (name, _) = parse_snake(tokens)?;
+
+    let ty = match tokens.take(Token::Colon) {
+        Some(_) => Some(parse_ty(tokens)?),
+        None => None,
+    };
 
     tokens.expect(Token::Eq)?;
 
@@ -527,10 +615,10 @@ fn parse_mut(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> 
         false => parse_expr(tokens, multiline)?,
     };
 
-    Ok(Expr::Mut(name, Box::new(value)))
+    Ok(Expr::Mut(name, ty, Box::new(value)))
 }
 
-fn parse_match(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_match_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     if !multiline {
         return Err(miette::miette!(
             severity = Severity::Error,
@@ -600,15 +688,6 @@ fn parse_pat(tokens: &mut TokenStream) -> miette::Result<Pat> {
     Ok(Pat { kind, span })
 }
 
-fn is_pat_term(tokens: &TokenStream) -> bool {
-    let (token, _) = tokens.peek();
-
-    matches!(
-        token,
-        Token::Under | Token::Snake | Token::Pascal | Token::True | Token::False
-    )
-}
-
 fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
     let (token, span) = tokens.peek();
 
@@ -618,6 +697,13 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
 
             let kind = PatKind::Bind(None);
             Ok(Pat { kind, span })
+        }
+        Token::LParen => {
+            tokens.expect(Token::LParen)?;
+            let pat = parse_pat(tokens)?;
+            tokens.expect(Token::RParen)?;
+
+            Ok(pat)
         }
         Token::LBracket => {
             let start = tokens.expect(Token::LBracket)?;
@@ -692,8 +778,8 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
     }
 }
 
-fn parse_assign(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let lhs = parse_pipe(tokens, multiline)?;
+fn parse_assign_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let lhs = parse_pipe_expr(tokens, multiline)?;
 
     if tokens.take(Token::Eq).is_none() {
         return Ok(lhs);
@@ -704,33 +790,33 @@ fn parse_assign(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Exp
     Ok(Expr::Assign(Box::new(lhs), Box::new(rhs)))
 }
 
-fn parse_pipe(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let input = parse_tuple(tokens, multiline)?;
+fn parse_pipe_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let input = parse_tuple_expr(tokens, multiline)?;
 
     if !tokens.is(Token::PipeGt) && !is_pipe_multiline(tokens) {
         return Ok(input);
     }
 
     if is_pipe_multiline(tokens) && multiline {
-        return parse_pipe_multiline(tokens, input);
+        return parse_pipe_expr_multiline(tokens, input);
     }
 
     let mut exprs = Vec::new();
 
     while tokens.take(Token::PipeGt).is_some() {
-        exprs.push(parse_unary(tokens, multiline)?);
+        exprs.push(parse_unary_expr(tokens, multiline)?);
     }
 
     Ok(Expr::Pipe(Box::new(input), exprs))
 }
 
-fn parse_pipe_multiline(tokens: &mut TokenStream, input: Expr) -> miette::Result<Expr> {
+fn parse_pipe_expr_multiline(tokens: &mut TokenStream, input: Expr) -> miette::Result<Expr> {
     let mut exprs = Vec::new();
 
     while is_pipe_multiline(tokens) {
         tokens.consume();
         tokens.consume();
-        exprs.push(parse_binary(tokens, true)?);
+        exprs.push(parse_binary_expr(tokens, true)?);
     }
 
     Ok(Expr::Pipe(Box::new(input), exprs))
@@ -740,13 +826,13 @@ fn is_pipe_multiline(tokens: &TokenStream) -> bool {
     tokens.is(Token::Newline) && tokens.nth_is(1, Token::PipeGt)
 }
 
-fn parse_tuple(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let first = parse_binary(tokens, multiline)?;
+fn parse_tuple_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let first = parse_binary_expr(tokens, multiline)?;
 
     let mut items = vec![first];
 
     while tokens.take(Token::Comma).is_some() {
-        let second = parse_binary(tokens, multiline)?;
+        let second = parse_binary_expr(tokens, multiline)?;
         items.push(second);
     }
 
@@ -757,16 +843,16 @@ fn parse_tuple(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
     }
 }
 
-fn parse_binary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_binary_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     let (token, _) = tokens.peek();
 
     match token {
-        Token::Pipe => return parse_closure(tokens),
-        Token::PipePipe => return parse_empty_closure(tokens),
+        Token::Pipe => return parse_closure_expr(tokens),
+        Token::PipePipe => return parse_empty_closure_expr(tokens),
         _ => {}
     }
 
-    let lhs = parse_unary(tokens, multiline)?;
+    let lhs = parse_unary_expr(tokens, multiline)?;
 
     let Some(lop) = get_binop(tokens) else {
         return Ok(lhs);
@@ -774,7 +860,7 @@ fn parse_binary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Exp
 
     let (_, lspan) = tokens.consume();
 
-    let rhs = parse_binary(tokens, multiline)?;
+    let rhs = parse_binary_expr(tokens, multiline)?;
 
     match rhs {
         Expr::Binary(rop, mid, rhs, rspan) => {
@@ -807,8 +893,8 @@ fn get_binop(tokens: &TokenStream) -> Option<BinOp> {
         Token::Star => BinOp::Mul,
         Token::Slash => BinOp::Div,
         Token::Percent => BinOp::Rem,
-        Token::Amp => BinOp::And,
-        Token::Pipe => BinOp::Or,
+        Token::AmpAmp => BinOp::And,
+        Token::PipePipe => BinOp::Or,
         Token::EqEq => BinOp::Eq,
         Token::NotEq => BinOp::Ne,
         Token::Lt => BinOp::Lt,
@@ -819,36 +905,36 @@ fn get_binop(tokens: &TokenStream) -> Option<BinOp> {
     })
 }
 
-fn parse_unary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_unary_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     let (token, span) = tokens.peek();
 
     match token {
         Token::Amp => {
             tokens.consume();
-            let expr = parse_unary(tokens, multiline)?;
+            let expr = parse_unary_expr(tokens, multiline)?;
             Ok(Expr::Unary(UnOp::Ref, Box::new(expr), span))
         }
         Token::Star => {
             tokens.consume();
-            let expr = parse_unary(tokens, multiline)?;
+            let expr = parse_unary_expr(tokens, multiline)?;
             Ok(Expr::Unary(UnOp::Deref, Box::new(expr), span))
         }
         Token::Minus => {
             tokens.consume();
-            let expr = parse_unary(tokens, multiline)?;
+            let expr = parse_unary_expr(tokens, multiline)?;
             Ok(Expr::Unary(UnOp::Neg, Box::new(expr), span))
         }
         Token::Not => {
             tokens.consume();
-            let expr = parse_unary(tokens, multiline)?;
+            let expr = parse_unary_expr(tokens, multiline)?;
             Ok(Expr::Unary(UnOp::Not, Box::new(expr), span))
         }
-        _ => parse_try(tokens, multiline),
+        _ => parse_try_expr(tokens, multiline),
     }
 }
 
-fn parse_try(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let mut expr = parse_call(tokens, multiline)?;
+fn parse_try_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let mut expr = parse_call_expr(tokens, multiline)?;
 
     while let Some(span) = tokens.take(Token::Question) {
         expr = Expr::Try(Box::new(expr), span);
@@ -857,8 +943,8 @@ fn parse_try(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> 
     Ok(expr)
 }
 
-fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let callee = parse_field(tokens, multiline)?;
+fn parse_call_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let callee = parse_field_expr(tokens, multiline)?;
 
     if !tokens.is(Token::LParen) {
         return Ok(callee);
@@ -870,7 +956,7 @@ fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
 
     while !tokens.is(Token::RParen) {
         match tokens.take(Token::Under).is_some() {
-            false => args.push(Some(parse_binary(tokens, false)?)),
+            false => args.push(Some(parse_binary_expr(tokens, false)?)),
             true => args.push(None),
         }
 
@@ -884,8 +970,8 @@ fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     Ok(Expr::Call(Box::new(callee), args))
 }
 
-fn parse_field(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let base = parse_term(tokens, multiline)?;
+fn parse_field_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let base = parse_term_expr(tokens, multiline)?;
 
     if !tokens.is(Token::Dot) {
         return Ok(base);
@@ -898,16 +984,16 @@ fn parse_field(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
     Ok(Expr::Field(Box::new(base), name))
 }
 
-fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_term_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     let (token, span) = tokens.peek();
 
     match token {
-        Token::LParen => parse_paren(tokens, multiline),
-        Token::Integer => parse_integer(tokens),
-        Token::Minus => parse_integer(tokens),
-        Token::FormatStart => parse_format_string(tokens),
-        Token::String => parse_string_literal(tokens),
-        Token::LBracket => parse_list(tokens, multiline),
+        Token::LParen => parse_paren_expr(tokens, multiline),
+        Token::Integer => parse_integer_expr(tokens),
+        Token::Minus => parse_integer_expr(tokens),
+        Token::FormatStart => parse_format_expr(tokens),
+        Token::String => parse_string_expr(tokens),
+        Token::LBracket => parse_list_expr(tokens, multiline),
         Token::Void => {
             tokens.consume();
             Ok(Expr::Void(span))
@@ -922,7 +1008,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
 
             Ok(Expr::Panic(message, span))
         }
-        Token::True | Token::False => parse_bool(tokens),
+        Token::True | Token::False => parse_bool_expr(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),
         _ => Err(miette::miette!(
             severity = Severity::Error,
@@ -935,7 +1021,7 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     }
 }
 
-fn parse_paren(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_paren_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     let span = tokens.take(Token::LParen).unwrap();
 
     let expr = parse_expr(tokens, multiline)?;
@@ -945,7 +1031,7 @@ fn parse_paren(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
     Ok(Expr::Paren(Box::new(expr), span.join(close)))
 }
 
-fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
+fn parse_integer_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
     let span = tokens.take(Token::Integer).ok_or_else(|| {
         let (token, span) = tokens.peek();
 
@@ -969,7 +1055,7 @@ fn parse_integer(tokens: &mut TokenStream) -> miette::Result<Expr> {
     Ok(Expr::Int(false, base, digits, span))
 }
 
-fn parse_string_literal(tokens: &mut TokenStream) -> miette::Result<Expr> {
+fn parse_string_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
     let (token, mut span) = tokens.consume();
 
     span.lo += 1;
@@ -981,7 +1067,7 @@ fn parse_string_literal(tokens: &mut TokenStream) -> miette::Result<Expr> {
     }
 }
 
-fn parse_format_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
+fn parse_format_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
     tokens.expect(Token::FormatStart)?;
 
     let (_, mut total_span) = tokens.peek();
@@ -1050,7 +1136,7 @@ fn parse_format_string(tokens: &mut TokenStream) -> miette::Result<Expr> {
     Ok(expr)
 }
 
-fn parse_list(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+fn parse_list_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     let start = tokens.expect(Token::LBracket)?;
 
     let mut items = Vec::new();
@@ -1062,7 +1148,7 @@ fn parse_list(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
             break;
         }
 
-        items.push(parse_binary(tokens, multiline)?);
+        items.push(parse_binary_expr(tokens, multiline)?);
 
         if tokens.take(Token::Comma).is_none() {
             break;
@@ -1074,7 +1160,7 @@ fn parse_list(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
     Ok(Expr::List(items, rest, start.join(end)))
 }
 
-fn parse_closure(tokens: &mut TokenStream) -> miette::Result<Expr> {
+fn parse_closure_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
     let _start = tokens.expect(Token::Pipe)?;
 
     let mut args = Vec::new();
@@ -1091,24 +1177,24 @@ fn parse_closure(tokens: &mut TokenStream) -> miette::Result<Expr> {
 
     let body = match is_block(tokens) {
         true => parse_block(tokens)?,
-        false => parse_binary(tokens, false)?,
+        false => parse_binary_expr(tokens, false)?,
     };
 
     Ok(Expr::Closure(args, Box::new(body)))
 }
 
-fn parse_empty_closure(tokens: &mut TokenStream) -> miette::Result<Expr> {
+fn parse_empty_closure_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
     let _start = tokens.expect(Token::PipePipe)?;
 
     let body = match is_block(tokens) {
         true => parse_block(tokens)?,
-        false => parse_binary(tokens, false)?,
+        false => parse_binary_expr(tokens, false)?,
     };
 
     Ok(Expr::Closure(Vec::new(), Box::new(body)))
 }
 
-fn parse_bool(tokens: &mut TokenStream) -> miette::Result<Expr> {
+fn parse_bool_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
     let (token, span) = tokens.consume();
 
     match token {

@@ -41,6 +41,7 @@ pub fn build(hir: &hir::Unit) -> miette::Result<rir::Unit> {
             .collect::<Vec<_>>();
 
         rir.adts.push(rir::Adt {
+            decorators: adt.decorators.clone(),
             name: adt.name.to_string(),
             generics,
             variants,

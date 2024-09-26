@@ -143,6 +143,7 @@ fn specialize_adt(spec: &mut Specializer, adt: usize, generics: &[Specific]) -> 
     }
 
     spec.specific.adts[id] = Adt {
+        decorators: adt.decorators.clone(),
         name: adt.name.clone(),
         generics: adt.generics.clone(),
         variants,

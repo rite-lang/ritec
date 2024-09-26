@@ -57,9 +57,7 @@ fn main() -> miette::Result<()> {
     let (main, rir) = compiler.compile(main)?;
 
     let interpreter = Interpreter::new(&rir);
-    let output = interpreter.interpret(main);
-
-    println!("{}", output);
+    interpreter.interpret(main);
 
     Ok(())
 }

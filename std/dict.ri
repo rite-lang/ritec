@@ -1,0 +1,70 @@
+//! Dictionary type and utilities.
+
+import result:Result
+
+/// A dictionary type that maps keys to values.
+#[language("Dict")]
+pub type Dict<'k, 'v>
+
+/// Create a new empty dictionary.
+#[language("dict:new")]
+pub fn new() -> Dict<'k, 'v>
+  panic "dict:new builtin not implemented"
+
+/// Get the length of a dictionary.
+#[language("dict:length")]
+pub fn length(dict: Dict<'k, 'v>) -> int
+  panic "dict:length builtin not implemented"
+
+/// Get the value associated with a key in a dictionary.
+#[language("dict:get")]
+pub fn get(key: 'k, dict: Dict<'k, 'v>) -> Result<'v, void>
+  panic "dict:get builtin not implemented"
+
+/// Check if a key exists in a dictionary.
+pub fn has(key: 'k, dict: Dict<'k, 'v>) -> bool
+  get(key, dict) |> result:is_ok
+
+/// Insert a key-value pair into a dictionary.
+#[language("dict:insert")]
+pub fn insert(
+  key: 'k
+  value: 'v
+  dict: Dict<'k, 'v>
+) -> Dict<'k, 'v>
+  panic "dict:insert builtin not implemented"
+
+/// Remove a key-value pair from a dictionary.
+#[language("dict:remove")]
+pub fn remove(key: 'k, dict: Dict<'k, 'v>) -> Dict<'k, 'v>
+  panic "dict:remove builtin not implemented"
+
+/// Get the pairs of keys and values in a dictionary.
+#[language("dict:pairs")]
+pub fn pairs(dict: Dict<'k, 'v>) -> ['k * 'v]
+  panic "dict:pairs builtin not implemented"
+
+/// Create a dictionary from a list of key-value pairs.
+pub fn from_pairs(pairs: ['k * 'v]) -> Dict<'k, 'v>
+  new(), pairs |> list:fold(|pair, acc|
+    let key, value = pair
+    insert(key, value, acc)
+  )
+
+/// Get the keys of a dictionary.
+#[language("dict:keys")]
+pub fn keys(dict: Dict<'k, 'v>) -> ['k]
+  let map = |pair|
+    let key, _ = pair
+    key
+
+  pairs(dict) |> list:map(map)
+
+/// Get the values of a dictionary.
+#[language("dict:values")]
+pub fn values(dict: Dict<'k, 'v>) -> ['v]
+  let map = |pair|
+    let _, value = pair
+    value
+
+  pairs(dict) |> list:map(map)

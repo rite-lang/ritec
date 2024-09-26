@@ -3,7 +3,7 @@
 import std:string
 
 /// Print a string to the standard output.
-#[extern("intrinsic", "io_print")]
+#[language("io:print")]
 pub fn print(a: str) -> void
   panic
 

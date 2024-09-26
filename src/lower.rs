@@ -30,6 +30,7 @@ pub fn type_register_ast(
             };
 
             let id = unit.push_adt(hir::Adt {
+                decorators: adt.decorators.clone(),
                 name: adt.name,
                 generics: Vec::new(),
                 variants: Vec::new(),
@@ -56,6 +57,7 @@ pub fn type_register_ast(
             };
 
             let id = unit.push_adt(hir::Adt {
+                decorators: single.decorators.clone(),
                 name: single.name,
                 generics: Vec::new(),
                 variants: Vec::new(),
@@ -115,14 +117,14 @@ pub fn type_construct_ast(
                 unreachable!("expected adt");
             };
 
-            let mut generics = mem::take(&mut unit.adts[id].generics);
+            let (mut generics, new_generics) = lower_generics(adt.generics.as_ref());
 
             for variant in &adt.variants {
                 let mut cx = TyCx {
                     unit,
                     module,
                     generics: &mut generics,
-                    new_generics: true,
+                    new_generics,
                     inferring: false,
                     func: None,
                 };
@@ -146,13 +148,13 @@ pub fn type_construct_ast(
                 unreachable!("expected adt");
             };
 
-            let mut generics = mem::take(&mut unit.adts[id].generics);
+            let (mut generics, new_generics) = lower_generics(single.generics.as_ref());
 
             let mut cx = TyCx {
                 unit,
                 module,
                 generics: &mut generics,
-                new_generics: true,
+                new_generics,
                 inferring: false,
                 func: None,
             };
@@ -172,9 +174,26 @@ pub fn type_construct_ast(
     Ok(())
 }
 
+fn lower_generics(generics: Option<&Vec<ast::Generic>>) -> (Vec<hir::Generic>, bool) {
+    match generics {
+        Some(generics) => {
+            let generics = generics
+                .iter()
+                .map(|generic| hir::Generic {
+                    name: generic.name,
+                    span: generic.span,
+                })
+                .collect();
+
+            (generics, false)
+        }
+        None => (Vec::new(), true),
+    }
+}
+
 fn lower_fields<'a>(
     cx: &mut TyCx,
-    iter: impl Iterator<Item = &'a ast::Argument>,
+    iter: impl Iterator<Item = &'a ast::Field>,
 ) -> miette::Result<Vec<hir::Argument>> {
     let mut fields: Vec<hir::Argument> = Vec::new();
 
@@ -743,8 +762,8 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
         ast::Expr::Binary(op, lhs, rhs, span) => lower_binary(cx, *op, lhs, rhs, *span),
         ast::Expr::Unary(op, expr, span) => lower_unary(cx, *op, expr, *span),
-        ast::Expr::Let(name, expr) => lower_let(cx, name, expr),
-        ast::Expr::Mut(name, expr) => lower_mut(cx, name, expr),
+        ast::Expr::Let(pat, ty, expr) => lower_let(cx, pat, ty.as_ref(), expr),
+        ast::Expr::Mut(name, ty, expr) => lower_mut(cx, name, ty.as_ref(), expr),
         ast::Expr::LetAssert(pat, expr) => lower_let_assert(cx, pat, expr),
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
         ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
@@ -1217,26 +1236,72 @@ fn lower_unary(
     }
 }
 
-fn lower_let(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::Result<hir::Expr> {
+fn lower_let(
+    cx: &mut BodyCx,
+    pat: &ast::Pat,
+    ty: Option<&ast::Ty>,
+    expr: &ast::Expr,
+) -> miette::Result<hir::Expr> {
     let value = lower_expr(cx, expr)?;
 
-    let id = cx.locals.len();
-    let ty = value.ty.clone();
+    if let Some(ty) = ty {
+        let ty = lower_ty(&mut cx.as_ty_cx(), ty, expr.span())?;
+        cx.unit.unify(value.ty.clone(), ty);
+    }
 
-    cx.locals.push(hir::Local {
-        mutable: false,
-        name,
-        ty,
-    });
-    cx.scope.push((name.to_owned(), id));
+    let span = pat.span;
+    let pat = lower_pat(cx, pat, &value.ty)?;
 
-    let kind = hir::ExprKind::Let(id, Box::new(value));
+    if !is_pat_irrefutable(cx, &pat) {
+        return Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::pat",
+            labels = [span.label("here")],
+            "irrefutable pattern required"
+        )
+        .with_source_code(span));
+    }
+
+    let mut locals = Vec::new();
+
+    build_pat_destructure(cx, value.clone(), &pat, &mut locals)?;
+
+    let mut exprs = Vec::new();
+
+    for (name, expr) in locals {
+        let id = cx.locals.len();
+
+        cx.locals.push(hir::Local {
+            mutable: false,
+            name,
+            ty: expr.ty.clone(),
+        });
+        cx.scope.push((String::from(name), id));
+
+        let kind = hir::ExprKind::Let(id, Box::new(expr));
+        exprs.push(hir::Expr {
+            kind,
+            ty: hir::Ty::void(),
+        });
+    }
+
+    let kind = hir::ExprKind::Block(exprs);
     let ty = hir::Ty::void();
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_mut(cx: &mut BodyCx, name: &'static str, expr: &ast::Expr) -> miette::Result<hir::Expr> {
+fn lower_mut(
+    cx: &mut BodyCx,
+    name: &'static str,
+    ty: Option<&ast::Ty>,
+    expr: &ast::Expr,
+) -> miette::Result<hir::Expr> {
     let value = lower_expr(cx, expr)?;
+
+    if let Some(ty) = ty {
+        let ty = lower_ty(&mut cx.as_ty_cx(), ty, expr.span())?;
+        cx.unit.unify(value.ty.clone(), ty);
+    }
 
     let id = cx.locals.len();
     let ty = hir::Ty::Partial(hir::Part::Ref, vec![value.ty.clone()]);
@@ -1266,7 +1331,7 @@ fn lower_let_assert(
     let pat = lower_pat(cx, pat, &input.ty)?;
 
     let mut locals = Vec::new();
-    build_destructure(cx, input.clone(), &pat, &mut locals)?;
+    build_pat_destructure(cx, input.clone(), &pat, &mut locals)?;
     let check = build_pat_check(cx, input, pat)?;
 
     let mut exprs = Vec::new();
@@ -1447,12 +1512,22 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             cx.unit.unify(ty.clone(), hir::Ty::bool());
             Ok(Pat::Bool(b))
         }
-        ast::PatKind::Tuple(ref pats) => pats
-            .iter()
-            .enumerate()
-            .map(|(i, pat)| lower_pat(cx, pat, &hir::Ty::Tuple(Box::new(ty.clone()), i)))
-            .collect::<miette::Result<Vec<_>>>()
-            .map(Pat::Tuple),
+        ast::PatKind::Tuple(ref ast) => {
+            let mut pats = Vec::new();
+            let mut tys = Vec::new();
+
+            for pat in ast {
+                let ty = hir::Ty::any(pat.span);
+                let pat = lower_pat(cx, pat, &ty)?;
+                pats.push(pat);
+                tys.push(ty);
+            }
+
+            let tuple = hir::Ty::Partial(hir::Part::Tuple, tys);
+            cx.unit.unify(ty.clone(), tuple);
+
+            Ok(Pat::Tuple(pats))
+        }
         ast::PatKind::Variant(ref path, ref pats) => {
             let (adt, index) = find_variant(cx.unit, cx.module, path)?;
 
@@ -1519,7 +1594,7 @@ enum Pat {
     List(Option<Box<(Pat, Pat)>>, Span),
 }
 
-fn build_destructure(
+fn build_pat_destructure(
     cx: &mut BodyCx,
     input: hir::Expr,
     pat: &Pat,
@@ -1541,7 +1616,8 @@ fn build_destructure(
                     ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i),
                 };
 
-                build_destructure(cx, input, pat, locals)?;
+                cx.unit.normalize(input.ty.clone());
+                build_pat_destructure(cx, input, pat, locals)?;
             }
 
             Ok(())
@@ -1553,7 +1629,7 @@ fn build_destructure(
                     ty: ty.clone(),
                 };
 
-                build_destructure(cx, input, pat, locals)?;
+                build_pat_destructure(cx, input, pat, locals)?;
             }
 
             Ok(())
@@ -1567,7 +1643,7 @@ fn build_destructure(
                     ty: ty.clone(),
                 };
 
-                build_destructure(cx, expr, head, locals)?;
+                build_pat_destructure(cx, expr, head, locals)?;
 
                 let ty = hir::Ty::Partial(hir::Part::List, vec![ty]);
                 cx.unit.unify(input.ty.clone(), ty.clone());
@@ -1577,11 +1653,27 @@ fn build_destructure(
                     ty,
                 };
 
-                build_destructure(cx, expr, tail, locals)?;
+                build_pat_destructure(cx, expr, tail, locals)?;
             }
 
             Ok(())
         }
+    }
+}
+
+fn is_pat_irrefutable(cx: &mut BodyCx, pat: &Pat) -> bool {
+    match pat {
+        Pat::Bind(_) => true,
+        Pat::Bool(_) => false,
+        Pat::Tuple(pats) => pats.iter().all(|pat| is_pat_irrefutable(cx, pat)),
+        Pat::Variant(adt, _, fields) => {
+            if cx.unit.adts[*adt].variants.len() > 1 {
+                return false;
+            }
+
+            fields.iter().all(|(_, pat)| is_pat_irrefutable(cx, pat))
+        }
+        Pat::List(_, _) => false,
     }
 }
 

@@ -1,6 +1,10 @@
 //! Debugging utilities.
 
 /// Format a value for debugging.
-#[extern("intrinsic", "debug_format")]
+#[language("debug:format")]
 pub fn format(a: 'a) -> str
-  panic "debug_format intrinsic not implemented"
+  panic "debug:format intrinsic not implemented"
+
+/// Print a value for debugging.
+pub fn print(a: 'a)
+  io:println(format(a))

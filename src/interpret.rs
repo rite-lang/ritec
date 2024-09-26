@@ -6,10 +6,10 @@ use crate::{
         Statement, Unit,
     },
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::{cell::RefCell, iter::Peekable, rc::Rc};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     Void,
     Int(i64),
@@ -19,6 +19,7 @@ pub enum Value {
     Adt(usize, Vec<Value>),
     String(String),
     Ref(Rc<RefCell<Value>>),
+    Dict(BTreeMap<Value, Value>),
 }
 
 impl Value {
@@ -69,11 +70,28 @@ impl std::fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Ref(value) => write!(f, "&{}", value.borrow()),
+            Value::Dict(dict) => {
+                if dict.is_empty() {
+                    return write!(f, "{{}}");
+                }
+
+                write!(f, "{{ ")?;
+
+                for (i, (key, value)) in dict.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+
+                    write!(f, "{}: {}", key, value)?;
+                }
+
+                write!(f, " }}")
+            }
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct List {
     head: Value,
     tail: Option<Box<List>>,
@@ -172,6 +190,102 @@ fn string_concat(args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
+fn dict_new(args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 0);
+    Value::Dict(BTreeMap::new())
+}
+
+fn dict_length(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::Dict(dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    Value::Int(dict.len() as i64)
+}
+
+fn dict_get(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let Value::Dict(dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    let key = args.pop().unwrap();
+
+    match dict.get(&key) {
+        Some(value) => value.clone(),
+        None => Value::Adt(1, vec![Value::Void]),
+    }
+}
+
+fn dict_insert(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 3);
+
+    let Value::Dict(mut dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    let value = args.pop().unwrap();
+    let key = args.pop().unwrap();
+
+    dict.insert(key, value);
+
+    Value::Dict(dict)
+}
+
+fn dict_remove(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let Value::Dict(mut dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    let key = args.pop().unwrap();
+
+    dict.remove(&key);
+
+    Value::Dict(dict)
+}
+
+fn dict_pairs(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::Dict(dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    let pairs = dict
+        .iter()
+        .map(|(key, value)| Value::Adt(0, vec![key.clone(), value.clone()]))
+        .collect();
+
+    Value::list_from_vec(pairs)
+}
+
+fn dict_keys(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::Dict(dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    let keys = dict.keys().cloned().collect();
+    Value::list_from_vec(keys)
+}
+
+fn dict_values(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::Dict(dict) = args.pop().unwrap() else {
+        panic!("expected dictionary")
+    };
+
+    let values = dict.values().cloned().collect();
+    Value::list_from_vec(values)
+}
+
 fn io_print(mut args: Vec<Value>) -> Value {
     let Value::String(s) = args.pop().unwrap() else {
         panic!("expected string")
@@ -207,23 +321,28 @@ impl<'a> Interpreter<'a> {
     fn find_builtins(mir: &'a Unit<Specific>) -> HashMap<usize, fn(Vec<Value>) -> Value> {
         let mut builtins = HashMap::new();
         for (index, value) in mir.funcs.iter().enumerate() {
-            // Find extern intrinsic decorator.
-            let extern_decorator = value
-                .decorators
-                .iter()
-                .find(|d| d.name == "extern" && d.args.len() == 2 && d.args[0] == "intrinsic");
+            // find extern intrinsic decorator.
+            let decorator = value.decorators.iter().find(|d| d.name == "language");
 
-            if let Some(extern_decorator) = extern_decorator {
-                let name = extern_decorator.args[1].as_str();
+            if let Some(extern_decorator) = decorator {
+                let name = extern_decorator.args[0].as_str();
                 let func = match name {
-                    "string_bytes" => string_bytes,
-                    "string_from_bytes" => string_from_bytes,
-                    "string_concat" => string_concat,
-                    "string_length" => string_length,
-                    "string_graphemes" => string_graphemes,
-                    "debug_format" => debug_format,
-                    "io_print" => io_print,
-                    // We allow intrinsics to have pure rite fallbacks.
+                    "string:bytes" => string_bytes,
+                    "string:from_bytes" => string_from_bytes,
+                    "string:concat" => string_concat,
+                    "string:length" => string_length,
+                    "string:graphemes" => string_graphemes,
+                    "debug:format" => debug_format,
+                    "io:print" => io_print,
+                    "dict:new" => dict_new,
+                    "dict:length" => dict_length,
+                    "dict:get" => dict_get,
+                    "dict:insert" => dict_insert,
+                    "dict:remove" => dict_remove,
+                    "dict:pairs" => dict_pairs,
+                    "dict:keys" => dict_keys,
+                    "dict:values" => dict_values,
+                    // we allow intrinsics to have pure rite fallbacks.
                     _ => continue,
                 };
 

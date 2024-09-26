@@ -95,6 +95,7 @@ pub struct Local {
 
 #[derive(Debug)]
 pub struct Adt {
+    pub decorators: Vec<Decorator>,
     pub name: &'static str,
     pub generics: Vec<Generic>,
     pub variants: Vec<Variant>,

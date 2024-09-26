@@ -69,6 +69,7 @@ pub struct Capture<T = Ty> {
 
 #[derive(Debug)]
 pub struct Adt<T = Ty> {
+    pub decorators: Vec<Decorator>,
     pub name: String,
     pub generics: Vec<Generic>,
     pub variants: Vec<Variant<T>>,
@@ -77,6 +78,7 @@ pub struct Adt<T = Ty> {
 impl<T> Default for Adt<T> {
     fn default() -> Self {
         Self {
+            decorators: Vec::new(),
             name: String::new(),
             generics: Vec::new(),
             variants: Vec::new(),

@@ -1,8 +1,15 @@
 import std:io
 import std:result:Result
+import std:list
+import std:debug
+import std:dict
+import std:dict:Dict
 
 fn main()
-  let a = std:result:none()?
+  [1, 2, 3, 4]
+  |> list:chunk_pairs
+  |> dict:from_pairs
+  |> debug:print
 
-  1 |> (|x| f"{x} {x} {x}") |> io:println
-  Ok(a)
+  let dict = dict:new() |> dict:insert("a", 1)
+  io:println(f"dict: {dict}")

@@ -5,9 +5,9 @@
 /// Rite does not have an option type, so optional values are represented using
 /// a result type with an error type of `void`.
 #[language("Result")]
-pub type Result =
+pub type Result<'a, 'e> =
   | Ok(ok: 'a)
-  | Err(err: 'b)
+  | Err(err: 'e)
 
 /// Create a new successful optional.
 pub fn some(value: 'a) -> Result<'a, void>
@@ -18,13 +18,13 @@ pub fn none() -> Result<'a, void>
   Err(void)
 
 /// Check if a result is successful.
-pub fn is_ok(result: Result<'a, 'b>) -> bool
+pub fn is_ok(result: Result<'a, 'e>) -> bool
   match result
   | Ok(_) -> true
   | Err(_) -> false
 
 /// Check if a result is an error.
-pub fn is_err(result: Result<'a, 'b>) -> bool
+pub fn is_err(result: Result<'a, 'e>) -> bool
   match result
   | Ok(_) -> false
   | Err(_) -> true

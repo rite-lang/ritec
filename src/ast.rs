@@ -45,6 +45,7 @@ pub struct Adt {
     pub decorators: Vec<Decorator>,
     pub vis: Vis,
     pub name: &'static str,
+    pub generics: Option<Vec<Generic>>,
     pub variants: Vec<Variant>,
     pub span: Span,
 }
@@ -54,19 +55,27 @@ pub struct Single {
     pub decorators: Vec<Decorator>,
     pub vis: Vis,
     pub name: &'static str,
-    pub fields: Vec<Argument>,
+    pub generics: Option<Vec<Generic>>,
+    pub fields: Vec<Field>,
     pub span: Span,
 }
 
 #[derive(Debug)]
 pub struct Variant {
     pub name: &'static str,
-    pub fields: Vec<Argument>,
+    pub fields: Vec<Field>,
     pub span: Span,
 }
 
 #[derive(Debug)]
 pub struct Argument {
+    pub name: &'static str,
+    pub ty: Option<Ty>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Field {
     pub name: &'static str,
     pub ty: Option<Ty>,
     pub span: Span,
@@ -115,8 +124,8 @@ pub enum Expr {
     Pipe(Box<Expr>, Vec<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>, Span),
     Unary(UnOp, Box<Expr>, Span),
-    Let(&'static str, Box<Expr>),
-    Mut(&'static str, Box<Expr>),
+    Let(Pat, Option<Ty>, Box<Expr>),
+    Mut(&'static str, Option<Ty>, Box<Expr>),
     LetAssert(Pat, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>, Span),
@@ -173,8 +182,8 @@ impl Expr {
                 let inner = expr.span();
                 span.join(inner)
             }
-            Expr::Let(_, expr) => expr.span(),
-            Expr::Mut(_, expr) => expr.span(),
+            Expr::Let(_, _, expr) => expr.span(),
+            Expr::Mut(_, _, expr) => expr.span(),
             Expr::LetAssert(_, expr) => expr.span(),
             Expr::Assign(lhs, rhs) => {
                 let start = lhs.span();
