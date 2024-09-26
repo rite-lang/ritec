@@ -3,7 +3,7 @@
 import result:Result
 
 /// A dictionary type that maps keys to values.
-#[language("Dict")]
+#[language("dict:Dict")]
 pub type Dict<'k, 'v>
 
 /// Create a new empty dictionary.

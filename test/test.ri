@@ -12,5 +12,10 @@ fn main()
     |> dict:from_pairs
     |> debug:print
 
-  let dict = dict:new() |> dict:insert("a", 1)
+  let dict = 
+    dict:new()
+    |> dict:insert("a", 1)
+    |> dict:insert("b", 2)
+    |> dict:pairs
+
   io:println(f"dict: {dict}")

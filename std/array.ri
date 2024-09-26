@@ -1,0 +1,22 @@
+//! Array type and utilities.
+
+import std:list
+
+/// An array type that stores elements in a contiguous block of memory.
+#[language("array:Array")]
+pub type Array<'a>
+
+/// Create a new empty array.
+#[language("array:new")]
+pub fn new(length: int) -> Array<'a>
+  panic "array:new builtin not implemented"
+
+/// Get the length of an array.
+#[language("array:length")]
+pub fn length(array: Array<'a>) -> int
+  panic "array:length builtin not implemented"
+
+/// Get the element at an index in an array.
+#[language("array:get")]
+pub fn get(array: Array<'a>) -> 'a
+  panic "array:get builtin not implemented"
