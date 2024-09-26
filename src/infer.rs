@@ -604,7 +604,7 @@ fn normalize_pipe(
 
     let has_slot = arguments.iter().any(Option::is_none);
 
-    if arguments.len() + has_slot as usize > rhs_arguments.len() {
+    if arguments.len() + !has_slot as usize > rhs_arguments.len() {
         return Err(miette::miette!(
             labels = [span.label("here"), constraint_span.label("here")],
             "wrong number of arguments: expected at most {} but found {}",
