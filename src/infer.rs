@@ -7,19 +7,19 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub struct TyEnv {
-    constraints: VecDeque<(Ty, Ty)>,
+    constraints: VecDeque<(Ty, Ty, Span)>,
     substitutions: HashMap<Ty, Ty>,
     the_matrix: HashMap<usize, (Vec<Tid>, Vec<Vec<Ty>>)>,
     the_gatrix: HashMap<usize, Vec<Vec<Ty>>>,
 }
 
 impl TyEnv {
-    pub fn unify(&mut self, a: Ty, b: Ty) {
-        self.constraints.push_back((a, b));
+    pub fn unify(&mut self, a: Ty, b: Ty, span: Span) {
+        self.constraints.push_back((a, b, span));
     }
 
-    pub fn normalize(&mut self, ty: Ty) {
-        self.unify(ty.clone(), ty);
+    pub fn normalize(&mut self, ty: Ty, span: Span) {
+        self.unify(ty.clone(), ty, span);
     }
 
     pub fn substitute(&self, ty: &Ty) -> Option<&Ty> {
@@ -130,13 +130,13 @@ impl From<miette::Report> for RetryOrError {
 pub fn infer(unit: &mut Unit) -> miette::Result<()> {
     let mut retried = 0;
 
-    while let Some((a, b)) = unit.env.constraints.pop_front() {
-        match unify_ty_ty(unit, &a, &b) {
+    while let Some((a, b, span)) = unit.env.constraints.pop_front() {
+        match unify_ty_ty(unit, &a, &b, span) {
             Ok(()) => {
                 retried = 0;
             }
             Err(RetryOrError::Retry) => {
-                unit.env.constraints.push_back((a, b));
+                unit.env.constraints.push_back((a, b, span));
                 retried += 1;
             }
             Err(RetryOrError::Error(report)) => return Err(report),
@@ -150,9 +150,9 @@ pub fn infer(unit: &mut Unit) -> miette::Result<()> {
     Ok(())
 }
 
-fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
-    let a = normalize(unit, a)?;
-    let b = normalize(unit, b)?;
+fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty, constraint_span: Span) -> Result<(), RetryOrError> {
+    let a = normalize(unit, a, constraint_span)?;
+    let b = normalize(unit, b, constraint_span)?;
 
     match (a, b) {
         (
@@ -165,12 +165,30 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
 
             if is_sub_kind(&a_kind, &b_kind) {
                 unify_inferred_inferred(
-                    unit, a_tid, a_kind, a_func, a_span, b_tid, b_kind, b_func, b_span,
+                    unit,
+                    a_tid,
+                    a_kind,
+                    a_func,
+                    a_span,
+                    b_tid,
+                    b_kind,
+                    b_func,
+                    b_span,
+                    constraint_span,
                 )?;
                 Ok(())
             } else if is_sub_kind(&b_kind, &a_kind) {
                 unify_inferred_inferred(
-                    unit, b_tid, b_kind, b_func, b_span, a_tid, a_kind, a_func, a_span,
+                    unit,
+                    b_tid,
+                    b_kind,
+                    b_func,
+                    b_span,
+                    a_tid,
+                    a_kind,
+                    a_func,
+                    a_span,
+                    constraint_span,
                 )?;
                 Ok(())
             } else {
@@ -191,7 +209,7 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
                     let index = index.iter().position(|&i| i == tid).unwrap();
                     for (i, used) in table[index].clone().iter().enumerate() {
                         let ty = unit.env.use_ty(i, &ty, span);
-                        unify_ty_ty(unit, used, &ty)?;
+                        unify_ty_ty(unit, used, &ty, constraint_span)?;
                     }
                 }
             }
@@ -201,7 +219,7 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
                 Inferred::Unsigned => {
                     if !matches!(ty, Ty::Partial(Part::Int(_), _, _)) {
                         return Err(miette::miette!(
-                            labels = [span.label("here")],
+                            labels = [span.label("here"), constraint_span.label("here")],
                             "expected `{}` but found `{}`",
                             inferred.format(unit),
                             ty.format(unit),
@@ -213,7 +231,7 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
                 Inferred::Signed => {
                     let hir::Ty::Partial(hir::Part::Int(kind), _, _) = ty.clone() else {
                         return Err(miette::miette!(
-                            labels = [span.label("here")],
+                            labels = [span.label("here"), constraint_span.label("here")],
                             "expected `{}` but found `{}`",
                             inferred.format(unit),
                             ty.format(unit),
@@ -224,7 +242,7 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
 
                     if !kind.is_signed() {
                         return Err(miette::miette!(
-                            labels = [span.label("here")],
+                            labels = [span.label("here"), constraint_span.label("here")],
                             "expected `{}` but found `{}`",
                             inferred.format(unit),
                             ty.format(unit),
@@ -240,10 +258,18 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
             Ok(())
         }
         (Ty::Partial(a_part, a_args, a_span), Ty::Partial(b_part, b_args, b_span)) => {
-            unify_partial_partial(unit, &a_part, &a_args, a_span, &b_part, &b_args, b_span)
+            unify_partial_partial(
+                unit,
+                &a_part,
+                &a_args,
+                a_span,
+                &b_part,
+                &b_args,
+                b_span,
+                constraint_span,
+            )
         }
-        a => {
-            println!("{:?}", a);
+        _ => {
             unreachable!()
         }
     }
@@ -271,6 +297,7 @@ fn unify_inferred_inferred(
     b_kind: Inferred,
     b_func: Option<usize>,
     b_span: Span,
+    constraint_span: Span,
 ) -> Result<(), RetryOrError> {
     let a = Ty::Inferred(a_tid, a_kind, a_func, a_span);
     let b = Ty::Inferred(b_tid, b_kind, b_func, b_span);
@@ -306,7 +333,7 @@ fn unify_inferred_inferred(
             }
 
             unit.env.substitutions.insert(b, b_with_func.clone());
-            unify_ty_ty(unit, &a, &b_with_func)?;
+            unify_ty_ty(unit, &a, &b_with_func, constraint_span)?;
 
             Ok(())
         }
@@ -331,7 +358,7 @@ fn unify_inferred_inferred(
                         continue;
                     }
 
-                    unify_ty_ty(unit, &table_a, &table_b)?;
+                    unify_ty_ty(unit, &table_a, &table_b, constraint_span)?;
                 }
             }
 
@@ -342,31 +369,31 @@ fn unify_inferred_inferred(
     }
 }
 
-fn normalize(unit: &mut Unit, ty: &Ty) -> Result<Ty, RetryOrError> {
+fn normalize(unit: &mut Unit, ty: &Ty, constraint_span: Span) -> Result<Ty, RetryOrError> {
     if let Some(ty) = unit.env.substitute(ty) {
-        return normalize(unit, &ty.clone());
+        return normalize(unit, &ty.clone(), constraint_span);
     }
 
     match ty {
         Ty::Inferred(_, _, _, _) => Ok(ty.clone()),
         Ty::Partial(_, _, _) => Ok(ty.clone()),
         Ty::Field(adt, field, _) => {
-            let normalized = normalize_field(unit, adt, field)?;
+            let normalized = normalize_field(unit, adt, field, constraint_span)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
         Ty::Tuple(base, index, _) => {
-            let normalized = normalize_tuple(unit, base, *index)?;
+            let normalized = normalize_tuple(unit, base, *index, constraint_span)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
         Ty::Call(callee, arguments, _) => {
-            let normalized = normalize_call(unit, callee, arguments)?;
+            let normalized = normalize_call(unit, callee, arguments, constraint_span)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
         Ty::Pipe(lhs, rhs, arguments, _) => {
-            let normalized = normalize_pipe(unit, lhs, rhs, arguments)?;
+            let normalized = normalize_pipe(unit, lhs, rhs, arguments, constraint_span)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
@@ -379,7 +406,7 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
             assert!(func.is_none() || *func == Some(new_func));
 
             let new_ty = Ty::Inferred(Tid::new(), *kind, Some(new_func), *span);
-            unit.unify(ty.clone(), new_ty.clone());
+            unit.unify(ty.clone(), new_ty.clone(), *span);
             new_ty
         }
         Ty::Partial(part, arguments, span) => {
@@ -393,14 +420,14 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
             let base = with_func(unit, base, new_func);
 
             let ty = Ty::Field(Box::new(base), field, *span);
-            unit.normalize(ty.clone());
+            unit.normalize(ty.clone(), *span);
             ty
         }
         Ty::Tuple(base, index, span) => {
             let base = with_func(unit, base, new_func);
 
             let ty = Ty::Tuple(Box::new(base), *index, *span);
-            unit.normalize(ty.clone());
+            unit.normalize(ty.clone(), *span);
             ty
         }
         Ty::Call(callee, arguments, span) => {
@@ -411,7 +438,7 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
                 .collect();
 
             let ty = Ty::Call(Box::new(callee), arguments, *span);
-            unit.normalize(ty.clone());
+            unit.normalize(ty.clone(), *span);
             ty
         }
         Ty::Pipe(lhs, rhs, arguments, span) => {
@@ -423,63 +450,87 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
                 .collect();
 
             let ty = Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments, *span);
-            unit.normalize(ty.clone());
+            unit.normalize(ty.clone(), *span);
             ty
         }
     }
 }
 
-fn normalize_field(unit: &mut Unit, adt: &Ty, field: &str) -> Result<Ty, RetryOrError> {
-    let adt = normalize(unit, adt)?;
+fn normalize_field(
+    unit: &mut Unit,
+    adt: &Ty,
+    field: &str,
+    constraint_span: Span,
+) -> Result<Ty, RetryOrError> {
+    let adt = normalize(unit, adt, constraint_span)?;
 
     if let Ty::Partial(Part::Ref, args, _) = adt {
-        return normalize_field(unit, &args[0], field);
+        return normalize_field(unit, &args[0], field, constraint_span);
     }
 
     let (index, generics) = match adt {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Adt(index), generics, _) => (index, generics),
-        Ty::Partial(_, _, _) => return Err(miette::miette!("expected an ADT").into()),
+        Ty::Partial(_, _, _) => {
+            return Err(miette::miette!(
+                labels = [constraint_span.label("here")],
+                "tried to get field of non ADT type"
+            )
+            .into())
+        }
         Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
         }
     };
 
     let (_, ty) = unit.adts[index].find_field(field)?;
-    normalize(unit, &ty.specialize(&generics))
+    normalize(unit, &ty.specialize(&generics), constraint_span)
 }
 
-fn normalize_tuple(unit: &mut Unit, base: &Ty, index: usize) -> Result<Ty, RetryOrError> {
-    let base = normalize(unit, base)?;
+fn normalize_tuple(
+    unit: &mut Unit,
+    base: &Ty,
+    index: usize,
+    constraint_span: Span,
+) -> Result<Ty, RetryOrError> {
+    let base = normalize(unit, base, constraint_span)?;
 
     let (index, items) = match base {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Tuple, items, _) => (index, items),
-        Ty::Partial(_, _, _) => return Err(miette::miette!("expected a tuple").into()),
+        Ty::Partial(_, _, _) => {
+            return Err(miette::miette!(
+                labels = [constraint_span.label("here")],
+                "expected a tuple"
+            )
+            .into())
+        }
         Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
         }
     };
 
-    normalize(unit, &items[index])
+    normalize(unit, &items[index], constraint_span)
 }
 
 fn normalize_call(
     unit: &mut Unit,
     callee: &Ty,
     arguments: &[Option<Ty>],
+    constraint_span: Span,
 ) -> Result<Ty, RetryOrError> {
-    let callee = normalize(unit, callee)?;
+    let callee = normalize(unit, callee, constraint_span)?;
 
     let (mut callee_arguments, span) = match callee {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Func, arguments, span) => (arguments, span),
         Ty::Partial(_, _, span) => {
-            return Err(
-                miette::miette!(labels = [span.label("here")], "expected a function")
-                    .with_source_code(span.source)
-                    .into(),
+            return Err(miette::miette!(
+                labels = [span.label("here"), constraint_span.label("here")],
+                "expected a function"
             )
+            .with_source_code(span.source)
+            .into())
         }
         Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
@@ -492,6 +543,7 @@ fn normalize_call(
 
     if arguments.len() > callee_arguments.len() {
         return Err(miette::miette!(
+            labels = [span.label("here"), constraint_span.label("here")],
             "wrong number of arguments: expected {} but found {}",
             callee_arguments.len(),
             arguments.len()
@@ -503,7 +555,7 @@ fn normalize_call(
 
     for (a, b) in callee_arguments.iter().zip(arguments) {
         match b {
-            Some(b) => unify_ty_ty(unit, a, b)?,
+            Some(b) => unify_ty_ty(unit, a, b, constraint_span)?,
             None => remaining.push(a.clone()),
         }
     }
@@ -511,13 +563,13 @@ fn normalize_call(
     remaining.extend(callee_arguments.iter().skip(arguments.len()).cloned());
 
     if remaining.is_empty() {
-        return normalize(unit, &output);
+        return normalize(unit, &output, constraint_span);
     }
 
     remaining.push(output);
 
     let func = Ty::Partial(Part::Func, remaining, span);
-    normalize(unit, &func)
+    normalize(unit, &func, constraint_span)
 }
 
 fn normalize_pipe(
@@ -525,18 +577,20 @@ fn normalize_pipe(
     lhs: &Ty,
     rhs: &Ty,
     arguments: &[Option<Ty>],
+    constraint_span: Span,
 ) -> Result<Ty, RetryOrError> {
-    let rhs = normalize(unit, rhs)?;
+    let rhs = normalize(unit, rhs, constraint_span)?;
 
     let (mut rhs_arguments, span) = match rhs {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Func, arguments, span) => (arguments, span),
         Ty::Partial(_, _, span) => {
-            return Err(
-                miette::miette!(labels = [span.label("here")], "expected a function")
-                    .with_source_code(span.source)
-                    .into(),
+            return Err(miette::miette!(
+                labels = [span.label("here"), constraint_span.label("here")],
+                "expected a function"
             )
+            .with_source_code(span.source)
+            .into())
         }
         Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
@@ -549,6 +603,7 @@ fn normalize_pipe(
 
     if arguments.len() + has_slot as usize > rhs_arguments.len() {
         return Err(miette::miette!(
+            labels = [span.label("here"), constraint_span.label("here")],
             "wrong number of arguments: expected at most {} but found {}",
             rhs_arguments.len() - 1,
             arguments.len()
@@ -564,7 +619,7 @@ fn normalize_pipe(
 
     for arg in rhs_arguments.iter().skip(missing).zip(arguments) {
         match arg {
-            (a, Some(b)) => unify_ty_ty(unit, a, b)?,
+            (a, Some(b)) => unify_ty_ty(unit, a, b, constraint_span)?,
             (a, None) => tys.push(a.clone()),
         }
     }
@@ -572,13 +627,13 @@ fn normalize_pipe(
     match tys.len() {
         0 => panic!(),
         1 => {
-            unify_ty_ty(unit, lhs, &tys[0])?;
-            normalize(unit, &output)
+            unify_ty_ty(unit, lhs, &tys[0], constraint_span)?;
+            normalize(unit, &output, constraint_span)
         }
         _ => {
             let tuple = Ty::Partial(Part::Tuple, tys, span);
-            unify_ty_ty(unit, lhs, &tuple)?;
-            normalize(unit, &output)
+            unify_ty_ty(unit, lhs, &tuple, constraint_span)?;
+            normalize(unit, &output, constraint_span)
         }
     }
 }
@@ -590,6 +645,7 @@ fn part_eq(a_part: &Part, b_part: &Part) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn unify_partial_partial(
     unit: &mut Unit,
     a_part: &Part,
@@ -598,10 +654,15 @@ fn unify_partial_partial(
     b_part: &Part,
     b_args: &[Ty],
     b_span: Span,
+    constraint_span: Span,
 ) -> Result<(), RetryOrError> {
     if !part_eq(a_part, b_part) || a_args.len() != b_args.len() {
         return Err(miette::miette!(
-            labels = [a_span.label("here"), b_span.label("here")],
+            labels = [
+                a_span.label("here"),
+                b_span.label("here"),
+                constraint_span.label("here")
+            ],
             "expected `{}` but found `{}`",
             Ty::format_partial(unit, a_part, a_args),
             Ty::format_partial(unit, b_part, b_args),
@@ -611,7 +672,7 @@ fn unify_partial_partial(
     }
 
     for (a, b) in a_args.iter().zip(b_args) {
-        unify_ty_ty(unit, a, b)?;
+        unify_ty_ty(unit, a, b, constraint_span)?;
     }
 
     Ok(())

@@ -256,9 +256,9 @@ pub struct Pat {
 #[derive(Debug)]
 pub enum PatKind {
     Bind(Option<&'static str>),
-    Bool(bool, Span),
-    Tuple(Vec<Pat>, Span),
-    Variant(Path, Vec<Pat>, Span),
+    Bool(bool),
+    Tuple(Vec<Pat>),
+    Variant(Path, Vec<Pat>),
     List(Vec<Pat>, Option<Option<Box<Pat>>>),
 }
 

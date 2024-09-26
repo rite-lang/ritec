@@ -337,9 +337,14 @@ pub fn func_construct_ast(
                 unit.unify(
                     unit.funcs[id].body.ty.clone(),
                     unit.funcs[id].output.clone(),
+                    func.span,
                 );
             } else {
-                unit.unify(hir::Ty::void(func.span), unit.funcs[id].output.clone());
+                unit.unify(
+                    hir::Ty::void(func.span),
+                    unit.funcs[id].output.clone(),
+                    func.span,
+                );
             }
         }
     }
@@ -764,7 +769,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
         ast::Expr::Binary(op, lhs, rhs, span) => lower_binary(cx, *op, lhs, rhs, *span),
         ast::Expr::Unary(op, expr, span) => lower_unary(cx, *op, expr, *span),
-        ast::Expr::Let(pat, ty, expr) => lower_let(cx, pat, ty.as_ref(), expr),
+        ast::Expr::Let(pat, ty, expr) => lower_let(cx, pat, ty.as_ref(), expr, expr.span()),
         ast::Expr::Mut(name, ty, expr) => lower_mut(cx, name, ty.as_ref(), expr),
         ast::Expr::LetAssert(pat, expr) => lower_let_assert(cx, pat, expr),
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
@@ -862,8 +867,8 @@ fn lower_try(cx: &mut BodyCx, expr: &ast::Expr, span: Span) -> miette::Result<hi
         ),
     };
 
-    cx.unit.unify(input.ty.clone(), result_ty);
-    cx.unit.unify(cx.output.clone(), err_value.ty.clone());
+    cx.unit.unify(input.ty.clone(), result_ty, span);
+    cx.unit.unify(cx.output.clone(), err_value.ty.clone(), span);
 
     let err_expr = hir::Expr {
         kind: hir::ExprKind::Return(Box::new(err_value)),
@@ -911,7 +916,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
 
                 let ty = hir::Ty::any(path.span);
                 let outer = cx.locals[*id].ty.clone();
-                (cx.unit).unify(hir::Ty::new_ref(ty.clone(), path.span), outer);
+                (cx.unit).unify(hir::Ty::new_ref(ty.clone(), path.span), outer, path.span);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -938,7 +943,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 let expr = hir::Expr { kind, ty };
 
                 let ty = hir::Ty::any(path.span);
-                (cx.unit).unify(hir::Ty::new_ref(ty.clone(), path.span), outer);
+                (cx.unit).unify(hir::Ty::new_ref(ty.clone(), path.span), outer, path.span);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -1055,7 +1060,7 @@ fn lower_list(
 
     for expr in exprs {
         let arg = lower_expr(cx, expr)?;
-        cx.unit.unify(arg.ty.clone(), ty.clone());
+        cx.unit.unify(arg.ty.clone(), ty.clone(), span);
 
         args.push(arg);
     }
@@ -1065,7 +1070,7 @@ fn lower_list(
     let rest = match rest {
         Some(rest) => {
             let rest = lower_expr(cx, rest)?;
-            cx.unit.unify(rest.ty.clone(), ty.clone());
+            cx.unit.unify(rest.ty.clone(), ty.clone(), span);
             Some(Box::new(rest))
         }
         None => None,
@@ -1101,7 +1106,7 @@ fn lower_field(cx: &mut BodyCx, expr: &ast::Expr, name: &'static str) -> miette:
     let expr = lower_expr(cx, expr)?;
     let ty = hir::Ty::Field(Box::new(expr.ty.clone()), name, span);
     let kind = hir::ExprKind::Field(Box::new(expr), name);
-    cx.unit.normalize(ty.clone());
+    cx.unit.normalize(ty.clone(), span);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -1132,7 +1137,7 @@ fn lower_call(
 
     let ty = hir::Ty::Call(Box::new(func.ty.clone()), tys, span);
     let kind = hir::ExprKind::Call(Box::new(func), args);
-    cx.unit.normalize(ty.clone());
+    cx.unit.normalize(ty.clone(), span);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -1181,7 +1186,7 @@ fn lower_pipe(
         };
     }
 
-    cx.unit.normalize(ty.clone());
+    cx.unit.normalize(ty.clone(), span);
     Ok(pipee)
 }
 
@@ -1199,8 +1204,8 @@ fn lower_binary(
         ast::BinOp::Add | ast::BinOp::Sub | ast::BinOp::Mul | ast::BinOp::Div | ast::BinOp::Rem => {
             let ty = hir::Ty::inferred(hir::Inferred::Unsigned, span);
 
-            cx.unit.unify(lhs.ty.clone(), ty.clone());
-            cx.unit.unify(rhs.ty.clone(), ty.clone());
+            cx.unit.unify(lhs.ty.clone(), ty.clone(), span);
+            cx.unit.unify(rhs.ty.clone(), ty.clone(), span);
 
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
             Ok(hir::Expr { kind, ty })
@@ -1209,8 +1214,8 @@ fn lower_binary(
         ast::BinOp::Lt | ast::BinOp::Le | ast::BinOp::Gt | ast::BinOp::Ge => {
             let ty = hir::Ty::inferred(hir::Inferred::Unsigned, span);
 
-            cx.unit.unify(lhs.ty.clone(), ty.clone());
-            cx.unit.unify(rhs.ty.clone(), ty.clone());
+            cx.unit.unify(lhs.ty.clone(), ty.clone(), span);
+            cx.unit.unify(rhs.ty.clone(), ty.clone(), span);
 
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
             let ty = hir::Ty::bool(span);
@@ -1219,7 +1224,7 @@ fn lower_binary(
         }
 
         ast::BinOp::Eq | ast::BinOp::Ne => {
-            cx.unit.unify(lhs.ty.clone(), rhs.ty.clone());
+            cx.unit.unify(lhs.ty.clone(), rhs.ty.clone(), span);
 
             let ty = hir::Ty::bool(span);
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
@@ -1228,8 +1233,8 @@ fn lower_binary(
         ast::BinOp::And | ast::BinOp::Or => {
             let ty = hir::Ty::bool(span);
 
-            cx.unit.unify(lhs.ty.clone(), ty.clone());
-            cx.unit.unify(rhs.ty.clone(), ty.clone());
+            cx.unit.unify(lhs.ty.clone(), ty.clone(), span);
+            cx.unit.unify(rhs.ty.clone(), ty.clone(), span);
 
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
             Ok(hir::Expr { kind, ty })
@@ -1254,21 +1259,21 @@ fn lower_unary(
         ast::UnOp::Deref => {
             let ty = hir::Ty::any(span);
             let mut_ty = hir::Ty::Partial(hir::Part::Ref, vec![ty.clone()], span);
-            cx.unit.unify(expr.ty.clone(), mut_ty.clone());
+            cx.unit.unify(expr.ty.clone(), mut_ty.clone(), span);
 
             let kind = hir::ExprKind::Deref(Box::new(expr));
             Ok(hir::Expr { kind, ty })
         }
         ast::UnOp::Neg => {
             let ty = hir::Ty::inferred(hir::Inferred::Signed, span);
-            cx.unit.unify(expr.ty.clone(), ty.clone());
+            cx.unit.unify(expr.ty.clone(), ty.clone(), span);
 
             let kind = hir::ExprKind::Unary(hir::UnOp::Neg, Box::new(expr));
             Ok(hir::Expr { kind, ty })
         }
         ast::UnOp::Not => {
             let ty = hir::Ty::bool(span);
-            cx.unit.unify(expr.ty.clone(), ty.clone());
+            cx.unit.unify(expr.ty.clone(), ty.clone(), span);
 
             let kind = hir::ExprKind::Unary(hir::UnOp::Not, Box::new(expr));
             Ok(hir::Expr { kind, ty })
@@ -1281,12 +1286,13 @@ fn lower_let(
     pat: &ast::Pat,
     ty: Option<&ast::Ty>,
     expr: &ast::Expr,
+    span: Span,
 ) -> miette::Result<hir::Expr> {
     let value = lower_expr(cx, expr)?;
 
     if let Some(ty) = ty {
         let ty = lower_ty(&mut cx.as_ty_cx(), ty, expr.span())?;
-        cx.unit.unify(value.ty.clone(), ty);
+        cx.unit.unify(value.ty.clone(), ty, span);
     }
 
     let span = pat.span;
@@ -1341,7 +1347,7 @@ fn lower_mut(
 
     if let Some(ty) = ty {
         let ty = lower_ty(&mut cx.as_ty_cx(), ty, expr.span())?;
-        cx.unit.unify(value.ty.clone(), ty);
+        cx.unit.unify(value.ty.clone(), ty, span);
     }
 
     let id = cx.locals.len();
@@ -1467,7 +1473,7 @@ fn lower_closure(
     };
 
     let body = Box::new(lower_expr(&mut body_cx, body)?);
-    body_cx.unit.unify(body_cx.output.clone(), body.ty.clone());
+    (body_cx.unit).unify(body_cx.output.clone(), body.ty.clone(), span);
 
     let capture = body_cx.capture.take().unwrap();
     cx.capture = capture.parent.map(|parent| *parent);
@@ -1532,7 +1538,7 @@ fn lower_match(
         )?;
 
         cx.scope.truncate(scope);
-        cx.unit.unify(ty.clone(), arm_ty);
+        cx.unit.unify(ty.clone(), arm_ty, arm.span);
     }
 
     if tree.missing_patterns() {
@@ -1551,12 +1557,12 @@ fn lower_match(
 
 fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pat> {
     match pat.kind {
-        ast::PatKind::Bind(name) => Ok(Pat::Bind(name)),
-        ast::PatKind::Bool(b, span) => {
-            cx.unit.unify(ty.clone(), hir::Ty::bool(span));
-            Ok(Pat::Bool(b, span))
+        ast::PatKind::Bind(name) => Ok(Pat::Bind(name, pat.span)),
+        ast::PatKind::Bool(b) => {
+            cx.unit.unify(ty.clone(), hir::Ty::bool(pat.span), pat.span);
+            Ok(Pat::Bool(b, pat.span))
         }
-        ast::PatKind::Tuple(ref ast, span) => {
+        ast::PatKind::Tuple(ref ast) => {
             let mut pats = Vec::new();
             let mut tys = Vec::new();
 
@@ -1568,11 +1574,11 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             }
 
             let tuple = hir::Ty::Partial(hir::Part::Tuple, tys, pat.span);
-            cx.unit.unify(ty.clone(), tuple);
+            cx.unit.unify(ty.clone(), tuple, pat.span);
 
-            Ok(Pat::Tuple(pats, span))
+            Ok(Pat::Tuple(pats, pat.span))
         }
-        ast::PatKind::Variant(ref path, ref pats, span) => {
+        ast::PatKind::Variant(ref path, ref pats) => {
             let (adt, index) = find_variant(cx.unit, cx.module, path)?;
 
             let generics: Vec<_> = cx.unit.adts[adt]
@@ -1602,16 +1608,16 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             }
 
             let adt_ty = hir::Ty::Partial(hir::Part::Adt(adt), generics, path.span);
-            cx.unit.unify(ty.clone(), adt_ty);
+            cx.unit.unify(ty.clone(), adt_ty, pat.span);
 
-            Ok(Pat::Variant(adt, index, hir, span))
+            Ok(Pat::Variant(adt, index, hir, pat.span))
         }
         ast::PatKind::List(ref pats, ref rest) => {
             let span = pat.span;
 
             let mut rest = match rest {
                 Some(Some(rest)) => lower_pat(cx, rest, &hir::Ty::any(span))?,
-                Some(None) => Pat::Bind(None),
+                Some(None) => Pat::Bind(None, span),
                 None => Pat::List(None, span),
             };
 
@@ -1622,7 +1628,7 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
             }
 
             let ty = hir::Ty::Partial(hir::Part::List, vec![hir::Ty::any(span)], span);
-            cx.unit.unify(ty.clone(), ty);
+            cx.unit.unify(ty.clone(), ty, span);
 
             Ok(rest)
         }
@@ -1631,7 +1637,7 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
 
 #[derive(Clone, Debug)]
 enum Pat {
-    Bind(Option<&'static str>),
+    Bind(Option<&'static str>, Span),
     Bool(bool, Span),
     Tuple(Vec<Pat>, Span),
     Variant(usize, usize, Vec<(hir::Ty, Pat)>, Span),
@@ -1645,7 +1651,7 @@ fn build_pat_destructure(
     locals: &mut Vec<(&'static str, hir::Expr)>,
 ) -> miette::Result<()> {
     match pat {
-        Pat::Bind(name) => match name {
+        Pat::Bind(name, _) => match name {
             Some(name) => {
                 locals.push((name, input));
                 Ok(())
@@ -1660,7 +1666,7 @@ fn build_pat_destructure(
                     ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i, *span),
                 };
 
-                cx.unit.normalize(input.ty.clone());
+                cx.unit.normalize(input.ty.clone(), *span);
                 build_pat_destructure(cx, input, pat, locals)?;
             }
 
@@ -1690,7 +1696,7 @@ fn build_pat_destructure(
                 build_pat_destructure(cx, expr, head, locals)?;
 
                 let ty = hir::Ty::Partial(hir::Part::List, vec![ty], *span);
-                cx.unit.unify(input.ty.clone(), ty.clone());
+                cx.unit.unify(input.ty.clone(), ty.clone(), *span);
 
                 let expr = hir::Expr {
                     kind: hir::ExprKind::ListTail(Box::new(input.clone())),
@@ -1707,7 +1713,7 @@ fn build_pat_destructure(
 
 fn is_pat_irrefutable(cx: &mut BodyCx, pat: &Pat) -> bool {
     match pat {
-        Pat::Bind(_) => true,
+        Pat::Bind(_, _) => true,
         Pat::Bool(_, _) => false,
         Pat::Tuple(pats, _) => pats.iter().all(|pat| is_pat_irrefutable(cx, pat)),
         Pat::Variant(adt, _, fields, _) => {
@@ -1727,7 +1733,7 @@ fn build_pat_check(
     pat: Pat,
 ) -> miette::Result<Option<hir::Expr>> {
     match pat {
-        Pat::Bind(_) => Ok(None),
+        Pat::Bind(_, _) => Ok(None),
         Pat::Bool(value, span) => match value {
             true => Ok(Some(input)),
             false => Ok(Some(hir::Expr {
@@ -1816,7 +1822,7 @@ fn build_pat_check(
                 };
 
                 let ty = hir::Ty::Partial(hir::Part::List, vec![ty.clone()], span);
-                cx.unit.unify(input.ty.clone(), ty.clone());
+                cx.unit.unify(input.ty.clone(), ty.clone(), span);
 
                 let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
                 let tail_expr = hir::Expr {
@@ -1925,7 +1931,7 @@ fn build_match_tree(
                 .map(|(i, pat)| {
                     let kind = hir::ExprKind::TupleField(Box::new(input.clone()), i);
                     let ty = hir::Ty::Tuple(Box::new(input.ty.clone()), i, span);
-                    cx.unit.normalize(ty.clone());
+                    cx.unit.normalize(ty.clone(), span);
 
                     let input = hir::Expr { kind, ty };
                     (input, pat)
@@ -2008,7 +2014,7 @@ fn build_match_tree(
                     let head_ty = hir::Ty::any(span);
                     let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()], span);
 
-                    cx.unit.unify(input.ty.clone(), list_ty.clone());
+                    cx.unit.unify(input.ty.clone(), list_ty.clone(), span);
 
                     let head_kind = hir::ExprKind::ListHead(Box::new(input.clone()));
                     let head_expr = hir::Expr {
@@ -2053,7 +2059,7 @@ fn build_match_tree(
                 }
             }
         }
-        Pat::Bind(name) => {
+        Pat::Bind(name, span) => {
             if let Some(name) = name {
                 let id = cx.locals.len();
                 let ty = input.ty.clone();
@@ -2125,7 +2131,7 @@ fn build_match_tree(
                         locals,
                     )?;
 
-                    cx.unit.unify(r#true.clone(), r#false.clone());
+                    cx.unit.unify(r#true.clone(), r#false.clone(), span);
 
                     Ok(r#true)
                 }
@@ -2153,7 +2159,7 @@ fn build_match_tree(
                             locals.clone(),
                         )?;
 
-                        cx.unit.unify(ty.clone(), variant_ty);
+                        cx.unit.unify(ty.clone(), variant_ty, span);
                     }
 
                     Ok(ty)
@@ -2190,7 +2196,7 @@ fn build_match_tree(
                         locals,
                     )?;
 
-                    cx.unit.unify(some.clone(), none.clone());
+                    cx.unit.unify(some.clone(), none.clone(), span);
 
                     Ok(some)
                 }
@@ -2237,8 +2243,8 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<
             let r#true = build_match_expr(cx, *r#true, span)?.map(Box::new).unwrap();
             let r#false = build_match_expr(cx, *r#false, span)?.map(Box::new).unwrap();
 
-            cx.unit.unify(ty.clone(), r#true.ty.clone());
-            cx.unit.unify(ty.clone(), r#false.ty.clone());
+            cx.unit.unify(ty.clone(), r#true.ty.clone(), span);
+            cx.unit.unify(ty.clone(), r#false.ty.clone(), span);
 
             let r#match = hir::Match::Bool(r#true, r#false);
             let kind = hir::ExprKind::Match(Box::new(input), r#match);
@@ -2258,7 +2264,7 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<
                 match variant {
                     Some(subtree) => {
                         let expr = build_match_expr(cx, subtree, span)?.unwrap();
-                        cx.unit.unify(ty.clone(), expr.ty.clone());
+                        cx.unit.unify(ty.clone(), expr.ty.clone(), span);
                         exprs.push(Some(expr));
                     }
                     None => exprs.push(None),
@@ -2268,7 +2274,7 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<
             let default = build_match_expr(cx, *default, span)?.map(Box::new);
 
             if let Some(ref default) = default {
-                cx.unit.unify(ty.clone(), default.ty.clone());
+                cx.unit.unify(ty.clone(), default.ty.clone(), span);
             }
 
             let r#match = hir::Match::Adt(adt, exprs, default);
@@ -2293,8 +2299,8 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<
             let some = build_match_expr(cx, *some, span)?.map(Box::new).unwrap();
             let none = build_match_expr(cx, *none, span)?.map(Box::new).unwrap();
 
-            cx.unit.unify(ty.clone(), some.ty.clone());
-            cx.unit.unify(ty.clone(), none.ty.clone());
+            cx.unit.unify(ty.clone(), some.ty.clone(), span);
+            cx.unit.unify(ty.clone(), none.ty.clone(), span);
 
             let empty = hir::Expr {
                 kind: hir::ExprKind::ListEmpty(Box::new(input.clone())),

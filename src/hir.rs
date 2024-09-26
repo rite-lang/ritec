@@ -241,12 +241,12 @@ impl Unit {
         id
     }
 
-    pub fn unify(&mut self, a: Ty, b: Ty) {
-        self.env.unify(a, b);
+    pub fn unify(&mut self, a: Ty, b: Ty, span: Span) {
+        self.env.unify(a, b, span);
     }
 
-    pub fn normalize(&mut self, ty: Ty) {
-        self.env.normalize(ty);
+    pub fn normalize(&mut self, ty: Ty, span: Span) {
+        self.env.normalize(ty, span);
     }
 }
 
