@@ -476,6 +476,7 @@ fn normalize_field(
                 labels = [constraint_span.label("here")],
                 "tried to get field of non ADT type"
             )
+            .with_source_code(constraint_span)
             .into())
         }
         Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
@@ -503,6 +504,7 @@ fn normalize_tuple(
                 labels = [constraint_span.label("here")],
                 "expected a tuple"
             )
+            .with_source_code(constraint_span)
             .into())
         }
         Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
@@ -548,6 +550,7 @@ fn normalize_call(
             callee_arguments.len(),
             arguments.len()
         )
+        .with_source_code(constraint_span)
         .into());
     }
 
@@ -608,6 +611,7 @@ fn normalize_pipe(
             rhs_arguments.len() - 1,
             arguments.len()
         )
+        .with_source_code(constraint_span)
         .into());
     }
 
