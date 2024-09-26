@@ -1421,7 +1421,7 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Pat {
     Bind(Option<&'static str>),
     Bool(bool),
@@ -1843,35 +1843,131 @@ fn build_match_tree(
                 locals.push((id, input));
             }
 
-            let tree = match tree {
-                Match::None => {
-                    *tree = Match::Bind(Box::new(Match::None));
+            if matches!(tree, Match::None) {
+                *tree = Match::Bind(Box::new(Match::None));
+            }
 
-                    match tree {
-                        Match::Bind(tree) => tree,
-                        _ => unreachable!(),
+            let Some((input, pat)) = pats.next() else {
+                let expr = lower_expr(cx, body)?;
+                let ty = expr.ty.clone();
+
+                tree.visit(&mut move |tree| {
+                    if matches!(tree, Match::None) {
+                        *tree = Match::Leaf(locals.clone(), expr.clone());
                     }
-                }
-                Match::Leaf(_, _) => unreachable!(),
-                Match::Bind(tree) => tree,
-                Match::Bool { default, .. }
-                | Match::Adt { default, .. }
-                | Match::List { default, .. } => default,
+                });
+
+                return Ok(ty);
             };
 
-            match pats.next() {
-                Some((input, pat)) => build_match_tree(cx, input, pat, pats, tree, body, locals),
-                None => {
-                    let expr = lower_expr(cx, body)?;
-                    let ty = expr.ty.clone();
+            let pats = pats.collect::<Vec<_>>();
 
-                    tree.visit(&mut move |tree| {
-                        if matches!(tree, Match::None) {
-                            *tree = Match::Leaf(locals.clone(), expr.clone());
-                        }
-                    });
+            match tree {
+                Match::None => unreachable!(),
+                Match::Bind(subtree) => {
+                    build_match_tree(cx, input, pat, &mut pats.into_iter(), subtree, body, locals)
+                }
+                Match::Leaf(_, _) => unreachable!(),
+                Match::Bool {
+                    r#true,
+                    r#false,
+                    default,
+                    ..
+                } => {
+                    let (r#true, r#false) = match (r#true, r#false) {
+                        (Some(r#true), Some(r#false)) => (r#true, r#false),
+                        (Some(r#true), None) => (r#true, default),
+                        (None, Some(r#false)) => (default, r#false),
+                        (None, None) => unreachable!(),
+                    };
+
+                    let r#true = build_match_tree(
+                        cx,
+                        input.clone(),
+                        pat.clone(),
+                        &mut pats.clone().into_iter(),
+                        r#true,
+                        body,
+                        locals.clone(),
+                    )?;
+                    let r#false = build_match_tree(
+                        cx,
+                        input,
+                        pat,
+                        &mut pats.into_iter(),
+                        r#false,
+                        body,
+                        locals,
+                    )?;
+
+                    cx.unit.unify(r#true.clone(), r#false.clone());
+
+                    Ok(r#true)
+                }
+                Match::Adt {
+                    variants, default, ..
+                } => {
+                    let ty = build_match_tree(
+                        cx,
+                        input.clone(),
+                        pat.clone(),
+                        &mut pats.clone().into_iter(),
+                        default,
+                        body,
+                        locals.clone(),
+                    )?;
+
+                    for variant in variants.iter_mut().flatten() {
+                        let variant_ty = build_match_tree(
+                            cx,
+                            input.clone(),
+                            pat.clone(),
+                            &mut pats.clone().into_iter(),
+                            variant,
+                            body,
+                            locals.clone(),
+                        )?;
+
+                        cx.unit.unify(ty.clone(), variant_ty);
+                    }
 
                     Ok(ty)
+                }
+                Match::List {
+                    some,
+                    none,
+                    default,
+                    ..
+                } => {
+                    let (some, none) = match (some, none) {
+                        (Some(some), Some(none)) => (some, none),
+                        (Some(some), None) => (some, default),
+                        (None, Some(none)) => (default, none),
+                        (None, None) => unreachable!(),
+                    };
+
+                    let some = build_match_tree(
+                        cx,
+                        input.clone(),
+                        pat.clone(),
+                        &mut pats.clone().into_iter(),
+                        some,
+                        body,
+                        locals.clone(),
+                    )?;
+                    let none = build_match_tree(
+                        cx,
+                        input,
+                        pat,
+                        &mut pats.into_iter(),
+                        none,
+                        body,
+                        locals,
+                    )?;
+
+                    cx.unit.unify(some.clone(), none.clone());
+
+                    Ok(some)
                 }
             }
         }
