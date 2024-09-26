@@ -696,7 +696,7 @@ fn parse_pat(tokens: &mut TokenStream) -> miette::Result<Pat> {
         pats.push(pat);
     }
 
-    let kind = PatKind::Tuple(pats);
+    let kind = PatKind::Tuple(pats, span);
     Ok(Pat { kind, span })
 }
 
@@ -755,7 +755,7 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
             }
 
             if tokens.take(Token::LParen).is_none() {
-                let kind = PatKind::Variant(path, Vec::new());
+                let kind = PatKind::Variant(path, Vec::new(), span);
                 return Ok(Pat { kind, span });
             }
 
@@ -771,11 +771,11 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
 
             tokens.expect(Token::RParen)?;
 
-            let kind = PatKind::Variant(path, pats);
+            let kind = PatKind::Variant(path, pats, span);
             Ok(Pat { kind, span })
         }
         Token::True | Token::False => {
-            let kind = PatKind::Bool(token == Token::True);
+            let kind = PatKind::Bool(token == Token::True, span);
             tokens.consume();
             Ok(Pat { kind, span })
         }

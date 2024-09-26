@@ -213,7 +213,7 @@ fn lower_fields<'a>(
             Some(ref ty) => lower_ty(cx, ty, field.span)?,
             None => {
                 let index = cx.add_generic(field.name, field.span)?;
-                hir::Ty::Partial(hir::Part::Generic(index, None), Vec::new())
+                hir::Ty::Partial(hir::Part::Generic(index, None), Vec::new(), field.span)
             }
         };
 
@@ -281,7 +281,7 @@ pub fn func_register_ast(
                 captures: Vec::new(),
                 body: hir::Expr {
                     kind: hir::ExprKind::Void,
-                    ty: hir::Ty::void(),
+                    ty: hir::Ty::void(func.span),
                 },
             });
 
@@ -339,7 +339,7 @@ pub fn func_construct_ast(
                     unit.funcs[id].output.clone(),
                 );
             } else {
-                unit.unify(hir::Ty::void(), unit.funcs[id].output.clone());
+                unit.unify(hir::Ty::void(func.span), unit.funcs[id].output.clone());
             }
         }
     }
@@ -412,9 +412,9 @@ fn lower_output(cx: &mut TyCx, output: &Option<ast::Ty>, span: Span) -> miette::
 
 fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> {
     match ty {
-        ast::Ty::Void => Ok(hir::Ty::void()),
-        ast::Ty::Bool => Ok(hir::Ty::bool()),
-        ast::Ty::Str => Ok(hir::Ty::string()),
+        ast::Ty::Void => Ok(hir::Ty::void(span)),
+        ast::Ty::Bool => Ok(hir::Ty::bool(span)),
+        ast::Ty::Str => Ok(hir::Ty::string(span)),
         ast::Ty::Inferred => {
             if !cx.inferring {
                 return Err(miette::miette!(
@@ -431,10 +431,10 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
                 span,
             ))
         }
-        ast::Ty::Int(kind) => Ok(hir::Ty::Partial(hir::Part::Int(*kind), Vec::new())),
+        ast::Ty::Int(kind) => Ok(hir::Ty::Partial(hir::Part::Int(*kind), Vec::new(), span)),
         ast::Ty::Ref(ty) => {
             let ty = lower_ty(cx, ty, span)?;
-            Ok(hir::Ty::Partial(hir::Part::Ref, vec![ty]))
+            Ok(hir::Ty::Partial(hir::Part::Ref, vec![ty], span))
         }
         ast::Ty::Tuple(tys) => {
             let mut args = Vec::new();
@@ -443,7 +443,7 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
                 args.push(lower_ty(cx, ty, span)?);
             }
 
-            Ok(hir::Ty::Partial(hir::Part::Tuple, args))
+            Ok(hir::Ty::Partial(hir::Part::Tuple, args, span))
         }
         ast::Ty::Item(path, generics) => {
             let index = find_adt(cx.unit, cx.module, path)?;
@@ -488,11 +488,11 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
                 }
             };
 
-            Ok(hir::Ty::Partial(hir::Part::Adt(index), generics))
+            Ok(hir::Ty::Partial(hir::Part::Adt(index), generics, span))
         }
         ast::Ty::List(ty) => {
             let ty = lower_ty(cx, ty, span)?;
-            Ok(hir::Ty::Partial(hir::Part::List, vec![ty]))
+            Ok(hir::Ty::Partial(hir::Part::List, vec![ty], span))
         }
         ast::Ty::Func(input, output) => {
             let mut args = Vec::new();
@@ -511,13 +511,14 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
                 )),
             }
 
-            Ok(hir::Ty::Partial(hir::Part::Func, args))
+            Ok(hir::Ty::Partial(hir::Part::Func, args, span))
         }
         ast::Ty::Generic(generic) => {
             if let Some(index) = cx.generics.iter().position(|g| g.name == generic.name) {
                 return Ok(hir::Ty::Partial(
                     hir::Part::Generic(index, cx.func),
                     Vec::new(),
+                    span,
                 ));
             }
 
@@ -534,6 +535,7 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
             Ok(hir::Ty::Partial(
                 hir::Part::Generic(index, cx.func),
                 Vec::new(),
+                span,
             ))
         }
     }
@@ -746,7 +748,7 @@ enum Capture {
 
 fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
     match ast {
-        ast::Expr::Void(_) => lower_void(cx),
+        ast::Expr::Void(span) => lower_void(cx, *span),
         ast::Expr::Int(negative, base, digits, span) => {
             lower_int(cx, *negative, *base, digits, *span)
         }
@@ -773,8 +775,8 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
     }
 }
 
-fn lower_void(_cx: &mut BodyCx) -> miette::Result<hir::Expr> {
-    let ty = hir::Ty::void();
+fn lower_void(_cx: &mut BodyCx, span: Span) -> miette::Result<hir::Expr> {
+    let ty = hir::Ty::void(span);
     let kind = hir::ExprKind::Void;
     Ok(hir::Expr { kind, ty })
 }
@@ -797,15 +799,15 @@ fn lower_int(
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_bool(_cx: &mut BodyCx, value: bool, _span: Span) -> miette::Result<hir::Expr> {
-    let ty = hir::Ty::bool();
+fn lower_bool(_cx: &mut BodyCx, value: bool, span: Span) -> miette::Result<hir::Expr> {
+    let ty = hir::Ty::bool(span);
     let kind = hir::ExprKind::Bool(value);
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_string(_cx: &mut BodyCx, value: &'static str, _span: Span) -> miette::Result<hir::Expr> {
-    let ty = hir::Ty::string();
-    let kind = hir::ExprKind::StringLiteral(value);
+fn lower_string(_cx: &mut BodyCx, value: &'static str, span: Span) -> miette::Result<hir::Expr> {
+    let ty = hir::Ty::string(span);
+    let kind = hir::ExprKind::String(value);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -835,7 +837,11 @@ fn lower_try(cx: &mut BodyCx, expr: &ast::Expr, span: Span) -> miette::Result<hi
     let ok_ty = hir::Ty::any(span);
     let err_ty = hir::Ty::any(span);
 
-    let result_ty = hir::Ty::Partial(hir::Part::Adt(result), vec![ok_ty.clone(), err_ty.clone()]);
+    let result_ty = hir::Ty::Partial(
+        hir::Part::Adt(result),
+        vec![ok_ty.clone(), err_ty.clone()],
+        span,
+    );
 
     let ok_value = hir::Expr {
         kind: hir::ExprKind::VariantField(Box::new(value.clone()), 0, 0),
@@ -852,6 +858,7 @@ fn lower_try(cx: &mut BodyCx, expr: &ast::Expr, span: Span) -> miette::Result<hi
         ty: hir::Ty::Partial(
             hir::Part::Adt(result),
             vec![hir::Ty::any(span), err_ty.clone()],
+            span,
         ),
     };
 
@@ -860,7 +867,7 @@ fn lower_try(cx: &mut BodyCx, expr: &ast::Expr, span: Span) -> miette::Result<hi
 
     let err_expr = hir::Expr {
         kind: hir::ExprKind::Return(Box::new(err_value)),
-        ty: hir::Ty::void(),
+        ty: hir::Ty::void(span),
     };
 
     let r#match = hir::Match::Adt(result, vec![Some(ok_value), Some(err_expr)], None);
@@ -872,7 +879,7 @@ fn lower_try(cx: &mut BodyCx, expr: &ast::Expr, span: Span) -> miette::Result<hi
     let exprs = vec![
         hir::Expr {
             kind: hir::ExprKind::Let(local, Box::new(input)),
-            ty: hir::Ty::void(),
+            ty: hir::Ty::void(span),
         },
         expr,
     ];
@@ -904,7 +911,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
 
                 let ty = hir::Ty::any(path.span);
                 let outer = cx.locals[*id].ty.clone();
-                cx.unit.unify(hir::Ty::new_ref(ty.clone()), outer);
+                (cx.unit).unify(hir::Ty::new_ref(ty.clone(), path.span), outer);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -931,7 +938,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 let expr = hir::Expr { kind, ty };
 
                 let ty = hir::Ty::any(path.span);
-                cx.unit.unify(hir::Ty::new_ref(ty.clone()), outer);
+                (cx.unit).unify(hir::Ty::new_ref(ty.clone(), path.span), outer);
 
                 let kind = hir::ExprKind::Deref(Box::new(expr));
                 return Ok(hir::Expr { kind, ty });
@@ -955,7 +962,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
             parts.push(cx.unit.env.use_ty(column, output, path.span));
 
             let kind = hir::ExprKind::Func(id);
-            let ty = hir::Ty::Partial(hir::Part::Func, parts);
+            let ty = hir::Ty::Partial(hir::Part::Func, parts, path.span);
 
             Ok(hir::Expr { kind, ty })
         }
@@ -969,12 +976,12 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
                 .collect();
 
             if variant.fields.is_empty() {
-                let ty = hir::Ty::Partial(hir::Part::Adt(adt), generics);
+                let ty = hir::Ty::Partial(hir::Part::Adt(adt), generics, path.span);
                 let kind = hir::ExprKind::Variant(adt, index);
                 return Ok(hir::Expr { kind, ty });
             }
 
-            let output = hir::Ty::Partial(hir::Part::Adt(adt), generics.clone());
+            let output = hir::Ty::Partial(hir::Part::Adt(adt), generics.clone(), path.span);
 
             let mut parts = Vec::new();
 
@@ -984,7 +991,7 @@ fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
 
             parts.push(output);
 
-            let ty = hir::Ty::Partial(hir::Part::Func, parts);
+            let ty = hir::Ty::Partial(hir::Part::Func, parts, path.span);
             let kind = hir::ExprKind::Variant(adt, index);
             Ok(hir::Expr { kind, ty })
         }
@@ -1022,13 +1029,17 @@ fn lower_tuple(cx: &mut BodyCx, exprs: &[ast::Expr]) -> miette::Result<hir::Expr
     let mut args = Vec::new();
     let mut tys = Vec::new();
 
+    let start_span = exprs.first().unwrap().span();
+    let end_span = exprs.last().unwrap().span();
+    let span = start_span.join(end_span);
+
     for expr in exprs {
         let arg = lower_expr(cx, expr)?;
         tys.push(arg.ty.clone());
         args.push(arg);
     }
 
-    let ty = hir::Ty::Partial(hir::Part::Tuple, tys);
+    let ty = hir::Ty::Partial(hir::Part::Tuple, tys, span);
     let kind = hir::ExprKind::Tuple(args);
     Ok(hir::Expr { kind, ty })
 }
@@ -1049,7 +1060,7 @@ fn lower_list(
         args.push(arg);
     }
 
-    let ty = hir::Ty::Partial(hir::Part::List, vec![ty]);
+    let ty = hir::Ty::Partial(hir::Part::List, vec![ty], span);
 
     let rest = match rest {
         Some(rest) => {
@@ -1132,11 +1143,37 @@ fn lower_pipe(
     let mut ty = pipee.ty.clone();
 
     for expr in exprs {
-        let expr = lower_expr(cx, expr)?;
+        let (expr, tys, args) = match expr {
+            ast::Expr::Call(func, arguments) => {
+                let expr = lower_expr(cx, func)?;
+                let mut tys = Vec::new();
+                let mut args = Vec::new();
 
-        ty = hir::Ty::Pipe(Box::new(ty), Box::new(expr.ty.clone()));
+                for arg in arguments {
+                    match arg {
+                        Some(arg) => {
+                            let arg = lower_expr(cx, arg)?;
+                            tys.push(Some(arg.ty.clone()));
+                            args.push(Some(arg));
+                        }
+                        None => {
+                            tys.push(None);
+                            args.push(None);
+                        }
+                    }
+                }
+
+                (Box::new(expr), tys, args)
+            }
+            expr => {
+                let expr = lower_expr(cx, expr)?;
+                (Box::new(expr), Vec::new(), Vec::new())
+            }
+        };
+
+        ty = hir::Ty::Pipe(Box::new(ty), Box::new(expr.ty.clone()), tys);
         pipee = hir::Expr {
-            kind: hir::ExprKind::Pipe(Box::new(pipee), Box::new(expr)),
+            kind: hir::ExprKind::Pipe(Box::new(pipee), expr, args),
             ty: ty.clone(),
         };
     }
@@ -1173,7 +1210,7 @@ fn lower_binary(
             cx.unit.unify(rhs.ty.clone(), ty.clone());
 
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
-            let ty = hir::Ty::bool();
+            let ty = hir::Ty::bool(span);
 
             Ok(hir::Expr { kind, ty })
         }
@@ -1181,12 +1218,12 @@ fn lower_binary(
         ast::BinOp::Eq | ast::BinOp::Ne => {
             cx.unit.unify(lhs.ty.clone(), rhs.ty.clone());
 
-            let ty = hir::Ty::bool();
+            let ty = hir::Ty::bool(span);
             let kind = hir::ExprKind::Binary(op, Box::new(lhs), Box::new(rhs));
             Ok(hir::Expr { kind, ty })
         }
         ast::BinOp::And | ast::BinOp::Or => {
-            let ty = hir::Ty::bool();
+            let ty = hir::Ty::bool(span);
 
             cx.unit.unify(lhs.ty.clone(), ty.clone());
             cx.unit.unify(rhs.ty.clone(), ty.clone());
@@ -1207,13 +1244,13 @@ fn lower_unary(
 
     match op {
         ast::UnOp::Ref => {
-            let ty = hir::Ty::Partial(hir::Part::Ref, vec![expr.ty.clone()]);
+            let ty = hir::Ty::Partial(hir::Part::Ref, vec![expr.ty.clone()], span);
             let kind = hir::ExprKind::Ref(Box::new(expr));
             Ok(hir::Expr { kind, ty })
         }
         ast::UnOp::Deref => {
             let ty = hir::Ty::any(span);
-            let mut_ty = hir::Ty::Partial(hir::Part::Ref, vec![ty.clone()]);
+            let mut_ty = hir::Ty::Partial(hir::Part::Ref, vec![ty.clone()], span);
             cx.unit.unify(expr.ty.clone(), mut_ty.clone());
 
             let kind = hir::ExprKind::Deref(Box::new(expr));
@@ -1227,7 +1264,7 @@ fn lower_unary(
             Ok(hir::Expr { kind, ty })
         }
         ast::UnOp::Not => {
-            let ty = hir::Ty::bool();
+            let ty = hir::Ty::bool(span);
             cx.unit.unify(expr.ty.clone(), ty.clone());
 
             let kind = hir::ExprKind::Unary(hir::UnOp::Not, Box::new(expr));
@@ -1281,12 +1318,12 @@ fn lower_let(
         let kind = hir::ExprKind::Let(id, Box::new(expr));
         exprs.push(hir::Expr {
             kind,
-            ty: hir::Ty::void(),
+            ty: hir::Ty::void(span),
         });
     }
 
     let kind = hir::ExprKind::Block(exprs);
-    let ty = hir::Ty::void();
+    let ty = hir::Ty::void(span);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -1296,6 +1333,7 @@ fn lower_mut(
     ty: Option<&ast::Ty>,
     expr: &ast::Expr,
 ) -> miette::Result<hir::Expr> {
+    let span = expr.span();
     let value = lower_expr(cx, expr)?;
 
     if let Some(ty) = ty {
@@ -1304,7 +1342,7 @@ fn lower_mut(
     }
 
     let id = cx.locals.len();
-    let ty = hir::Ty::Partial(hir::Part::Ref, vec![value.ty.clone()]);
+    let ty = hir::Ty::Partial(hir::Part::Ref, vec![value.ty.clone()], expr.span());
 
     cx.locals.push(hir::Local {
         mutable: true,
@@ -1318,17 +1356,17 @@ fn lower_mut(
     let expr = hir::Expr { kind, ty: value_ty };
 
     let kind = hir::ExprKind::Let(id, Box::new(expr));
-    let ty = hir::Ty::void();
+    let ty = hir::Ty::void(span);
     Ok(hir::Expr { kind, ty })
 }
 
 fn lower_let_assert(
     cx: &mut BodyCx,
-    pat: &ast::Pat,
+    ast_pat: &ast::Pat,
     expr: &ast::Expr,
 ) -> miette::Result<hir::Expr> {
     let input = lower_expr(cx, expr)?;
-    let pat = lower_pat(cx, pat, &input.ty)?;
+    let pat = lower_pat(cx, ast_pat, &input.ty)?;
 
     let mut locals = Vec::new();
     build_pat_destructure(cx, input.clone(), &pat, &mut locals)?;
@@ -1349,12 +1387,12 @@ fn lower_let_assert(
         let kind = hir::ExprKind::Let(id, Box::new(expr));
         exprs.push(hir::Expr {
             kind,
-            ty: hir::Ty::void(),
+            ty: hir::Ty::void(ast_pat.span),
         });
     }
 
     let kind = hir::ExprKind::Block(exprs);
-    let ty = hir::Ty::void();
+    let ty = hir::Ty::void(ast_pat.span);
 
     let expr = hir::Expr { kind, ty };
 
@@ -1362,12 +1400,12 @@ fn lower_let_assert(
         Some(check) => {
             let panic = hir::Expr {
                 kind: hir::ExprKind::Panic("assertion failed"),
-                ty: hir::Ty::void(),
+                ty: hir::Ty::void(ast_pat.span),
             };
 
             let r#match = hir::Match::Bool(Box::new(expr), Box::new(panic));
             let kind = hir::ExprKind::Match(Box::new(check), r#match);
-            let ty = hir::Ty::void();
+            let ty = hir::Ty::void(ast_pat.span);
             Ok(hir::Expr { kind, ty })
         }
         None => Ok(expr),
@@ -1375,11 +1413,13 @@ fn lower_let_assert(
 }
 
 fn lower_assign(cx: &mut BodyCx, lhs: &ast::Expr, rhs: &ast::Expr) -> miette::Result<hir::Expr> {
+    let span = lhs.span().join(rhs.span());
+
     let lhs = lower_expr(cx, lhs)?;
     let rhs = lower_expr(cx, rhs)?;
 
     let kind = hir::ExprKind::Assign(Box::new(lhs), Box::new(rhs));
-    let ty = hir::Ty::void();
+    let ty = hir::Ty::void(span);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -1403,7 +1443,8 @@ fn lower_closure(
         });
     }
 
-    let output = hir::Ty::any(body.span());
+    let span = body.span();
+    let output = hir::Ty::any(span);
 
     let mut body_cx = BodyCx {
         unit: cx.unit,
@@ -1457,7 +1498,7 @@ fn lower_closure(
         .collect();
 
     let kind = hir::ExprKind::Closure(locals, captured, body);
-    let ty = hir::Ty::Partial(hir::Part::Func, parts);
+    let ty = hir::Ty::Partial(hir::Part::Func, parts, span);
     Ok(hir::Expr { kind, ty })
 }
 
@@ -1508,11 +1549,11 @@ fn lower_match(
 fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pat> {
     match pat.kind {
         ast::PatKind::Bind(name) => Ok(Pat::Bind(name)),
-        ast::PatKind::Bool(b) => {
-            cx.unit.unify(ty.clone(), hir::Ty::bool());
-            Ok(Pat::Bool(b))
+        ast::PatKind::Bool(b, span) => {
+            cx.unit.unify(ty.clone(), hir::Ty::bool(span));
+            Ok(Pat::Bool(b, span))
         }
-        ast::PatKind::Tuple(ref ast) => {
+        ast::PatKind::Tuple(ref ast, span) => {
             let mut pats = Vec::new();
             let mut tys = Vec::new();
 
@@ -1523,12 +1564,12 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
                 tys.push(ty);
             }
 
-            let tuple = hir::Ty::Partial(hir::Part::Tuple, tys);
+            let tuple = hir::Ty::Partial(hir::Part::Tuple, tys, pat.span);
             cx.unit.unify(ty.clone(), tuple);
 
-            Ok(Pat::Tuple(pats))
+            Ok(Pat::Tuple(pats, span))
         }
-        ast::PatKind::Variant(ref path, ref pats) => {
+        ast::PatKind::Variant(ref path, ref pats, span) => {
             let (adt, index) = find_variant(cx.unit, cx.module, path)?;
 
             let generics: Vec<_> = cx.unit.adts[adt]
@@ -1557,10 +1598,10 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
                 hir.push((ty, pat));
             }
 
-            let adt_ty = hir::Ty::Partial(hir::Part::Adt(adt), generics);
+            let adt_ty = hir::Ty::Partial(hir::Part::Adt(adt), generics, path.span);
             cx.unit.unify(ty.clone(), adt_ty);
 
-            Ok(Pat::Variant(adt, index, hir))
+            Ok(Pat::Variant(adt, index, hir, span))
         }
         ast::PatKind::List(ref pats, ref rest) => {
             let span = pat.span;
@@ -1577,7 +1618,7 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
                 rest = Pat::List(Some(Box::new((pat, rest))), span);
             }
 
-            let ty = hir::Ty::Partial(hir::Part::List, vec![hir::Ty::any(span)]);
+            let ty = hir::Ty::Partial(hir::Part::List, vec![hir::Ty::any(span)], span);
             cx.unit.unify(ty.clone(), ty);
 
             Ok(rest)
@@ -1588,9 +1629,9 @@ fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pa
 #[derive(Clone, Debug)]
 enum Pat {
     Bind(Option<&'static str>),
-    Bool(bool),
-    Tuple(Vec<Pat>),
-    Variant(usize, usize, Vec<(hir::Ty, Pat)>),
+    Bool(bool, Span),
+    Tuple(Vec<Pat>, Span),
+    Variant(usize, usize, Vec<(hir::Ty, Pat)>, Span),
     List(Option<Box<(Pat, Pat)>>, Span),
 }
 
@@ -1608,8 +1649,8 @@ fn build_pat_destructure(
             }
             None => Ok(()),
         },
-        Pat::Bool(_) => Ok(()),
-        Pat::Tuple(pats) => {
+        Pat::Bool(_, _) => Ok(()),
+        Pat::Tuple(pats, _) => {
             for (i, pat) in pats.iter().enumerate() {
                 let input = hir::Expr {
                     kind: hir::ExprKind::TupleField(Box::new(input.clone()), i),
@@ -1622,7 +1663,7 @@ fn build_pat_destructure(
 
             Ok(())
         }
-        Pat::Variant(_, variant, fields) => {
+        Pat::Variant(_, variant, fields, _) => {
             for (i, (ty, pat)) in fields.iter().enumerate() {
                 let input = hir::Expr {
                     kind: hir::ExprKind::VariantField(Box::new(input.clone()), *variant, i),
@@ -1645,7 +1686,7 @@ fn build_pat_destructure(
 
                 build_pat_destructure(cx, expr, head, locals)?;
 
-                let ty = hir::Ty::Partial(hir::Part::List, vec![ty]);
+                let ty = hir::Ty::Partial(hir::Part::List, vec![ty], *span);
                 cx.unit.unify(input.ty.clone(), ty.clone());
 
                 let expr = hir::Expr {
@@ -1664,9 +1705,9 @@ fn build_pat_destructure(
 fn is_pat_irrefutable(cx: &mut BodyCx, pat: &Pat) -> bool {
     match pat {
         Pat::Bind(_) => true,
-        Pat::Bool(_) => false,
-        Pat::Tuple(pats) => pats.iter().all(|pat| is_pat_irrefutable(cx, pat)),
-        Pat::Variant(adt, _, fields) => {
+        Pat::Bool(_, _) => false,
+        Pat::Tuple(pats, _) => pats.iter().all(|pat| is_pat_irrefutable(cx, pat)),
+        Pat::Variant(adt, _, fields, _) => {
             if cx.unit.adts[*adt].variants.len() > 1 {
                 return false;
             }
@@ -1684,14 +1725,14 @@ fn build_pat_check(
 ) -> miette::Result<Option<hir::Expr>> {
     match pat {
         Pat::Bind(_) => Ok(None),
-        Pat::Bool(value) => match value {
+        Pat::Bool(value, span) => match value {
             true => Ok(Some(input)),
             false => Ok(Some(hir::Expr {
                 kind: hir::ExprKind::Unary(hir::UnOp::Not, Box::new(input)),
-                ty: hir::Ty::bool(),
+                ty: hir::Ty::bool(span),
             })),
         },
-        Pat::Tuple(pats) => {
+        Pat::Tuple(pats, span) => {
             let mut items = Vec::new();
 
             for (i, pat) in pats.into_iter().enumerate() {
@@ -1714,16 +1755,16 @@ fn build_pat_check(
             for item in items.into_iter().rev() {
                 expr = hir::Expr {
                     kind: hir::ExprKind::Binary(ast::BinOp::And, Box::new(expr), Box::new(item)),
-                    ty: hir::Ty::bool(),
+                    ty: hir::Ty::bool(span),
                 };
             }
 
             Ok(Some(expr))
         }
-        Pat::Variant(_, variant, fields) => {
+        Pat::Variant(_, variant, fields, span) => {
             let check = hir::Expr {
                 kind: hir::ExprKind::IsVariant(Box::new(input.clone()), variant),
-                ty: hir::Ty::bool(),
+                ty: hir::Ty::bool(span),
             };
 
             let mut items = Vec::new();
@@ -1749,13 +1790,13 @@ fn build_pat_check(
                     Box::new(check),
                     Box::new(items.pop().unwrap()),
                 ),
-                ty: hir::Ty::bool(),
+                ty: hir::Ty::bool(span),
             };
 
             for item in items.into_iter().rev() {
                 expr = hir::Expr {
                     kind: hir::ExprKind::Binary(ast::BinOp::And, Box::new(expr), Box::new(item)),
-                    ty: hir::Ty::bool(),
+                    ty: hir::Ty::bool(span),
                 };
             }
 
@@ -1771,7 +1812,7 @@ fn build_pat_check(
                     ty: ty.clone(),
                 };
 
-                let ty = hir::Ty::Partial(hir::Part::List, vec![ty.clone()]);
+                let ty = hir::Ty::Partial(hir::Part::List, vec![ty.clone()], span);
                 cx.unit.unify(input.ty.clone(), ty.clone());
 
                 let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
@@ -1782,12 +1823,12 @@ fn build_pat_check(
 
                 let empty = hir::Expr {
                     kind: hir::ExprKind::ListEmpty(Box::new(input)),
-                    ty: hir::Ty::bool(),
+                    ty: hir::Ty::bool(span),
                 };
 
                 let not_empty = hir::Expr {
                     kind: hir::ExprKind::Unary(hir::UnOp::Not, Box::new(empty.clone())),
-                    ty: hir::Ty::bool(),
+                    ty: hir::Ty::bool(span),
                 };
 
                 let head = build_pat_check(cx, head_expr, head_pat)?;
@@ -1799,7 +1840,7 @@ fn build_pat_check(
                         let tail = Box::new(tail);
                         Some(hir::Expr {
                             kind: hir::ExprKind::Binary(ast::BinOp::And, head, tail),
-                            ty: hir::Ty::bool(),
+                            ty: hir::Ty::bool(span),
                         })
                     }
                     (Some(expr), None) => Some(expr),
@@ -1814,14 +1855,14 @@ fn build_pat_check(
                             Box::new(not_empty),
                             Box::new(check),
                         ),
-                        ty: hir::Ty::bool(),
+                        ty: hir::Ty::bool(span),
                     })),
                     None => Ok(Some(empty)),
                 }
             }
             None => {
                 let kind = hir::ExprKind::ListEmpty(Box::new(input));
-                let ty = hir::Ty::bool();
+                let ty = hir::Ty::bool(span);
                 Ok(Some(hir::Expr { kind, ty }))
             }
         },
@@ -1838,7 +1879,7 @@ fn build_match_tree(
     mut locals: Vec<(usize, hir::Expr)>,
 ) -> miette::Result<hir::Ty> {
     match pat {
-        Pat::Bool(value) => {
+        Pat::Bool(value, _) => {
             let Match::Bool {
                 r#true,
                 r#false,
@@ -1874,7 +1915,7 @@ fn build_match_tree(
                 }
             }
         }
-        Pat::Tuple(items) => {
+        Pat::Tuple(items, _) => {
             let items = items
                 .into_iter()
                 .enumerate()
@@ -1893,7 +1934,7 @@ fn build_match_tree(
             let (input, pat) = pats.next().unwrap();
             build_match_tree(cx, input, pat, &mut pats, tree, body, locals)
         }
-        Pat::Variant(adt, variant, fields) => {
+        Pat::Variant(adt, variant, fields, _) => {
             let variants = cx.unit.adts[adt].variants.len();
             let Match::Adt {
                 variants, default, ..
@@ -1962,7 +2003,7 @@ fn build_match_tree(
                     };
 
                     let head_ty = hir::Ty::any(span);
-                    let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()]);
+                    let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()], span);
 
                     cx.unit.unify(input.ty.clone(), list_ty.clone());
 
@@ -2254,7 +2295,7 @@ fn build_match_expr(cx: &mut BodyCx, tree: Match, span: Span) -> miette::Result<
 
             let empty = hir::Expr {
                 kind: hir::ExprKind::ListEmpty(Box::new(input.clone())),
-                ty: hir::Ty::bool(),
+                ty: hir::Ty::bool(span),
             };
 
             let r#match = hir::Match::Bool(none, some);

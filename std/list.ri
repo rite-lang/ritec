@@ -21,71 +21,71 @@ pub fn reverse(xs: ['a]) -> ['a]
   | [] -> []
 
 /// Check if all elements of a list satisfy a predicate.
-pub fn all(f: fn('a) -> bool, xs: ['a]) -> bool
+pub fn all(xs: ['a], f: fn('a) -> bool) -> bool
   match xs
-  | [x, ..xs] -> f(x) && all(f, xs)
+  | [x, ..xs] -> f(x) && all(xs, f)
   | [] -> true
 
 /// Check if any elements of a list satisfy a predicate.
-pub fn any(f: fn('a) -> bool, xs: ['a]) -> bool
+pub fn any(xs: ['a], f: fn('a) -> bool) -> bool
   match xs
-  | [x, ..xs] -> f(x) || any(f, xs)
+  | [x, ..xs] -> f(x) || any(xs, f)
   | [] -> false
 
 /// Check if a list contains an element.
-pub fn contains(x: 'a, xs: ['a]) -> bool
+pub fn contains(xs: ['a], x: 'a) -> bool
   match xs
-  | [y, ..xs] -> x == y || contains(x, xs)
+  | [y, ..xs] -> x == y || contains(xs, x)
   | [] -> false
 
 /// Count the number of elements in a list that satisfy a predicate.
-pub fn count(f: fn('a) -> bool, xs: ['a]) -> int
+pub fn count(xs: ['a], f: fn('a) -> bool) -> int
   match xs
   | [x, ..xs] ->
     match f(x)
-    | true -> 1 + count(f, xs)
-    | false -> count(f, xs)
+    | true -> 1 + count(xs, f)
+    | false -> count(xs, f)
   | [] -> 0
 
 /// Find the first element of a list that satisfies a predicate.
-pub fn find(f: fn('a) -> bool, xs: ['a]) -> Result<'a, void>
+pub fn find(xs: ['a], f: fn('a) -> bool) -> Result<'a, void>
   match xs
   | [x, ..xs] ->
     match f(x)
     | true -> Ok(x)
-    | false -> find(f, xs)
+    | false -> find(xs, f)
   | [] -> Err(void)
 
-pub fn fold(f: fn('a, 'b) -> 'b, acc: 'b, xs: ['a]) -> 'b
+pub fn fold(xs: ['a], acc: 'b, f: fn('a, 'b) -> 'b) -> 'b
   match xs
-  | [x, ..xs] -> fold(f, f(x, acc), xs)
+  | [x, ..xs] -> fold(xs, f(x, acc), f)
   | [] -> acc
 
 /// Take the first n elements of a list.
-pub fn take(n: int, xs: ['a]) -> ['a]
+pub fn take(xs: ['a], n: int) -> ['a]
   match xs
   | [x, ..xs] ->
     match n > 0
-    | true -> [x, ..take(n - 1, xs)]
+    | true -> [x, ..take(xs, n - 1)]
     | false -> []
   | [] -> []
 
 /// Drop the first n elements of a list.
-pub fn drop(n: int, xs: ['a]) -> ['a]
+pub fn drop(xs: ['a], n: int) -> ['a]
   match xs
   | [_, ..xs] ->
     match n > 0
-    | true -> drop(n - 1, xs)
+    | true -> drop(xs, n - 1)
     | false -> xs
   | [] -> []
 
 /// Split a list into chunks of size n.
-pub fn chunk(n: int, xs: ['a]) -> [['a]]
+pub fn chunk(xs: ['a], n: int) -> [['a]]
   match xs
   | [x, ..xs] ->
-    let ys = take(n, xs)
-    let zs = drop(n, xs)
-    [[x, ..ys], ..chunk(n, zs)]
+    let ys = take(xs, n)
+    let zs = drop(xs, n)
+    [[x, ..ys], ..chunk(zs, n)]
   | [] -> []
 
 /// Split a list into pairs of adjacent elements.
@@ -95,49 +95,49 @@ pub fn chunk_pairs(xs: ['a]) -> ['a * 'a]
   | _ -> []
 
 /// Map a function over a list.
-pub fn map(f: fn('a) -> 'b, xs: ['a]) -> ['b]
+pub fn map(xs: ['a], f: fn('a) -> 'b) -> ['b]
   match xs
-  | [x, ..xs] -> [f(x), ..map(f, xs)]
+  | [x, ..xs] -> [f(x), ..map(xs, f)]
   | [] -> []
 
 /// Run a function over each element of a list.
-pub fn each(f: fn('a) -> void, xs: ['a]) -> void
+pub fn each(xs: ['a], f: fn('a) -> void) -> void
   match xs
   | [x, ..xs] ->
     f(x)
-    each(f, xs)
+    each(xs, f)
   | [] -> void
 
 /// Try to map a function over a list.
 /// If the function returns an error, the whole operation fails.
 pub fn try_map(
-  f: fn('a) -> Result<'b, 'c>
   xs: ['a]
+  f: fn('a) -> Result<'b, 'c>
 ) -> Result<['b], 'c>
   match xs
   | [x, ..xs] ->
     match f(x)
     | Err(e) -> Err(e)
-    | Ok(y) -> try_map(f, xs) |> result:map(|ys| [y, ..ys])
+    | Ok(y) -> try_map(xs, f) |> result:map(|ys| [y, ..ys])
   | [] -> Ok([])
 
 /// Filter a list.
-pub fn filter(f: fn('a) -> bool, xs: ['a]) -> ['a]
+pub fn filter(xs: ['a], f: fn('a) -> bool) -> ['a]
   match xs
   | [x, ..xs] ->
     match f(x)
-    | true -> [x, ..filter(f, xs)]
-    | false -> filter(f, xs)
+    | true -> [x, ..filter(xs, f)]
+    | false -> filter(xs, f)
   | [] -> []
 
 /// Map a function over a list and filter out errors.
 pub fn filter_map(
-  f: fn('a) -> Result<'b, 'e>
   xs: ['a]
+  f: fn('a) -> Result<'b, 'e>
 ) -> ['b]
   match xs
   | [x, ..xs] ->
     match f(x)
-    | Err(_) -> filter_map(f, xs)
-    | Ok(y) -> [y, ..filter_map(f, xs)]
+    | Err(_) -> filter_map(xs, f)
+    | Ok(y) -> [y, ..filter_map(xs, f)]
   | [] -> []

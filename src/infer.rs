@@ -61,7 +61,7 @@ impl TyEnv {
 
                 ty
             }
-            Ty::Partial(Part::Generic(index, func), arguments) => {
+            Ty::Partial(Part::Generic(index, func), arguments, _) => {
                 assert!(arguments.is_empty());
 
                 let func = func.expect("generics must have a function");
@@ -77,12 +77,12 @@ impl TyEnv {
 
                 table[*index][column].clone()
             }
-            Ty::Partial(part, arguments) => {
+            Ty::Partial(part, arguments, tyspan) => {
                 let arguments = arguments
                     .iter()
                     .map(|arg| self.use_ty(column, arg, span))
                     .collect();
-                Ty::Partial(*part, arguments)
+                Ty::Partial(*part, arguments, *tyspan)
             }
             Ty::Field(ty, field) => {
                 let ty = self.use_ty(column, ty, span);
@@ -100,10 +100,16 @@ impl TyEnv {
                     .collect();
                 Ty::Call(Box::new(func), arguments)
             }
-            Ty::Pipe(lhs, rhs) => {
+            Ty::Pipe(lhs, rhs, arguments) => {
                 let lhs = self.use_ty(column, lhs, span);
                 let rhs = self.use_ty(column, rhs, span);
-                Ty::Pipe(Box::new(lhs), Box::new(rhs))
+
+                let arguments = arguments
+                    .iter()
+                    .map(|arg| arg.as_ref().map(|arg| self.use_ty(column, arg, span)))
+                    .collect();
+
+                Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments)
             }
         }
     }
@@ -193,31 +199,37 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
             match kind {
                 Inferred::Any => {}
                 Inferred::Unsigned => {
-                    if !matches!(ty, Ty::Partial(Part::Int(_), _)) {
+                    if !matches!(ty, Ty::Partial(Part::Int(_), _, _)) {
                         return Err(miette::miette!(
+                            labels = [span.label("here")],
                             "expected `{}` but found `{}`",
                             inferred.format(unit),
                             ty.format(unit),
                         )
+                        .with_source_code(span)
                         .into());
                     }
                 }
                 Inferred::Signed => {
-                    let hir::Ty::Partial(hir::Part::Int(kind), _) = ty.clone() else {
+                    let hir::Ty::Partial(hir::Part::Int(kind), _, _) = ty.clone() else {
                         return Err(miette::miette!(
+                            labels = [span.label("here")],
                             "expected `{}` but found `{}`",
                             inferred.format(unit),
                             ty.format(unit),
                         )
+                        .with_source_code(span)
                         .into());
                     };
 
                     if !kind.is_signed() {
                         return Err(miette::miette!(
+                            labels = [span.label("here")],
                             "expected `{}` but found `{}`",
                             inferred.format(unit),
                             ty.format(unit),
                         )
+                        .with_source_code(span)
                         .into());
                     }
                 }
@@ -227,8 +239,8 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
             unit.env.substitutions.insert(inferred.clone(), ty.clone());
             Ok(())
         }
-        (Ty::Partial(a_part, a_args), Ty::Partial(b_part, b_args)) => {
-            unify_partial_partial(unit, &a_part, &a_args, &b_part, &b_args)
+        (Ty::Partial(a_part, a_args, a_span), Ty::Partial(b_part, b_args, b_span)) => {
+            unify_partial_partial(unit, &a_part, &a_args, a_span, &b_part, &b_args, b_span)
         }
         _ => unreachable!(),
     }
@@ -334,7 +346,7 @@ fn normalize(unit: &mut Unit, ty: &Ty) -> Result<Ty, RetryOrError> {
 
     match ty {
         Ty::Inferred(_, _, _, _) => Ok(ty.clone()),
-        Ty::Partial(_, _) => Ok(ty.clone()),
+        Ty::Partial(_, _, _) => Ok(ty.clone()),
         Ty::Field(adt, field) => {
             let normalized = normalize_field(unit, adt, field)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
@@ -350,8 +362,8 @@ fn normalize(unit: &mut Unit, ty: &Ty) -> Result<Ty, RetryOrError> {
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
-        Ty::Pipe(lhs, rhs) => {
-            let normalized = normalize_pipe(unit, lhs, rhs)?;
+        Ty::Pipe(lhs, rhs, arguments) => {
+            let normalized = normalize_pipe(unit, lhs, rhs, arguments)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
@@ -367,12 +379,12 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
             unit.unify(ty.clone(), new_ty.clone());
             new_ty
         }
-        Ty::Partial(part, arguments) => {
+        Ty::Partial(part, arguments, span) => {
             let arguments = arguments
                 .iter()
                 .map(|arg| with_func(unit, arg, new_func))
                 .collect();
-            Ty::Partial(*part, arguments)
+            Ty::Partial(*part, arguments, *span)
         }
         Ty::Field(base, field) => {
             let base = with_func(unit, base, new_func);
@@ -399,11 +411,15 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
             unit.normalize(ty.clone());
             ty
         }
-        Ty::Pipe(lhs, rhs) => {
+        Ty::Pipe(lhs, rhs, arguments) => {
             let lhs = with_func(unit, lhs, new_func);
             let rhs = with_func(unit, rhs, new_func);
+            let arguments = arguments
+                .iter()
+                .map(|arg| arg.as_ref().map(|arg| with_func(unit, arg, new_func)))
+                .collect();
 
-            let ty = Ty::Pipe(Box::new(lhs), Box::new(rhs));
+            let ty = Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments);
             unit.normalize(ty.clone());
             ty
         }
@@ -413,15 +429,15 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
 fn normalize_field(unit: &mut Unit, adt: &Ty, field: &str) -> Result<Ty, RetryOrError> {
     let adt = normalize(unit, adt)?;
 
-    if let Ty::Partial(Part::Ref, args) = adt {
+    if let Ty::Partial(Part::Ref, args, _) = adt {
         return normalize_field(unit, &args[0], field);
     }
 
     let (index, generics) = match adt {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
-        Ty::Partial(Part::Adt(index), generics) => (index, generics),
-        Ty::Partial(_, _) => return Err(miette::miette!("expected an ADT").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _) => {
+        Ty::Partial(Part::Adt(index), generics, _) => (index, generics),
+        Ty::Partial(_, _, _) => return Err(miette::miette!("expected an ADT").into()),
+        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
             unreachable!()
         }
     };
@@ -435,9 +451,9 @@ fn normalize_tuple(unit: &mut Unit, base: &Ty, index: usize) -> Result<Ty, Retry
 
     let (index, items) = match base {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
-        Ty::Partial(Part::Tuple, items) => (index, items),
-        Ty::Partial(_, _) => return Err(miette::miette!("expected a tuple").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _) => {
+        Ty::Partial(Part::Tuple, items, _) => (index, items),
+        Ty::Partial(_, _, _) => return Err(miette::miette!("expected a tuple").into()),
+        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
             unreachable!()
         }
     };
@@ -452,11 +468,11 @@ fn normalize_call(
 ) -> Result<Ty, RetryOrError> {
     let callee = normalize(unit, callee)?;
 
-    let mut callee_arguments = match callee {
+    let (mut callee_arguments, span) = match callee {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
-        Ty::Partial(Part::Func, arguments) => arguments,
-        Ty::Partial(_, _) => return Err(miette::miette!("expected a function").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _) => {
+        Ty::Partial(Part::Func, arguments, span) => (arguments, span),
+        Ty::Partial(_, _, _) => return Err(miette::miette!("expected a function").into()),
+        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
             unreachable!()
         }
     };
@@ -491,32 +507,61 @@ fn normalize_call(
 
     remaining.push(output);
 
-    let func = Ty::Partial(Part::Func, remaining);
+    let func = Ty::Partial(Part::Func, remaining, span);
     normalize(unit, &func)
 }
 
-fn normalize_pipe(unit: &mut Unit, lhs: &Ty, rhs: &Ty) -> Result<Ty, RetryOrError> {
+fn normalize_pipe(
+    unit: &mut Unit,
+    lhs: &Ty,
+    rhs: &Ty,
+    arguments: &[Option<Ty>],
+) -> Result<Ty, RetryOrError> {
     let rhs = normalize(unit, rhs)?;
 
-    let mut rhs_arguments = match rhs {
+    let (mut rhs_arguments, span) = match rhs {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
-        Ty::Partial(Part::Func, arguments) => arguments,
-        Ty::Partial(_, _) => return Err(miette::miette!("expected a function").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _) => {
+        Ty::Partial(Part::Func, arguments, span) => (arguments, span),
+        Ty::Partial(_, _, _) => return Err(miette::miette!("expected a function").into()),
+        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
             unreachable!()
         }
     };
 
     let output = rhs_arguments.pop().expect("funcs have least one argument");
 
-    match rhs_arguments.len() {
-        0 => Err(miette::miette!("expected a function").into()),
+    let has_slot = arguments.iter().any(Option::is_none);
+
+    if arguments.len() + has_slot as usize > rhs_arguments.len() {
+        return Err(miette::miette!(
+            "wrong number of arguments: expected at most {} but found {}",
+            rhs_arguments.len() - 1,
+            arguments.len()
+        )
+        .into());
+    }
+
+    let missing = rhs_arguments.len() - arguments.len();
+
+    let mut tys = Vec::new();
+
+    tys.extend(rhs_arguments.iter().take(missing).cloned());
+
+    for arg in rhs_arguments.iter().skip(missing).zip(arguments) {
+        match arg {
+            (a, Some(b)) => unify_ty_ty(unit, a, b)?,
+            (a, None) => tys.push(a.clone()),
+        }
+    }
+
+    match tys.len() {
+        0 => panic!(),
         1 => {
-            unify_ty_ty(unit, lhs, &rhs_arguments[0])?;
+            unify_ty_ty(unit, lhs, &tys[0])?;
             normalize(unit, &output)
         }
         _ => {
-            let tuple = Ty::Partial(Part::Tuple, rhs_arguments);
+            let tuple = Ty::Partial(Part::Tuple, tys, span);
             unify_ty_ty(unit, lhs, &tuple)?;
             normalize(unit, &output)
         }
@@ -534,15 +579,19 @@ fn unify_partial_partial(
     unit: &mut Unit,
     a_part: &Part,
     a_args: &[Ty],
+    a_span: Span,
     b_part: &Part,
     b_args: &[Ty],
+    b_span: Span,
 ) -> Result<(), RetryOrError> {
     if !part_eq(a_part, b_part) || a_args.len() != b_args.len() {
         return Err(miette::miette!(
+            labels = [a_span.label("here"), b_span.label("here")],
             "expected `{}` but found `{}`",
             Ty::format_partial(unit, a_part, a_args),
             Ty::format_partial(unit, b_part, b_args),
         )
+        .with_source_code(a_span)
         .into());
     }
 

@@ -208,11 +208,11 @@ fn dict_length(mut args: Vec<Value>) -> Value {
 fn dict_get(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
+    let key = args.pop().unwrap();
+
     let Value::Dict(dict) = args.pop().unwrap() else {
         panic!("expected dictionary")
     };
-
-    let key = args.pop().unwrap();
 
     match dict.get(&key) {
         Some(value) => value.clone(),
@@ -223,12 +223,12 @@ fn dict_get(mut args: Vec<Value>) -> Value {
 fn dict_insert(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
+    let value = args.pop().unwrap();
+    let key = args.pop().unwrap();
+
     let Value::Dict(mut dict) = args.pop().unwrap() else {
         panic!("expected dictionary")
     };
-
-    let value = args.pop().unwrap();
-    let key = args.pop().unwrap();
 
     dict.insert(key, value);
 
@@ -238,11 +238,11 @@ fn dict_insert(mut args: Vec<Value>) -> Value {
 fn dict_remove(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
+    let key = args.pop().unwrap();
+
     let Value::Dict(mut dict) = args.pop().unwrap() else {
         panic!("expected dictionary")
     };
-
-    let key = args.pop().unwrap();
 
     dict.remove(&key);
 

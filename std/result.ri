@@ -31,8 +31,8 @@ pub fn is_err(result: Result<'a, 'e>) -> bool
 
 /// Map a function over a result.
 pub fn map(
-  f: fn('a) -> 'b
   result: Result<'a, 'e>
+  f: fn('a) -> 'b
 ) -> Result<'b, 'e>
   match result
   | Ok(ok) -> Ok(f(ok))
@@ -40,8 +40,8 @@ pub fn map(
 
 /// Try to map a function over a result.
 pub fn try(
-  f: fn('a) -> Result<'b, 'e>
   result: Result<'a, 'e>
+  f: fn('a) -> Result<'b, 'e>
 ) -> Result<'b, 'e>
   match result
   | Ok(ok) -> f(ok)

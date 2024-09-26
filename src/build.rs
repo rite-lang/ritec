@@ -263,7 +263,7 @@ fn build_place(
         }
 
         hir::ExprKind::Void
-        | hir::ExprKind::StringLiteral(_)
+        | hir::ExprKind::String(_)
         | hir::ExprKind::Int(_, _, _)
         | hir::ExprKind::Bool(_)
         | hir::ExprKind::Func(_)
@@ -277,7 +277,7 @@ fn build_place(
         | hir::ExprKind::IsVariant(_, _)
         | hir::ExprKind::VariantNew(_, _, _)
         | hir::ExprKind::Call(_, _)
-        | hir::ExprKind::Pipe(_, _)
+        | hir::ExprKind::Pipe(_, _, _)
         | hir::ExprKind::Binary(_, _, _)
         | hir::ExprKind::Unary(_, _)
         | hir::ExprKind::Ref(_)
@@ -309,7 +309,7 @@ fn build_operand(
     match expr.kind {
         hir::ExprKind::Void => Ok(rir::Operand::Constant(rir::Constant::Void)),
 
-        hir::ExprKind::StringLiteral(s) => Ok(rir::Operand::Constant(rir::Constant::String(s))),
+        hir::ExprKind::String(s) => Ok(rir::Operand::Constant(rir::Constant::String(s))),
 
         hir::ExprKind::Int(negative, base, ref value) => Ok(rir::Operand::Constant(
             rir::Constant::Int(negative, base, value.clone()),
@@ -477,7 +477,7 @@ fn build_operand(
         | hir::ExprKind::IsVariant(_, _)
         | hir::ExprKind::VariantNew(_, _, _)
         | hir::ExprKind::Call(_, _)
-        | hir::ExprKind::Pipe(_, _)
+        | hir::ExprKind::Pipe(_, _, _)
         | hir::ExprKind::Binary(_, _, _)
         | hir::ExprKind::Unary(_, _)
         | hir::ExprKind::Ref(_)
@@ -802,7 +802,7 @@ fn build_value(
             Ok(rir::Value::Func(index, captured, generics))
         }
 
-        hir::ExprKind::Pipe(ref lhs, ref rhs) => {
+        hir::ExprKind::Pipe(ref lhs, ref rhs, ref arguments) => {
             let rhs_ty = builder.build_ty(&rhs.ty)?;
             let rhs = build_operand(builder, block, rhs)?;
 
@@ -810,31 +810,76 @@ fn build_value(
                 unreachable!("unexpected pipe: {:?}", rhs_ty)
             };
 
-            let mut arguments = Vec::new();
+            let missing = input.len() - arguments.len();
+            let slots = arguments
+                .iter()
+                .fold(0, |slots, arg| slots + arg.is_none() as usize);
 
-            match input.len() {
-                1 => arguments.push(build_operand(builder, block, lhs)?),
-                _ => {
-                    let place = build_place(builder, block, lhs)?;
+            let is_tuple = missing + slots > 1;
 
-                    for (i, ty) in input.iter().enumerate() {
-                        let mut place = place.clone();
+            if !is_tuple {
+                let mut operands = Vec::new();
 
+                if missing > 0 {
+                    assert_eq!(missing, 1);
+
+                    operands.push(build_operand(builder, block, lhs)?);
+                }
+
+                for arg in arguments {
+                    match arg {
+                        Some(arg) => operands.push(build_operand(builder, block, arg)?),
+                        None => operands.push(build_operand(builder, block, lhs)?),
+                    }
+                }
+
+                return Ok(rir::Value::Call(rhs, operands));
+            }
+
+            let lhs = build_place(builder, block, lhs)?;
+            let rir::Ty::Tuple(ref input) = lhs.ty() else {
+                unreachable!("unexpected pipe: {:?}", lhs.ty)
+            };
+
+            let mut operands = Vec::new();
+
+            for (i, ty) in input.iter().enumerate() {
+                let mut place = lhs.clone();
+                place.projection.push(rir::Projection {
+                    kind: rir::ProjectionKind::Field {
+                        variant: None,
+                        field: i,
+                    },
+                    ty: ty.clone(),
+                    span: None,
+                });
+
+                operands.push(rir::Operand::Copy(place));
+            }
+
+            let mut index = missing;
+
+            for arg in arguments {
+                match arg {
+                    Some(arg) => operands.push(build_operand(builder, block, arg)?),
+                    None => {
+                        let mut place = lhs.clone();
                         place.projection.push(rir::Projection {
                             kind: rir::ProjectionKind::Field {
                                 variant: None,
-                                field: i,
+                                field: index,
                             },
-                            ty: ty.clone(),
+                            ty: input[index].clone(),
                             span: None,
                         });
 
-                        arguments.push(rir::Operand::Copy(place));
+                        operands.push(rir::Operand::Copy(place));
+                        index += 1;
                     }
                 }
             }
 
-            Ok(rir::Value::Call(rhs, arguments))
+            Ok(rir::Value::Call(rhs, operands))
         }
 
         hir::ExprKind::Ref(ref expr) => {
@@ -920,7 +965,7 @@ fn build_value(
         }
 
         hir::ExprKind::Void
-        | hir::ExprKind::StringLiteral(_)
+        | hir::ExprKind::String(_)
         | hir::ExprKind::Int(_, _, _)
         | hir::ExprKind::Bool(_)
         | hir::ExprKind::Local(_)
@@ -982,7 +1027,7 @@ fn build_ty(
         new_generics: bool,
         ty: &hir::Ty,
     ) -> Result<rir::Ty, miette::Result<Span>> {
-        let hir::Ty::Partial(part, ref arguments) = *ty else {
+        let hir::Ty::Partial(part, ref arguments, _) = *ty else {
             unreachable!()
         };
 

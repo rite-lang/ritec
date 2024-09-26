@@ -18,25 +18,25 @@ pub fn length(dict: Dict<'k, 'v>) -> int
 
 /// Get the value associated with a key in a dictionary.
 #[language("dict:get")]
-pub fn get(key: 'k, dict: Dict<'k, 'v>) -> Result<'v, void>
+pub fn get(dict: Dict<'k, 'v>, key: 'k) -> Result<'v, void>
   panic "dict:get builtin not implemented"
 
 /// Check if a key exists in a dictionary.
-pub fn has(key: 'k, dict: Dict<'k, 'v>) -> bool
-  get(key, dict) |> result:is_ok
+pub fn has(dict: Dict<'k, 'v>, key: 'k) -> bool
+  get(dict, key) |> result:is_ok
 
 /// Insert a key-value pair into a dictionary.
 #[language("dict:insert")]
 pub fn insert(
+  dict: Dict<'k, 'v>
   key: 'k
   value: 'v
-  dict: Dict<'k, 'v>
 ) -> Dict<'k, 'v>
   panic "dict:insert builtin not implemented"
 
 /// Remove a key-value pair from a dictionary.
 #[language("dict:remove")]
-pub fn remove(key: 'k, dict: Dict<'k, 'v>) -> Dict<'k, 'v>
+pub fn remove(dict: Dict<'k, 'v>, key: 'k) -> Dict<'k, 'v>
   panic "dict:remove builtin not implemented"
 
 /// Get the pairs of keys and values in a dictionary.
@@ -46,9 +46,9 @@ pub fn pairs(dict: Dict<'k, 'v>) -> ['k * 'v]
 
 /// Create a dictionary from a list of key-value pairs.
 pub fn from_pairs(pairs: ['k * 'v]) -> Dict<'k, 'v>
-  new(), pairs |> list:fold(|pair, acc|
+  pairs, new() |> list:fold(|pair, acc|
     let key, value = pair
-    insert(key, value, acc)
+    insert(acc, key, value)
   )
 
 /// Get the keys of a dictionary.

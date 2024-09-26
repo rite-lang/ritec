@@ -130,11 +130,11 @@ pub struct Generic {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
     Inferred(Tid, Inferred, Option<usize>, Span),
-    Partial(Part, Vec<Ty>),
+    Partial(Part, Vec<Ty>, Span),
     Field(Box<Ty>, &'static str),
     Tuple(Box<Ty>, usize),
     Call(Box<Ty>, Vec<Option<Ty>>),
-    Pipe(Box<Ty>, Box<Ty>),
+    Pipe(Box<Ty>, Box<Ty>, Vec<Option<Ty>>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -173,7 +173,7 @@ pub struct Expr {
 #[derive(Clone, Debug)]
 pub enum ExprKind {
     Void,
-    StringLiteral(&'static str),
+    String(&'static str),
     Int(bool, Base, Vec<u8>),
     Bool(bool),
     Func(usize),
@@ -193,7 +193,7 @@ pub enum ExprKind {
     IsVariant(Box<Expr>, usize),
     VariantNew(usize, usize, Vec<Expr>),
     Call(Box<Expr>, Vec<Option<Expr>>),
-    Pipe(Box<Expr>, Box<Expr>),
+    Pipe(Box<Expr>, Box<Expr>, Vec<Option<Expr>>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Unary(UnOp, Box<Expr>),
     Ref(Box<Expr>),
@@ -302,36 +302,36 @@ impl Ty {
         Ty::Inferred(Tid::new(), inferred, None, span)
     }
 
-    pub const fn void() -> Self {
-        Ty::Partial(Part::Void, Vec::new())
+    pub const fn void(span: Span) -> Self {
+        Ty::Partial(Part::Void, Vec::new(), span)
     }
 
-    pub const fn bool() -> Self {
-        Ty::Partial(Part::Bool, Vec::new())
+    pub const fn bool(span: Span) -> Self {
+        Ty::Partial(Part::Bool, Vec::new(), span)
     }
 
-    pub const fn string() -> Self {
-        Ty::Partial(Part::Str, Vec::new())
+    pub const fn string(span: Span) -> Self {
+        Ty::Partial(Part::Str, Vec::new(), span)
     }
 
-    pub const fn int(kind: IntKind) -> Self {
-        Ty::Partial(Part::Int(kind), Vec::new())
+    pub const fn int(kind: IntKind, span: Span) -> Self {
+        Ty::Partial(Part::Int(kind), Vec::new(), span)
     }
 
-    pub fn new_ref(ty: Ty) -> Self {
-        Ty::Partial(Part::Ref, vec![ty])
+    pub fn new_ref(ty: Ty, span: Span) -> Self {
+        Ty::Partial(Part::Ref, vec![ty], span)
     }
 
     pub fn specialize(&self, generics: &[Ty]) -> Ty {
         match self {
             Ty::Inferred(_, _, _, _) => self.clone(),
-            Ty::Partial(Part::Generic(index, _), args) => {
+            Ty::Partial(Part::Generic(index, _), args, _) => {
                 assert!(args.is_empty());
                 generics[*index].clone()
             }
-            Ty::Partial(part, args) => {
+            Ty::Partial(part, args, span) => {
                 let args = args.iter().map(|arg| arg.specialize(generics)).collect();
-                Ty::Partial(*part, args)
+                Ty::Partial(*part, args, *span)
             }
             Ty::Field(adt, field) => {
                 let base = adt.specialize(generics);
@@ -349,19 +349,21 @@ impl Ty {
                     .collect();
                 Ty::Call(Box::new(callee), arguments)
             }
-            Ty::Pipe(lhs, rhs) => {
+            Ty::Pipe(lhs, rhs, arguments) => {
                 let lhs = lhs.specialize(generics);
                 let rhs = rhs.specialize(generics);
-                Ty::Pipe(Box::new(lhs), Box::new(rhs))
+
+                let arguments = arguments
+                    .iter()
+                    .map(|arg| arg.as_ref().map(|arg| arg.specialize(generics)))
+                    .collect();
+
+                Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments)
             }
         }
     }
 
     pub fn format(&self, unit: &Unit) -> String {
-        if let Some(ty) = unit.env.substitute(self) {
-            return ty.format(unit);
-        }
-
         match self {
             Ty::Inferred(_, kind, _, _) => match kind {
                 Inferred::Any => String::from("_"),
@@ -369,11 +371,11 @@ impl Ty {
                 Inferred::Signed => String::from("{signed}"),
                 Inferred::Float => String::from("{float}"),
             },
-            Ty::Partial(part, args) => Self::format_partial(unit, part, args),
+            Ty::Partial(part, args, _) => Self::format_partial(unit, part, args),
             Ty::Field(_, _) => todo!(),
             Ty::Tuple(_, _) => todo!(),
             Ty::Call(_, _) => String::from("call"),
-            Ty::Pipe(_, _) => String::from("pipe"),
+            Ty::Pipe(_, _, _) => String::from("pipe"),
         }
     }
 
