@@ -138,6 +138,27 @@ fn string_from_bytes(mut args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
+fn string_length(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    Value::Int(s.len() as i64)
+}
+
+fn string_graphemes(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let chars = s.chars().map(|c| Value::String(String::from(c))).collect();
+    Value::list_from_vec(chars)
+}
+
 fn string_concat(args: Vec<Value>) -> Value {
     let mut s = String::new();
 
@@ -198,6 +219,8 @@ impl<'a> Interpreter<'a> {
                     "string_bytes" => string_bytes,
                     "string_from_bytes" => string_from_bytes,
                     "string_concat" => string_concat,
+                    "string_length" => string_length,
+                    "string_graphemes" => string_graphemes,
                     "debug_format" => debug_format,
                     "io_print" => io_print,
                     // We allow intrinsics to have pure rite fallbacks.

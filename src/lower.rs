@@ -4,6 +4,19 @@ use miette::Severity;
 
 use crate::{ast, hir, number::Base, span::Span};
 
+fn is_language_result(adt: &ast::Adt) -> bool {
+    for decorator in &adt.decorators {
+        let is_language = decorator.name == "language";
+        let is_result = decorator.args.first().map_or(false, |a| a == "Result");
+
+        if is_language && is_result {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn type_register_ast(
     unit: &mut hir::Unit,
     module: usize,
@@ -28,6 +41,10 @@ pub fn type_register_ast(
                 kind: hir::ImportKind::Adt(id),
                 span: adt.span,
             };
+
+            if is_language_result(adt) {
+                unit.result = Some(id);
+            }
 
             unit.modules[module].imports.insert(adt.name, import);
         }
@@ -279,11 +296,13 @@ pub fn func_construct_ast(
                 let mut generics = mem::take(&mut unit.funcs[id].generics);
 
                 let arguments = &unit.funcs[id].input.clone();
+                let output = unit.funcs[id].output.clone();
 
                 let mut cx = BodyCx {
                     unit,
                     arguments,
                     generics: &mut generics,
+                    output: &output,
                     module,
                     locals: Vec::new(),
                     scope: Vec::new(),
@@ -659,6 +678,7 @@ struct BodyCx<'a> {
     unit: &'a mut hir::Unit,
     arguments: &'a [hir::Argument],
     generics: &'a mut Vec<hir::Generic>,
+    output: &'a hir::Ty,
     module: usize,
     locals: Vec<hir::Local>,
     scope: Vec<(String, usize)>,
@@ -729,7 +749,8 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
         ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
-        ast::Expr::Panic(span) => lower_panic(cx, *span),
+        ast::Expr::Panic(message, span) => lower_panic(cx, message, *span),
+        ast::Expr::Try(expr, span) => lower_try(cx, expr, *span),
     }
 }
 
@@ -769,10 +790,78 @@ fn lower_string(_cx: &mut BodyCx, value: &'static str, _span: Span) -> miette::R
     Ok(hir::Expr { kind, ty })
 }
 
-fn lower_panic(_cx: &mut BodyCx, span: Span) -> miette::Result<hir::Expr> {
+fn lower_panic(_cx: &mut BodyCx, message: &'static str, span: Span) -> miette::Result<hir::Expr> {
     let ty = hir::Ty::inferred(hir::Inferred::Any, span);
-    let kind = hir::ExprKind::Panic;
+    let kind = hir::ExprKind::Panic(message);
     Ok(hir::Expr { kind, ty })
+}
+
+fn lower_try(cx: &mut BodyCx, expr: &ast::Expr, span: Span) -> miette::Result<hir::Expr> {
+    let result = cx.unit.result.expect("result type should be set");
+
+    let input = lower_expr(cx, expr)?;
+
+    let local = cx.locals.len();
+    cx.locals.push(hir::Local {
+        name: "",
+        ty: input.ty.clone(),
+        mutable: false,
+    });
+
+    let value = hir::Expr {
+        kind: hir::ExprKind::Local(local),
+        ty: input.ty.clone(),
+    };
+
+    let ok_ty = hir::Ty::any(span);
+    let err_ty = hir::Ty::any(span);
+
+    let result_ty = hir::Ty::Partial(hir::Part::Adt(result), vec![ok_ty.clone(), err_ty.clone()]);
+
+    let ok_value = hir::Expr {
+        kind: hir::ExprKind::VariantField(Box::new(value.clone()), 0, 0),
+        ty: ok_ty.clone(),
+    };
+
+    let err_value = hir::Expr {
+        kind: hir::ExprKind::VariantField(Box::new(value.clone()), 1, 0),
+        ty: err_ty.clone(),
+    };
+
+    let err_value = hir::Expr {
+        kind: hir::ExprKind::VariantNew(result, 1, vec![err_value]),
+        ty: hir::Ty::Partial(
+            hir::Part::Adt(result),
+            vec![hir::Ty::any(span), err_ty.clone()],
+        ),
+    };
+
+    cx.unit.unify(input.ty.clone(), result_ty);
+    cx.unit.unify(cx.output.clone(), err_value.ty.clone());
+
+    let err_expr = hir::Expr {
+        kind: hir::ExprKind::Return(Box::new(err_value)),
+        ty: hir::Ty::void(),
+    };
+
+    let r#match = hir::Match::Adt(result, vec![Some(ok_value), Some(err_expr)], None);
+    let expr = hir::Expr {
+        kind: hir::ExprKind::Match(Box::new(value), r#match),
+        ty: ok_ty.clone(),
+    };
+
+    let exprs = vec![
+        hir::Expr {
+            kind: hir::ExprKind::Let(local, Box::new(input)),
+            ty: hir::Ty::void(),
+        },
+        expr,
+    ];
+
+    Ok(hir::Expr {
+        kind: hir::ExprKind::Block(exprs),
+        ty: ok_ty,
+    })
 }
 
 fn lower_item(cx: &mut BodyCx, path: &ast::Path) -> miette::Result<hir::Expr> {
@@ -1207,7 +1296,7 @@ fn lower_let_assert(
     match check {
         Some(check) => {
             let panic = hir::Expr {
-                kind: hir::ExprKind::Panic,
+                kind: hir::ExprKind::Panic("assertion failed"),
                 ty: hir::Ty::void(),
             };
 
@@ -1249,10 +1338,13 @@ fn lower_closure(
         });
     }
 
+    let output = hir::Ty::any(body.span());
+
     let mut body_cx = BodyCx {
         unit: cx.unit,
         arguments: &input.clone(),
         generics: cx.generics,
+        output: &output,
         module: cx.module,
         locals: Vec::new(),
         scope: Vec::new(),
@@ -1266,6 +1358,7 @@ fn lower_closure(
     };
 
     let body = Box::new(lower_expr(&mut body_cx, body)?);
+    body_cx.unit.unify(body_cx.output.clone(), body.ty.clone());
 
     let capture = body_cx.capture.take().unwrap();
     cx.capture = capture.parent.map(|parent| *parent);

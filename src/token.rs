@@ -96,6 +96,7 @@ pub enum Token {
     Quote,
     Under,
     Pound,
+    Question,
 }
 
 impl Token {
@@ -175,6 +176,7 @@ impl Token {
             "'" => Token::Quote,
             "_" => Token::Under,
             "#" => Token::Pound,
+            "?" => Token::Question,
             _ => return None,
         })
     }

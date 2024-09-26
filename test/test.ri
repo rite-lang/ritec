@@ -1,5 +1,8 @@
 import std:io
+import std:result:Result
 
 fn main()
+  let a = std:result:none()?
+
   1 |> (|x| f"{x} {x} {x}") |> io:println
-  f"Hello World {1}!"
+  Ok(a)

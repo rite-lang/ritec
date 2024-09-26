@@ -1,3 +1,5 @@
+//! List utilities.
+
 import result:Result
 
 /// Compute the length of a list.
@@ -16,6 +18,24 @@ pub fn concat(xs: ['a], ys: ['a]) -> ['a]
 pub fn reverse(xs: ['a]) -> ['a]
   match xs
   | [x, ..xs] -> concat(reverse(xs), [x])
+  | [] -> []
+
+/// Take the first n elements of a list.
+pub fn take(n: int, xs: ['a]) -> ['a]
+  match xs
+  | [x, ..xs] ->
+    match n > 0
+    | true -> [x, ..take(n - 1, xs)]
+    | false -> []
+  | [] -> []
+
+/// Drop the first n elements of a list.
+pub fn drop(n: int, xs: ['a]) -> ['a]
+  match xs
+  | [_, ..xs] ->
+    match n > 0
+    | true -> drop(n - 1, xs)
+    | false -> xs
   | [] -> []
 
 /// Map a function over a list.

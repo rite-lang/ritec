@@ -49,7 +49,7 @@ fn parse_decl(tokens: &mut TokenStream) -> miette::Result<Decl> {
     if tokens.is(Token::Fn) || tokens.nth_is(1, Token::Fn) {
         parse_func_decl(tokens, decorators).map(Decl::Func)
     } else if tokens.is(Token::Type) || tokens.nth_is(1, Token::Type) {
-        parse_type_decl(tokens).map(Decl::Type)
+        parse_type_decl(tokens, decorators).map(Decl::Type)
     } else {
         let (_, span) = tokens.peek();
 
@@ -156,7 +156,7 @@ fn parse_func_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
     })
 }
 
-fn parse_type_decl(tokens: &mut TokenStream) -> miette::Result<Type> {
+fn parse_type_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miette::Result<Type> {
     let vis = parse_vis(tokens)?;
     tokens.expect(Token::Type)?;
 
@@ -166,9 +166,20 @@ fn parse_type_decl(tokens: &mut TokenStream) -> miette::Result<Type> {
         let fields = parse_arguments(tokens)?;
 
         return Ok(Type::Single(Single {
+            decorators,
             vis,
             name,
             fields,
+            span,
+        }));
+    }
+
+    if tokens.is(Token::Newline) {
+        return Ok(Type::Single(Single {
+            decorators,
+            vis,
+            name,
+            fields: Vec::new(),
             span,
         }));
     }
@@ -200,6 +211,7 @@ fn parse_type_decl(tokens: &mut TokenStream) -> miette::Result<Type> {
     tokens.expect(Token::Dedent)?;
 
     Ok(Type::Adt(Adt {
+        decorators,
         vis,
         name,
         variants,
@@ -831,8 +843,18 @@ fn parse_unary(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr
             let expr = parse_unary(tokens, multiline)?;
             Ok(Expr::Unary(UnOp::Not, Box::new(expr), span))
         }
-        _ => parse_call(tokens, multiline),
+        _ => parse_try(tokens, multiline),
     }
+}
+
+fn parse_try(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let mut expr = parse_call(tokens, multiline)?;
+
+    while let Some(span) = tokens.take(Token::Question) {
+        expr = Expr::Try(Box::new(expr), span);
+    }
+
+    Ok(expr)
 }
 
 fn parse_call(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
@@ -892,7 +914,13 @@ fn parse_term(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         }
         Token::Panic => {
             tokens.consume();
-            Ok(Expr::Panic(span))
+
+            let message = match tokens.take(Token::String) {
+                Some(span) => span.as_str(),
+                _ => "explicit panic",
+            };
+
+            Ok(Expr::Panic(message, span))
         }
         Token::True | Token::False => parse_bool(tokens),
         Token::Snake | Token::Pascal => parse_path(tokens).map(Expr::Item),

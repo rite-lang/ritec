@@ -23,6 +23,9 @@ pub struct Unit {
     /// A list of ADTs in the unit.
     pub adts: Vec<Adt>,
 
+    /// The index std result type.
+    pub result: Option<usize>,
+
     /// A list of constraints between types.
     ///
     /// Each constraint requires that two types are equal.
@@ -187,6 +190,7 @@ pub enum ExprKind {
     VariantField(Box<Expr>, usize, usize),
     TupleField(Box<Expr>, usize),
     IsVariant(Box<Expr>, usize),
+    VariantNew(usize, usize, Vec<Expr>),
     Call(Box<Expr>, Vec<Option<Expr>>),
     Pipe(Box<Expr>, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
@@ -197,7 +201,8 @@ pub enum ExprKind {
     Assign(Box<Expr>, Box<Expr>),
     Closure(Vec<Local>, Vec<Expr>, Box<Expr>),
     Match(Box<Expr>, Match),
-    Panic,
+    Panic(&'static str),
+    Return(Box<Expr>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

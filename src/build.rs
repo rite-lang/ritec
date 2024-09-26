@@ -274,6 +274,7 @@ fn build_place(
         | hir::ExprKind::ListEmpty(_)
         | hir::ExprKind::Block(_)
         | hir::ExprKind::IsVariant(_, _)
+        | hir::ExprKind::VariantNew(_, _, _)
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
@@ -283,7 +284,8 @@ fn build_place(
         | hir::ExprKind::Assign(_, _)
         | hir::ExprKind::Closure(_, _, _)
         | hir::ExprKind::Match(_, _)
-        | hir::ExprKind::Panic => {
+        | hir::ExprKind::Panic(_)
+        | hir::ExprKind::Return(_) => {
             let value = build_value(builder, block, expr)?;
             let ty = builder.build_ty(&expr.ty)?;
             let place = builder.make_temp(ty);
@@ -450,10 +452,16 @@ fn build_operand(
             Ok(rir::Operand::Copy(place))
         }
 
-        hir::ExprKind::Panic => {
-            block.statements.push(rir::Statement::Panic {
-                message: "panicked at 'panic'",
-            });
+        hir::ExprKind::Panic(message) => {
+            block.statements.push(rir::Statement::Panic { message });
+
+            Ok(rir::Operand::Constant(rir::Constant::Void))
+        }
+
+        hir::ExprKind::Return(ref expr) => {
+            let value = build_value(builder, block, expr)?;
+
+            (block.statements).push(rir::Statement::Return { value: Some(value) });
 
             Ok(rir::Operand::Constant(rir::Constant::Void))
         }
@@ -466,6 +474,7 @@ fn build_operand(
         | hir::ExprKind::ListTail(_)
         | hir::ExprKind::ListEmpty(_)
         | hir::ExprKind::IsVariant(_, _)
+        | hir::ExprKind::VariantNew(_, _, _)
         | hir::ExprKind::Call(_, _)
         | hir::ExprKind::Pipe(_, _)
         | hir::ExprKind::Binary(_, _, _)
@@ -599,13 +608,13 @@ fn build_value(
             Ok(rir::Value::Tuple(exprs))
         }
 
-        hir::ExprKind::Variant(adt, index) => {
+        hir::ExprKind::Variant(adt_index, variant_index) => {
             let ty = builder.build_ty(&expr.ty)?;
-            let adt = &builder.rir.adts[adt];
-            let variant = &adt.variants[index];
+            let adt = &builder.rir.adts[adt_index];
+            let variant = &adt.variants[variant_index];
 
             if variant.fields.is_empty() {
-                return Ok(rir::Value::Adt(index, Vec::new()));
+                return Ok(rir::Value::Adt(variant_index, Vec::new()));
             }
 
             let rir::Ty::Func(ref input, ref output) = ty else {
@@ -627,7 +636,7 @@ fn build_value(
 
             let body = rir::Block {
                 statements: vec![rir::Statement::Return {
-                    value: Some(rir::Value::Adt(index, items)),
+                    value: Some(rir::Value::Adt(variant_index, items)),
                 }],
             };
 
@@ -661,6 +670,16 @@ fn build_value(
         hir::ExprKind::IsVariant(ref expr, variant) => {
             let expr = build_operand(builder, block, expr)?;
             Ok(rir::Value::IsVariant(expr, variant))
+        }
+
+        hir::ExprKind::VariantNew(_, variant, ref exprs) => {
+            let mut items = Vec::new();
+
+            for expr in exprs {
+                items.push(build_operand(builder, block, expr)?);
+            }
+
+            Ok(rir::Value::Adt(variant, items))
         }
 
         hir::ExprKind::Call(ref func, ref args) => {
@@ -914,7 +933,8 @@ fn build_value(
         | hir::ExprKind::Let(_, _)
         | hir::ExprKind::Assign(_, _)
         | hir::ExprKind::Match(_, _)
-        | hir::ExprKind::Panic => {
+        | hir::ExprKind::Panic(_)
+        | hir::ExprKind::Return(_) => {
             let operand = build_operand(builder, block, expr)?;
 
             Ok(rir::Value::Use(operand))

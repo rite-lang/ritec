@@ -1,18 +1,35 @@
+//! Result type and utilities.
+
+/// A result type that can represent either a successful value or an error.
+///
+/// Rite does not have an option type, so optional values are represented using
+/// a result type with an error type of `void`.
+#[language("Result")]
 pub type Result =
   | Ok(ok: 'a)
   | Err(err: 'b)
 
+/// Create a new successful optional.
 pub fn some(value: 'a) -> Result<'a, void>
   Ok(value)
 
+/// Create a new error optional.
 pub fn none() -> Result<'a, void>
   Err(void)
 
+/// Check if a result is successful.
 pub fn is_ok(result: Result<'a, 'b>) -> bool
   match result
   | Ok(_) -> true
   | Err(_) -> false
 
+/// Check if a result is an error.
+pub fn is_err(result: Result<'a, 'b>) -> bool
+  match result
+  | Ok(_) -> false
+  | Err(_) -> true
+
+/// Map a function over a result.
 pub fn map(
   f: fn('a) -> 'b
   result: Result<'a, 'e>
@@ -21,6 +38,7 @@ pub fn map(
   | Ok(ok) -> Ok(f(ok))
   | Err(err) -> Err(err)
 
+/// Try to map a function over a result.
 pub fn try(
   f: fn('a) -> Result<'b, 'e>
   result: Result<'a, 'e>

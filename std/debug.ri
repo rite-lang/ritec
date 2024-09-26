@@ -1,3 +1,6 @@
+//! Debugging utilities.
+
+/// Format a value for debugging.
 #[extern("intrinsic", "debug_format")]
-pub fn format(a) -> str
-  panic
+pub fn format(a: 'a) -> str
+  panic "debug_format intrinsic not implemented"

@@ -1,20 +1,34 @@
+//! String utilities.
+
 import std:list
 
+/// Concatenate two strings. 
+#[extern("intrinsic", "string_concat")]
+pub fn concat(a: str, b: str) -> str
+  bytes(a), bytes(b) |> list:concat |> from_bytes
+
+/// Compute the length of a string.
+#[extern("intrinsic", "string_length")]
+pub fn length(s: str) -> int
+  bytes(s) |> list:length
+
+#[extern("intrinsic", "string_graphemes")]
+pub fn graphemes(s: str) -> [str]
+  panic "string_graphemes intrinsic not implemented"
+
+/// Get the list of bytes representing a string.
+#[extern("intrinsic", "string_bytes")]
+pub fn bytes(a: str) -> [u8]
+  panic "string_bytes intrinsic not implemented"
+
+/// Create a string from a list of bytes.
+#[extern("intrinsic", "string_from_bytes")]
+pub fn from_bytes(a: [u8]) -> str
+  panic "string_from_bytes intrinsic not implemented"
+
+/// Join a list of strings with a separator.
 pub fn join(sep: str, list: [str]) -> str
   match list
   | [] -> ""
   | [s] -> s
   | [s, ..rest] -> concat(s, sep) |> concat(_, join(sep, rest))
-
-#[extern("intrinsic", "string_concat")]
-pub fn concat(a: str, b: str) -> str
-  bytes(a), bytes(b) |> list:concat |> from_bytes
-
-#[extern("intrinsic", "string_bytes")]
-pub fn bytes(a: str) -> [u8]
-  panic
-
-#[extern("intrinsic", "string_from_bytes")]
-pub fn from_bytes(a: [u8]) -> str
-  panic
-

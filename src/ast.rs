@@ -42,6 +42,7 @@ pub enum Type {
 
 #[derive(Debug)]
 pub struct Adt {
+    pub decorators: Vec<Decorator>,
     pub vis: Vis,
     pub name: &'static str,
     pub variants: Vec<Variant>,
@@ -50,6 +51,7 @@ pub struct Adt {
 
 #[derive(Debug)]
 pub struct Single {
+    pub decorators: Vec<Decorator>,
     pub vis: Vis,
     pub name: &'static str,
     pub fields: Vec<Argument>,
@@ -119,9 +121,8 @@ pub enum Expr {
     Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>, Span),
     Closure(Vec<Argument>, Box<Expr>),
-
-    /* builtin */
-    Panic(Span),
+    Panic(&'static str, Span),
+    Try(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -186,7 +187,8 @@ impl Expr {
                 let start = args.first().map_or(end, |arg| arg.span);
                 start.join(end)
             }
-            Expr::Panic(span) => *span,
+            Expr::Panic(_, span) => *span,
+            Expr::Try(expr, span) => expr.span().join(*span),
         }
     }
 }
