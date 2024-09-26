@@ -1,6 +1,5 @@
 //! Array type and utilities.
-
-import std:list
+import result:Result
 
 /// An array type that stores elements in a contiguous block of memory.
 #[language("array:Array")]
@@ -8,8 +7,23 @@ pub type Array<'a>
 
 /// Create a new empty array.
 #[language("array:new")]
-pub fn new(length: int) -> Array<'a>
+pub fn new(length: int, default: 'a) -> Array<'a>
   panic "array:new builtin not implemented"
+
+/// Create a new empty array with a type.
+#[language("array:empty")]
+pub fn empty() -> Array<'a>
+  panic "array:empty builtin not implemented"
+
+/// Reallocate array to a new length.
+#[language("array:extend")]
+pub fn extend(array: Array<'a>, offset: int, default: 'a) -> Array<'a>
+  panic "array:extend builtin not implemented"
+
+/// Truncate array to a new length.
+#[language("array:truncate")]
+pub fn truncate(array: Array<'a>, offset: int) -> Array<'a>
+  panic "array:extend builtin not implemented"
 
 /// Get the length of an array.
 #[language("array:length")]
@@ -18,5 +32,77 @@ pub fn length(array: Array<'a>) -> int
 
 /// Get the element at an index in an array.
 #[language("array:get")]
-pub fn get(array: Array<'a>) -> 'a
+pub fn get(array: Array<'a>, index: int) -> Result<'a, void>
   panic "array:get builtin not implemented"
+
+/// Set the element at an index in an array.
+#[language("array:set")]
+pub fn set(array: Array<'a>, index: int, value: 'a) -> Array<'a>
+  panic "array:get builtin not implemented"
+
+/// Fold over an array.
+pub fn fold(array: Array<'a>, acc: 'b, f: fn('a, 'b) -> 'b) -> 'b
+  fold_impl(array, acc, f, 0)
+
+fn fold_impl(array: Array<'a>, acc: 'b, f: fn('a, 'b) -> 'b, index) -> 'b
+  match get(array, index)
+  | Ok(value) -> fold_impl(array, f(value, acc), f, index + 1)
+  | Err(_) -> acc
+
+/// Concatenate two arrays.
+pub fn concat(a: Array<'a>, b: Array<'a>) -> Array<'a>
+  let la = length(a)
+  let lb = length(b)
+
+  // Take the length of both arrays
+  let len = la + lb
+
+  // Find largest of the two arrays
+  // to find a default value to use
+  let largest = match la > lb
+    | true -> a
+    | false -> b
+
+  // Func to increment an index and set a value
+  let f = |x, acc|
+    match acc
+    | (i, arr) -> i + 1, set(arr, i, x)
+
+  // If both arrays are empty, return an empty array
+  match len == 0
+  | true -> empty()
+  | false ->
+    match get(largest, 0)
+    | Ok(default) ->
+      let arr = new(len, default)
+      match fold(a, (0, arr), f)
+      | (i, arr) ->
+        match fold(b, (i, arr), f)
+        | (_, arr) -> arr
+
+    | Err(_) -> panic "concat: unreachable array is empty"
+
+/// Convert an array to an list
+pub fn list(array: Array<'a>) -> ['a]
+  list_impl(0, array)
+
+/// Inner implementation of list
+fn list_impl(index: int, array: Array<'a>) -> ['a]
+  match get(array, index)
+  | Ok(value) -> [value, ..list_impl(index + 1, array)]
+  | Err(_) -> []
+
+/// Create an array from a list.
+pub fn from_list(xs: ['a]) -> Array<'a>
+  match xs
+  | [] -> empty()
+  | [x, ..rest] ->
+    let len = std:list:length(xs)
+    // Allocate entire list at once
+    let arr = new(len, x)
+    // Add each element to the array but skip first
+    let f = |x, acc|
+      match acc
+      | (i, arr) -> i + 1, set(arr, i, x)
+    match std:list:fold(rest, (1, arr), f)
+    | (_, arr) -> arr

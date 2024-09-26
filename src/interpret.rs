@@ -20,6 +20,7 @@ pub enum Value {
     String(String),
     Ref(Rc<RefCell<Value>>),
     Dict(BTreeMap<Value, Value>),
+    Array(usize, Vec<Value>),
 }
 
 impl Value {
@@ -87,6 +88,19 @@ impl std::fmt::Display for Value {
 
                 write!(f, " }}")
             }
+            Value::Array(_, values) => {
+                write!(f, "[")?;
+
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+
+                    write!(f, "{}", value)?;
+                }
+
+                write!(f, "]")
+            }
         }
     }
 }
@@ -130,28 +144,25 @@ fn string_bytes(mut args: Vec<Value>) -> Value {
         .map(|&b| Value::Int(b as i64))
         .collect::<Vec<_>>();
 
-    Value::list_from_vec(bytes)
+    Value::Array(bytes.len(), bytes)
 }
 
 fn string_from_bytes(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
-    let Value::List(list) = args.pop().unwrap() else {
-        panic!("expected list")
+    let Value::Array(_, bytes) = args.pop().unwrap() else {
+        panic!("expected array")
     };
 
-    let mut s = String::new();
-
-    let mut list = list;
-
-    while let Some(l) = list {
-        let Value::Int(b) = l.head else {
-            panic!("expected integer")
-        };
-
-        s.push(b as u8 as char);
-        list = l.tail;
-    }
+    let s = bytes
+        .iter()
+        .map(|value| {
+            let Value::Int(b) = value else {
+                panic!("expected integer")
+            };
+            *b as u8 as char
+        })
+        .collect::<String>();
 
     Value::String(s)
 }
@@ -286,6 +297,122 @@ fn dict_values(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(values)
 }
 
+fn array_new(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let default = args.pop().unwrap();
+
+    let Value::Int(len) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let len = len as usize;
+
+    Value::Array(len, vec![default; len])
+}
+
+fn array_empty(args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 0);
+
+    Value::Array(0, Vec::new())
+}
+
+fn array_extend(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 3);
+
+    let Value::Int(len2) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Array(len, mut values) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    let default = args.pop().unwrap();
+
+    let len2 = len2 as usize;
+    let new_len = len + len2;
+
+    values.extend(vec![default; len2]);
+
+    assert_eq!(values.len(), new_len);
+
+    Value::Array(new_len, values)
+}
+
+fn array_truncate(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let Value::Int(len2) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Array(len, mut values) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    let len2 = len2 as usize;
+    let new_len = len - len2;
+
+    values.truncate(new_len);
+
+    assert_eq!(values.len(), new_len);
+
+    Value::Array(new_len, values)
+}
+
+fn array_length(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::Array(len, _) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    Value::Int(len as i64)
+}
+
+fn array_get(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let Value::Int(index) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Array(len, values) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    let index = index as usize;
+
+    if index >= len {
+        return Value::Adt(1, vec![Value::Void]);
+    }
+
+    Value::Adt(0, vec![values[index].clone()])
+}
+
+fn array_set(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 3);
+
+    let value = args.pop().unwrap();
+
+    let Value::Int(index) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Array(len, mut values) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    let index = index as usize;
+
+    if index < len {
+        values[index] = value.clone();
+    }
+
+    Value::Array(len, values)
+}
+
 fn io_print(mut args: Vec<Value>) -> Value {
     let Value::String(s) = args.pop().unwrap() else {
         panic!("expected string")
@@ -342,6 +469,13 @@ impl<'a> Interpreter<'a> {
                     "dict:pairs" => dict_pairs,
                     "dict:keys" => dict_keys,
                     "dict:values" => dict_values,
+                    "array:new" => array_new,
+                    "array:empty" => array_empty,
+                    "array:extend" => array_extend,
+                    "array:truncate" => array_truncate,
+                    "array:length" => array_length,
+                    "array:get" => array_get,
+                    "array:set" => array_set,
                     // we allow intrinsics to have pure rite fallbacks.
                     _ => continue,
                 };

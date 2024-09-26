@@ -1,27 +1,32 @@
 //! String utilities.
 
-import std:list
-
-/// Concatenate two strings. 
+/// Concatenate two strings.
 #[language("string:concat")]
 pub fn concat(a: str, b: str) -> str
-  bytes(a), bytes(b) |> list:concat |> from_bytes
+  bytes(a), bytes(b) |> std:array:concat |> from_bytes
 
 /// Compute the length of a string.
 #[language("string:length")]
 pub fn length(s: str) -> int
-  bytes(s) |> list:length
+  bytes(s) |> std:array:length
 
 #[language("string:graphemes")]
 pub fn graphemes(s: str) -> [str]
   panic "string_graphemes builtin not implemented"
 
-/// Get the list of bytes representing a string.
+/// Get the array of bytes representing a string.
 #[language("string:bytes")]
-pub fn bytes(a: str) -> [u8]
+pub fn bytes(a: str) -> array:Array<u8>
   panic "string:bytes builtin not implemented"
 
-/// Create a string from a list of bytes.
+/// Create a string from a array of bytes.
 #[language("string:from_bytes")]
-pub fn from_bytes(a: [u8]) -> str
+pub fn from_bytes(a: array:Array<u8>) -> str
   panic "string:from_bytes builtin not implemented"
+
+/// Join a list of strings with a separator.
+pub fn join(sep: str, xs: [str]) -> str
+  match xs
+  | [] -> ""
+  | [s] -> s
+  | [s, ..rest] -> concat(s, sep) |> concat(_, join(sep, rest))

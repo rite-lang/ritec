@@ -1,3 +1,14 @@
 //! Filesystem operations.
 
+import result:Result
+
+#[language("fs:File")]
 pub type File
+
+/// Open a file.
+#[language("fs:open")]
+pub fn open(path: str) -> Result<File, void>
+  panic "fs:open builtin not implemented"
+
+
+

@@ -1,1 +1,7 @@
+import std:io
+import std:debug
+import std:array
+import std:string
+
 fn main()
+  "Hello, world!" |> string:bytes |> debug:print

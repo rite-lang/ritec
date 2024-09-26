@@ -9,5 +9,5 @@ pub fn print(a: str) -> void
 
 /// Print a string to the standard output followed by a newline.
 pub fn println(a: str) -> void
-  let newline = string:from_bytes([10])
+  let newline = string:from_bytes(std:array:from_list([10]))
   print(string:concat(a, newline))
