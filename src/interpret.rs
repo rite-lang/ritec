@@ -151,6 +151,22 @@ fn string_concat(args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
+fn debug_println(args: Vec<Value>) -> Value {
+    for arg in args {
+        println!("{}", arg);
+    }
+
+    Value::Void
+}
+
+fn debug_repr(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let arg = args.pop().unwrap();
+
+    Value::String(format!("{}", arg))
+}
+
 pub struct Interpreter<'a> {
     mir: &'a Unit<Specific>,
     builtins: HashMap<usize, fn(Vec<Value>) -> Value>,
@@ -180,6 +196,8 @@ impl<'a> Interpreter<'a> {
                     "string_to_bytes" => string_to_bytes,
                     "string_from_bytes" => string_from_bytes,
                     "string_concat" => string_concat,
+                    "debug_println" => debug_println,
+                    "debug_repr" => debug_repr,
                     // We allow intrinsics to have pure rite fallbacks.
                     _ => continue,
                 };

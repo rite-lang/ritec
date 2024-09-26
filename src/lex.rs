@@ -7,10 +7,33 @@ use crate::{
     token::{Token, TokenStream},
 };
 
+#[derive(Clone, Debug, PartialEq)]
+enum LexerFormatStringState {
+    Idle,
+    ParseString,
+    StartParseExpr,
+    ParseExpr,
+    Stop,
+}
+
+#[derive(Clone, Debug)]
+struct LexerState {
+    f_string: LexerFormatStringState,
+}
+
+impl Default for LexerState {
+    fn default() -> Self {
+        Self {
+            f_string: LexerFormatStringState::Idle,
+        }
+    }
+}
+
 struct Lexer {
     file: &'static str,
     source: &'static str,
     lo: usize,
+    state: LexerState,
 }
 
 impl Lexer {
@@ -58,7 +81,12 @@ pub fn lex(file: &'static str, source: &'static str) -> miette::Result<TokenStre
             continue;
         }
 
-        let mut lexer = Lexer { file, source, lo };
+        let mut lexer = Lexer {
+            file,
+            source,
+            lo,
+            state: Default::default(),
+        };
 
         let line_indents = lex_indents(&mut lexer, indents.iter())?;
 
@@ -95,8 +123,27 @@ pub fn lex(file: &'static str, source: &'static str) -> miette::Result<TokenStre
                 break;
             }
 
-            skip_whitespace(&mut lexer);
+            // Only skip whitespace if we are not in a special context.
+            if lexer.state.f_string == LexerFormatStringState::Idle {
+                skip_whitespace(&mut lexer);
+            }
+
             tokens.push(lex_token(&mut lexer)?);
+        }
+
+        // Cleanup LexerFormatStringState::stop if there are no more characters on the line
+        if lexer.state.f_string != LexerFormatStringState::Idle {
+            return Err(miette::miette!(
+                severity = Severity::Error,
+                code = "unexpected::brace",
+                help = format!(
+                    "Invalid format string current state: {:?}",
+                    lexer.state.f_string
+                ),
+                labels = vec![LabeledSpan::at_offset(lexer.lo, "here")],
+                "unexpected brace"
+            )
+            .with_source_code(lexer.source_code()));
         }
 
         // Only add a newline if the line doesn't already end with one
@@ -227,8 +274,20 @@ fn skip_whitespace(lexer: &mut Lexer) {
 fn lex_token(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let c = lexer.peek().expect("lex_token called on empty input");
 
+    match lexer.state.f_string {
+        LexerFormatStringState::ParseString => return lex_format_string(lexer),
+        LexerFormatStringState::StartParseExpr => return lex_format_string_expr_start(lexer),
+        LexerFormatStringState::ParseExpr => return lex_format_string_expr(lexer),
+        LexerFormatStringState::Stop => return lex_format_string_stop(lexer),
+        _ => {}
+    }
+
     if lexer.rest().starts_with("//") {
         return lex_comment(lexer);
+    }
+
+    if lexer.rest().starts_with("f\"") {
+        return lex_format_string_start(lexer);
     }
 
     if lexer.rest().len() >= 2 {
@@ -360,6 +419,24 @@ fn lex_integer(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     Ok((Token::Integer, span))
 }
 
+fn lex_escaped_character(lexer: &Lexer, c: char) -> miette::Result<char> {
+    match c {
+        'n' => Ok('\n'),
+        'r' => Ok('\r'),
+        't' => Ok('\t'),
+        '\\' => Ok('\\'),
+        '"' => Ok('"'),
+        _ => Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::escape",
+            help = "only \\n, \\r, \\t, \\\\ and \\\" are valid escape sequences",
+            labels = vec![LabeledSpan::at_offset(lexer.lo, "here")],
+            "invalid escape sequence"
+        )),
+    }
+}
+
+/// Lex simple string literal
 fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     let lo = lexer.lo;
     let mut str = String::new();
@@ -371,24 +448,7 @@ fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
             '"' => break,
             '\\' => {
                 let c = lexer.next().expect("unexpected end of input");
-
-                match c {
-                    'n' => str.push('\n'),
-                    'r' => str.push('\r'),
-                    't' => str.push('\t'),
-                    '\\' => str.push('\\'),
-                    '"' => str.push('"'),
-                    _ => {
-                        return Err(miette::miette!(
-                            severity = Severity::Error,
-                            code = "invalid::escape",
-                            help = "only \\n, \\r, \\t, \\\\ and \\\" are valid escape sequences",
-                            labels = vec![LabeledSpan::at_offset(lexer.lo, "here")],
-                            "invalid escape sequence"
-                        )
-                        .with_source_code(lexer.source_code()))
-                    }
-                }
+                str.push(lex_escaped_character(lexer, c)?);
             }
             c => str.push(c),
         }
@@ -403,6 +463,144 @@ fn lex_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
             source: lexer.source,
         },
     ))
+}
+
+/// Start lexing a format string
+/// Sets next state to ParseString and emits a FormatStringStart token
+fn lex_format_string_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    let lo = lexer.lo;
+
+    lexer.next();
+    lexer.next();
+
+    lexer.state.f_string = LexerFormatStringState::ParseString;
+
+    Ok((
+        Token::FormatStringStart,
+        Span {
+            lo,
+            hi: lexer.lo,
+            file: lexer.file,
+            source: lexer.source,
+        },
+    ))
+}
+
+fn lex_format_string_stop(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    // Consume last '"'
+    lexer.next();
+
+    lexer.state.f_string = LexerFormatStringState::Idle;
+
+    Ok((
+        Token::FormatStringEnd,
+        Span {
+            lo: lexer.lo,
+            hi: lexer.lo,
+            file: lexer.file,
+            source: lexer.source,
+        },
+    ))
+}
+
+/// Lex a format string
+fn lex_format_string(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    let lo = lexer.lo;
+
+    let mut str = String::new();
+
+    while let Some(c) = lexer.peek() {
+        if c == '"' {
+            lexer.state.f_string = LexerFormatStringState::Stop;
+
+            // If there is no content in the format string we do
+            // not need to emit a StringLiteral token
+            if str.len() == 0 {
+                return lex_format_string_stop(lexer);
+            }
+
+            break;
+        }
+
+        lexer.next();
+
+        match c {
+            '{' => {
+                if lexer.peek() == Some('{') {
+                    _ = lexer.next();
+                    str.push('{');
+                } else {
+                    lexer.state.f_string = LexerFormatStringState::StartParseExpr;
+
+                    // If there is no content in the format string we do
+                    // not need to emit a ParseExpr token
+                    if str.len() == 0 {
+                        return lex_format_string_expr_start(lexer);
+                    }
+
+                    break;
+                }
+            }
+            '}' => {
+                if lexer.peek() == Some('}') {
+                    _ = lexer.next();
+                    str.push('}');
+                } else {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "unexpected::brace",
+                        help = "expected '}}' to escape '}'",
+                        labels = vec![LabeledSpan::at_offset(lexer.lo, "here")],
+                        "unexpected brace"
+                    )
+                    .with_source_code(lexer.source_code()));
+                }
+            }
+            '\\' => {
+                let c = lexer.next().expect("unexpected end of input");
+                str.push(lex_escaped_character(lexer, c)?);
+            }
+            c => str.push(c),
+        }
+    }
+
+    let span = Span {
+        lo,
+        hi: lexer.lo - 1,
+        file: lexer.file,
+        source: lexer.source,
+    };
+
+    Ok((Token::StringLiteral, span))
+}
+
+fn lex_format_string_expr_start(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    lexer.state.f_string = LexerFormatStringState::ParseExpr;
+
+    Ok((
+        Token::FormatStringExprStart,
+        Span {
+            lo: lexer.lo,
+            hi: lexer.lo,
+            file: lexer.file,
+            source: lexer.source,
+        },
+    ))
+}
+
+fn lex_format_string_expr(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    lexer.state.f_string = LexerFormatStringState::Idle;
+
+    let (token, span) = lex_token(lexer)?;
+
+    lexer.state.f_string = LexerFormatStringState::ParseExpr;
+
+    if token == Token::RBrace {
+        lexer.state.f_string = LexerFormatStringState::ParseString;
+        return Ok((Token::FormatStringExprEnd, span));
+    }
+
+    Ok((token, span))
 }
 
 fn lex_comment(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {

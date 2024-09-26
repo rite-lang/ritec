@@ -8,7 +8,13 @@ pub enum Token {
     Pascal,
     Integer,
     Float,
+
+    /* strings */
     StringLiteral,
+    FormatStringStart,
+    FormatStringEnd,
+    FormatStringExprStart,
+    FormatStringExprEnd,
 
     /* comments */
     DocComment,
