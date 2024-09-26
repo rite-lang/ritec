@@ -24,6 +24,14 @@ pub fn map(f: fn('a) -> 'b, xs: ['a]) -> ['b]
   | [x, ..xs] -> [f(x), ..map(f, xs)]
   | [] -> []
 
+/// Run a function over each element of a list.
+pub fn each(f: fn('a) -> void, xs: ['a]) -> void
+  match xs
+  | [x, ..xs] ->
+    f(x)
+    each(f, xs)
+  | [] -> void
+
 /// Try to map a function over a list.
 /// If the function returns an error, the whole operation fails.
 pub fn try_map(
