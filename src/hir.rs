@@ -131,10 +131,10 @@ pub struct Generic {
 pub enum Ty {
     Inferred(Tid, Inferred, Option<usize>, Span),
     Partial(Part, Vec<Ty>, Span),
-    Field(Box<Ty>, &'static str),
-    Tuple(Box<Ty>, usize),
-    Call(Box<Ty>, Vec<Option<Ty>>),
-    Pipe(Box<Ty>, Box<Ty>, Vec<Option<Ty>>),
+    Field(Box<Ty>, &'static str, Span),
+    Tuple(Box<Ty>, usize, Span),
+    Call(Box<Ty>, Vec<Option<Ty>>, Span),
+    Pipe(Box<Ty>, Box<Ty>, Vec<Option<Ty>>, Span),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -333,23 +333,23 @@ impl Ty {
                 let args = args.iter().map(|arg| arg.specialize(generics)).collect();
                 Ty::Partial(*part, args, *span)
             }
-            Ty::Field(adt, field) => {
+            Ty::Field(adt, field, span) => {
                 let base = adt.specialize(generics);
-                Ty::Field(Box::new(base), field)
+                Ty::Field(Box::new(base), field, *span)
             }
-            Ty::Tuple(base, index) => {
+            Ty::Tuple(base, index, span) => {
                 let base = base.specialize(generics);
-                Ty::Tuple(Box::new(base), *index)
+                Ty::Tuple(Box::new(base), *index, *span)
             }
-            Ty::Call(callee, arguments) => {
+            Ty::Call(callee, arguments, span) => {
                 let callee = callee.specialize(generics);
                 let arguments = arguments
                     .iter()
                     .map(|arg| arg.as_ref().map(|arg| arg.specialize(generics)))
                     .collect();
-                Ty::Call(Box::new(callee), arguments)
+                Ty::Call(Box::new(callee), arguments, *span)
             }
-            Ty::Pipe(lhs, rhs, arguments) => {
+            Ty::Pipe(lhs, rhs, arguments, span) => {
                 let lhs = lhs.specialize(generics);
                 let rhs = rhs.specialize(generics);
 
@@ -358,7 +358,7 @@ impl Ty {
                     .map(|arg| arg.as_ref().map(|arg| arg.specialize(generics)))
                     .collect();
 
-                Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments)
+                Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments, *span)
             }
         }
     }
@@ -372,10 +372,10 @@ impl Ty {
                 Inferred::Float => String::from("{float}"),
             },
             Ty::Partial(part, args, _) => Self::format_partial(unit, part, args),
-            Ty::Field(_, _) => todo!(),
-            Ty::Tuple(_, _) => todo!(),
-            Ty::Call(_, _) => String::from("call"),
-            Ty::Pipe(_, _, _) => String::from("pipe"),
+            Ty::Field(_, _, _) => todo!(),
+            Ty::Tuple(_, _, _) => todo!(),
+            Ty::Call(_, _, _) => String::from("call"),
+            Ty::Pipe(_, _, _, _) => String::from("pipe"),
         }
     }
 

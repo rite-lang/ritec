@@ -1097,8 +1097,9 @@ fn lower_block(cx: &mut BodyCx, block: &[ast::Expr]) -> miette::Result<hir::Expr
 }
 
 fn lower_field(cx: &mut BodyCx, expr: &ast::Expr, name: &'static str) -> miette::Result<hir::Expr> {
+    let span = expr.span();
     let expr = lower_expr(cx, expr)?;
-    let ty = hir::Ty::Field(Box::new(expr.ty.clone()), name);
+    let ty = hir::Ty::Field(Box::new(expr.ty.clone()), name, span);
     let kind = hir::ExprKind::Field(Box::new(expr), name);
     cx.unit.normalize(ty.clone());
     Ok(hir::Expr { kind, ty })
@@ -1109,6 +1110,7 @@ fn lower_call(
     func: &ast::Expr,
     arguments: &[Option<ast::Expr>],
 ) -> miette::Result<hir::Expr> {
+    let span = func.span();
     let func = lower_expr(cx, func)?;
 
     let mut args = Vec::new();
@@ -1128,7 +1130,7 @@ fn lower_call(
         }
     }
 
-    let ty = hir::Ty::Call(Box::new(func.ty.clone()), tys);
+    let ty = hir::Ty::Call(Box::new(func.ty.clone()), tys, span);
     let kind = hir::ExprKind::Call(Box::new(func), args);
     cx.unit.normalize(ty.clone());
     Ok(hir::Expr { kind, ty })
@@ -1139,6 +1141,7 @@ fn lower_pipe(
     pipee: &ast::Expr,
     exprs: &[ast::Expr],
 ) -> miette::Result<hir::Expr> {
+    let span = pipee.span();
     let mut pipee = lower_expr(cx, pipee)?;
     let mut ty = pipee.ty.clone();
 
@@ -1171,7 +1174,7 @@ fn lower_pipe(
             }
         };
 
-        ty = hir::Ty::Pipe(Box::new(ty), Box::new(expr.ty.clone()), tys);
+        ty = hir::Ty::Pipe(Box::new(ty), Box::new(expr.ty.clone()), tys, span);
         pipee = hir::Expr {
             kind: hir::ExprKind::Pipe(Box::new(pipee), expr, args),
             ty: ty.clone(),
@@ -1650,11 +1653,11 @@ fn build_pat_destructure(
             None => Ok(()),
         },
         Pat::Bool(_, _) => Ok(()),
-        Pat::Tuple(pats, _) => {
+        Pat::Tuple(pats, span) => {
             for (i, pat) in pats.iter().enumerate() {
                 let input = hir::Expr {
                     kind: hir::ExprKind::TupleField(Box::new(input.clone()), i),
-                    ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i),
+                    ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i, *span),
                 };
 
                 cx.unit.normalize(input.ty.clone());
@@ -1738,7 +1741,7 @@ fn build_pat_check(
             for (i, pat) in pats.into_iter().enumerate() {
                 let input = hir::Expr {
                     kind: hir::ExprKind::TupleField(Box::new(input.clone()), items.len()),
-                    ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i),
+                    ty: hir::Ty::Tuple(Box::new(input.ty.clone()), i, span),
                 };
 
                 if let Some(expr) = build_pat_check(cx, input, pat)? {
@@ -1915,13 +1918,13 @@ fn build_match_tree(
                 }
             }
         }
-        Pat::Tuple(items, _) => {
+        Pat::Tuple(items, span) => {
             let items = items
                 .into_iter()
                 .enumerate()
                 .map(|(i, pat)| {
                     let kind = hir::ExprKind::TupleField(Box::new(input.clone()), i);
-                    let ty = hir::Ty::Tuple(Box::new(input.ty.clone()), i);
+                    let ty = hir::Ty::Tuple(Box::new(input.ty.clone()), i, span);
                     cx.unit.normalize(ty.clone());
 
                     let input = hir::Expr { kind, ty };

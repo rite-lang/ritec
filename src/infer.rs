@@ -77,30 +77,30 @@ impl TyEnv {
 
                 table[*index][column].clone()
             }
-            Ty::Partial(part, arguments, tyspan) => {
+            Ty::Partial(part, arguments, ty_span) => {
                 let arguments = arguments
                     .iter()
                     .map(|arg| self.use_ty(column, arg, span))
                     .collect();
-                Ty::Partial(*part, arguments, *tyspan)
+                Ty::Partial(*part, arguments, *ty_span)
             }
-            Ty::Field(ty, field) => {
+            Ty::Field(ty, field, ty_span) => {
                 let ty = self.use_ty(column, ty, span);
-                Ty::Field(Box::new(ty), field)
+                Ty::Field(Box::new(ty), field, *ty_span)
             }
-            Ty::Tuple(ty, index) => {
+            Ty::Tuple(ty, index, ty_span) => {
                 let ty = self.use_ty(column, ty, span);
-                Ty::Tuple(Box::new(ty), *index)
+                Ty::Tuple(Box::new(ty), *index, *ty_span)
             }
-            Ty::Call(func, arguments) => {
+            Ty::Call(func, arguments, ty_span) => {
                 let func = self.use_ty(column, func, span);
                 let arguments = arguments
                     .iter()
                     .map(|arg| arg.as_ref().map(|arg| self.use_ty(column, arg, span)))
                     .collect();
-                Ty::Call(Box::new(func), arguments)
+                Ty::Call(Box::new(func), arguments, *ty_span)
             }
-            Ty::Pipe(lhs, rhs, arguments) => {
+            Ty::Pipe(lhs, rhs, arguments, ty_span) => {
                 let lhs = self.use_ty(column, lhs, span);
                 let rhs = self.use_ty(column, rhs, span);
 
@@ -109,7 +109,7 @@ impl TyEnv {
                     .map(|arg| arg.as_ref().map(|arg| self.use_ty(column, arg, span)))
                     .collect();
 
-                Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments)
+                Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments, *ty_span)
             }
         }
     }
@@ -242,7 +242,10 @@ fn unify_ty_ty(unit: &mut Unit, a: &Ty, b: &Ty) -> Result<(), RetryOrError> {
         (Ty::Partial(a_part, a_args, a_span), Ty::Partial(b_part, b_args, b_span)) => {
             unify_partial_partial(unit, &a_part, &a_args, a_span, &b_part, &b_args, b_span)
         }
-        _ => unreachable!(),
+        a => {
+            println!("{:?}", a);
+            unreachable!()
+        }
     }
 }
 
@@ -347,22 +350,22 @@ fn normalize(unit: &mut Unit, ty: &Ty) -> Result<Ty, RetryOrError> {
     match ty {
         Ty::Inferred(_, _, _, _) => Ok(ty.clone()),
         Ty::Partial(_, _, _) => Ok(ty.clone()),
-        Ty::Field(adt, field) => {
+        Ty::Field(adt, field, _) => {
             let normalized = normalize_field(unit, adt, field)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
-        Ty::Tuple(base, index) => {
+        Ty::Tuple(base, index, _) => {
             let normalized = normalize_tuple(unit, base, *index)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
-        Ty::Call(callee, arguments) => {
+        Ty::Call(callee, arguments, _) => {
             let normalized = normalize_call(unit, callee, arguments)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
         }
-        Ty::Pipe(lhs, rhs, arguments) => {
+        Ty::Pipe(lhs, rhs, arguments, _) => {
             let normalized = normalize_pipe(unit, lhs, rhs, arguments)?;
             (unit.env.substitutions).insert(ty.clone(), normalized.clone());
             Ok(normalized)
@@ -386,32 +389,32 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
                 .collect();
             Ty::Partial(*part, arguments, *span)
         }
-        Ty::Field(base, field) => {
+        Ty::Field(base, field, span) => {
             let base = with_func(unit, base, new_func);
 
-            let ty = Ty::Field(Box::new(base), field);
+            let ty = Ty::Field(Box::new(base), field, *span);
             unit.normalize(ty.clone());
             ty
         }
-        Ty::Tuple(base, index) => {
+        Ty::Tuple(base, index, span) => {
             let base = with_func(unit, base, new_func);
 
-            let ty = Ty::Tuple(Box::new(base), *index);
+            let ty = Ty::Tuple(Box::new(base), *index, *span);
             unit.normalize(ty.clone());
             ty
         }
-        Ty::Call(callee, arguments) => {
+        Ty::Call(callee, arguments, span) => {
             let callee = with_func(unit, callee, new_func);
             let arguments = arguments
                 .iter()
                 .map(|arg| arg.as_ref().map(|arg| with_func(unit, arg, new_func)))
                 .collect();
 
-            let ty = Ty::Call(Box::new(callee), arguments);
+            let ty = Ty::Call(Box::new(callee), arguments, *span);
             unit.normalize(ty.clone());
             ty
         }
-        Ty::Pipe(lhs, rhs, arguments) => {
+        Ty::Pipe(lhs, rhs, arguments, span) => {
             let lhs = with_func(unit, lhs, new_func);
             let rhs = with_func(unit, rhs, new_func);
             let arguments = arguments
@@ -419,7 +422,7 @@ fn with_func(unit: &mut Unit, ty: &Ty, new_func: usize) -> Ty {
                 .map(|arg| arg.as_ref().map(|arg| with_func(unit, arg, new_func)))
                 .collect();
 
-            let ty = Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments);
+            let ty = Ty::Pipe(Box::new(lhs), Box::new(rhs), arguments, *span);
             unit.normalize(ty.clone());
             ty
         }
@@ -437,13 +440,13 @@ fn normalize_field(unit: &mut Unit, adt: &Ty, field: &str) -> Result<Ty, RetryOr
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Adt(index), generics, _) => (index, generics),
         Ty::Partial(_, _, _) => return Err(miette::miette!("expected an ADT").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
+        Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
         }
     };
 
     let (_, ty) = unit.adts[index].find_field(field)?;
-    Ok(ty.specialize(&generics))
+    normalize(unit, &ty.specialize(&generics))
 }
 
 fn normalize_tuple(unit: &mut Unit, base: &Ty, index: usize) -> Result<Ty, RetryOrError> {
@@ -453,12 +456,12 @@ fn normalize_tuple(unit: &mut Unit, base: &Ty, index: usize) -> Result<Ty, Retry
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Tuple, items, _) => (index, items),
         Ty::Partial(_, _, _) => return Err(miette::miette!("expected a tuple").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
+        Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
         }
     };
 
-    Ok(items[index].clone())
+    normalize(unit, &items[index])
 }
 
 fn normalize_call(
@@ -471,8 +474,14 @@ fn normalize_call(
     let (mut callee_arguments, span) = match callee {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Func, arguments, span) => (arguments, span),
-        Ty::Partial(_, _, _) => return Err(miette::miette!("expected a function").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
+        Ty::Partial(_, _, span) => {
+            return Err(
+                miette::miette!(labels = [span.label("here")], "expected a function")
+                    .with_source_code(span.source)
+                    .into(),
+            )
+        }
+        Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
         }
     };
@@ -522,8 +531,14 @@ fn normalize_pipe(
     let (mut rhs_arguments, span) = match rhs {
         Ty::Inferred(_, _, _, _) => return Err(RetryOrError::Retry),
         Ty::Partial(Part::Func, arguments, span) => (arguments, span),
-        Ty::Partial(_, _, _) => return Err(miette::miette!("expected a function").into()),
-        Ty::Field(_, _) | Ty::Tuple(_, _) | Ty::Call(_, _) | Ty::Pipe(_, _, _) => {
+        Ty::Partial(_, _, span) => {
+            return Err(
+                miette::miette!(labels = [span.label("here")], "expected a function")
+                    .with_source_code(span.source)
+                    .into(),
+            )
+        }
+        Ty::Field(_, _, _) | Ty::Tuple(_, _, _) | Ty::Call(_, _, _) | Ty::Pipe(_, _, _, _) => {
             unreachable!()
         }
     };
