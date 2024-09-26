@@ -573,9 +573,9 @@ fn parse_let_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<E
         let pat = parse_pat(tokens)?;
         tokens.expect(Token::Eq)?;
 
-        let value = match is_block(tokens) {
+        let value = match is_block(tokens) && multiline {
             true => parse_block(tokens)?,
-            false => parse_expr(tokens, multiline)?,
+            false => parse_match_or_pipe_expr(tokens, false)?,
         };
 
         return Ok(Expr::LetAssert(pat, Box::new(value)));
@@ -590,9 +590,9 @@ fn parse_let_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<E
 
     tokens.expect(Token::Eq)?;
 
-    let value = match is_block(tokens) {
+    let value = match is_block(tokens) && multiline {
         true => parse_block(tokens)?,
-        false => parse_pipe_expr(tokens, multiline)?,
+        false => parse_match_or_pipe_expr(tokens, false)?,
     };
 
     Ok(Expr::Let(pat, ty, Box::new(value)))
@@ -610,29 +610,33 @@ fn parse_mut_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<E
 
     tokens.expect(Token::Eq)?;
 
-    let value = match is_block(tokens) {
+    let value = match is_block(tokens) && multiline {
         true => parse_block(tokens)?,
-        false => parse_expr(tokens, multiline)?,
+        false => parse_match_or_pipe_expr(tokens, false)?,
     };
 
     Ok(Expr::Mut(name, ty, Box::new(value)))
 }
 
-fn parse_match_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    if !multiline {
-        return Err(miette::miette!(
-            severity = Severity::Error,
-            code = "expected::match",
-            labels = vec![tokens.peek().1.label("here")],
-            "expected match expression",
-        )
-        .with_source_code(tokens.peek().1));
-    }
+fn parse_match_or_pipe_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let (token, _) = tokens.peek();
 
+    match token {
+        Token::Match => parse_match_expr(tokens, multiline),
+        _ => parse_pipe_expr(tokens, multiline),
+    }
+}
+
+fn parse_match_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
     let span = tokens.expect(Token::Match)?;
 
     let input = parse_expr(tokens, false)?;
     let mut arms = Vec::new();
+
+    if !multiline {
+        tokens.expect(Token::Newline)?;
+        tokens.expect(Token::Indent)?;
+    }
 
     while is_arm(tokens) {
         if tokens.is(Token::Newline) {
@@ -640,6 +644,14 @@ fn parse_match_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result
         }
 
         arms.push(parse_arm(tokens)?);
+    }
+
+    if !multiline {
+        while tokens.is(Token::Newline) {
+            tokens.consume();
+        }
+
+        tokens.expect(Token::Dedent)?;
     }
 
     Ok(Expr::Match(Box::new(input), arms, span))

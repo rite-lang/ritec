@@ -6,10 +6,11 @@ import std:dict
 import std:dict:Dict
 
 fn main()
-  [1, 2, 3, 4]
-  |> list:chunk_pairs
-  |> dict:from_pairs
-  |> debug:print
+  let x =
+    [1, 2, 3, 4]
+    |> list:chunk_pairs
+    |> dict:from_pairs
+    |> debug:print
 
   let dict = dict:new() |> dict:insert("a", 1)
   io:println(f"dict: {dict}")
