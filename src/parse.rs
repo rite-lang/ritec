@@ -144,11 +144,6 @@ fn parse_func_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
     let (name, span) = parse_snake(tokens)?;
     let input = parse_arguments(tokens)?;
     let output = parse_output(tokens)?;
-
-    while tokens.is(Token::Newline) {
-        tokens.consume();
-    }
-
     let body = parse_body(tokens)?;
 
     Ok(Func {
@@ -551,7 +546,11 @@ fn parse_generic(tokens: &mut TokenStream) -> miette::Result<Generic> {
 }
 
 fn parse_body(tokens: &mut TokenStream) -> miette::Result<Option<Expr>> {
-    if !is_block(tokens) {
+    while tokens.is(Token::Newline) {
+        tokens.consume();
+    }
+
+    if !tokens.is(Token::Indent) {
         return Ok(None);
     }
 
@@ -561,7 +560,7 @@ fn parse_body(tokens: &mut TokenStream) -> miette::Result<Option<Expr>> {
 fn parse_block(tokens: &mut TokenStream) -> miette::Result<Expr> {
     let mut exprs = Vec::new();
 
-    tokens.expect(Token::Newline)?;
+    tokens.take(Token::Newline);
     tokens.expect(Token::Indent)?;
 
     while !tokens.is(Token::Dedent) {
