@@ -2,6 +2,11 @@
 
 import std:string
 
+pub type Error =
+  | NotFound
+  | PermissionDenied
+  | Other
+
 /// Print a string to the standard output.
 #[language("io:print")]
 pub fn print(a: str) -> void

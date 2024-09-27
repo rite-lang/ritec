@@ -1,7 +1,7 @@
-import std:io
+import std:fs
 import std:debug
-import std:array
-import std:string
+import std:result:Result
 
 fn main()
-  "Hello, world!" |> string:bytes |> debug:print
+  fs:read_to_string("test/test.ri")? |> std:io:println
+  Ok(void)

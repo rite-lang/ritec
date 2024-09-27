@@ -1,5 +1,6 @@
 //! Filesystem operations.
 
+import array:Array
 import result:Result
 
 #[language("fs:File")]
@@ -7,8 +8,35 @@ pub type File
 
 /// Open a file.
 #[language("fs:open")]
-pub fn open(path: str) -> Result<File, void>
+pub fn open(path: str) -> Result<File, io:Error>
   panic "fs:open builtin not implemented"
 
+/// Close a file.
+#[language("fs:close")]
+pub fn close(file: File) -> Result<void, io:Error>
+  panic "fs:close builtin not implemented"
 
+/// Read all the contents of a file.
+#[language("fs:read_all")]
+pub fn read_all(file: File) -> Result<Array<u8>, io:Error>
+  panic "fs:read builtin not implemented"
 
+/// Write all the contents of a file.
+#[language("fs:write_all")]
+pub fn write_all(file: File, contents: Array<u8>) -> Result<void, io:Error>
+  panic "fs:write builtin not implemented"
+
+/// Read a file to a string.
+pub fn read_to_string(path: str) -> Result<str, io:Error>
+  let file = open(path)?
+  let contents = read_all(file)
+  close(file)?
+  contents |> result:map(string:from_bytes)
+
+/// Write a string to a file.
+pub fn write_from_string(path: str, contents: str) -> Result<void, io:Error>
+  let file = open(path)?
+  let bytes = contents |> string:bytes
+  let result = write_all(file, bytes)
+  close(file)?
+  result

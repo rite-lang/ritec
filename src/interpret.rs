@@ -6,8 +6,60 @@ use crate::{
         Statement, Unit,
     },
 };
-use std::collections::{BTreeMap, HashMap};
-use std::{cell::RefCell, iter::Peekable, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp,
+    io::{self, Read, Write},
+    iter::Peekable,
+    rc::Rc,
+    sync::{
+        atomic::{self, AtomicUsize},
+        Arc, Mutex,
+    },
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+};
+
+#[derive(Clone, Debug)]
+pub struct RiteFile {
+    id: usize,
+    file: Arc<Mutex<Option<fs::File>>>,
+}
+
+impl RiteFile {
+    fn new(file: fs::File) -> Self {
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+        let id = NEXT_ID.fetch_add(1, atomic::Ordering::Relaxed);
+
+        Self {
+            id,
+            file: Arc::new(Mutex::new(Some(file))),
+        }
+    }
+}
+
+impl PartialEq for RiteFile {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for RiteFile {}
+
+impl PartialOrd for RiteFile {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RiteFile {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
@@ -20,7 +72,8 @@ pub enum Value {
     String(String),
     Ref(Rc<RefCell<Value>>),
     Dict(BTreeMap<Value, Value>),
-    Array(usize, Vec<Value>),
+    Array(Vec<Value>),
+    File(RiteFile),
 }
 
 impl Value {
@@ -88,7 +141,7 @@ impl std::fmt::Display for Value {
 
                 write!(f, " }}")
             }
-            Value::Array(_, values) => {
+            Value::Array(values) => {
                 write!(f, "[")?;
 
                 for (i, value) in values.iter().enumerate() {
@@ -101,6 +154,7 @@ impl std::fmt::Display for Value {
 
                 write!(f, "]")
             }
+            Value::File(file) => write!(f, "File({})", file.id),
         }
     }
 }
@@ -144,13 +198,13 @@ fn string_bytes(mut args: Vec<Value>) -> Value {
         .map(|&b| Value::Int(b as i64))
         .collect::<Vec<_>>();
 
-    Value::Array(bytes.len(), bytes)
+    Value::Array(bytes)
 }
 
 fn string_from_bytes(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
-    let Value::Array(_, bytes) = args.pop().unwrap() else {
+    let Value::Array(bytes) = args.pop().unwrap() else {
         panic!("expected array")
     };
 
@@ -308,13 +362,13 @@ fn array_new(mut args: Vec<Value>) -> Value {
 
     let len = len as usize;
 
-    Value::Array(len, vec![default; len])
+    Value::Array(vec![default; len])
 }
 
 fn array_empty(args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 0);
 
-    Value::Array(0, Vec::new())
+    Value::Array(Vec::new())
 }
 
 fn array_extend(mut args: Vec<Value>) -> Value {
@@ -324,20 +378,15 @@ fn array_extend(mut args: Vec<Value>) -> Value {
         panic!("expected integer")
     };
 
-    let Value::Array(len, mut values) = args.pop().unwrap() else {
+    let Value::Array(mut arr) = args.pop().unwrap() else {
         panic!("expected array")
     };
 
     let default = args.pop().unwrap();
 
-    let len2 = len2 as usize;
-    let new_len = len + len2;
+    arr.resize(arr.len() + len2 as usize, default);
 
-    values.extend(vec![default; len2]);
-
-    assert_eq!(values.len(), new_len);
-
-    Value::Array(new_len, values)
+    Value::Array(arr)
 }
 
 fn array_truncate(mut args: Vec<Value>) -> Value {
@@ -347,28 +396,23 @@ fn array_truncate(mut args: Vec<Value>) -> Value {
         panic!("expected integer")
     };
 
-    let Value::Array(len, mut values) = args.pop().unwrap() else {
+    let Value::Array(mut arr) = args.pop().unwrap() else {
         panic!("expected array")
     };
 
-    let len2 = len2 as usize;
-    let new_len = len - len2;
+    arr.truncate(arr.len() - len2 as usize);
 
-    values.truncate(new_len);
-
-    assert_eq!(values.len(), new_len);
-
-    Value::Array(new_len, values)
+    Value::Array(arr)
 }
 
 fn array_length(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
-    let Value::Array(len, _) = args.pop().unwrap() else {
+    let Value::Array(arr) = args.pop().unwrap() else {
         panic!("expected array")
     };
 
-    Value::Int(len as i64)
+    Value::Int(arr.len() as i64)
 }
 
 fn array_get(mut args: Vec<Value>) -> Value {
@@ -378,17 +422,14 @@ fn array_get(mut args: Vec<Value>) -> Value {
         panic!("expected integer")
     };
 
-    let Value::Array(len, values) = args.pop().unwrap() else {
+    let Value::Array(arr) = args.pop().unwrap() else {
         panic!("expected array")
     };
 
-    let index = index as usize;
-
-    if index >= len {
-        return Value::Adt(1, vec![Value::Void]);
+    match arr.get(index as usize) {
+        Some(value) => Value::Adt(0, vec![value.clone()]),
+        None => Value::Adt(1, vec![Value::Void]),
     }
-
-    Value::Adt(0, vec![values[index].clone()])
 }
 
 fn array_set(mut args: Vec<Value>) -> Value {
@@ -400,17 +441,126 @@ fn array_set(mut args: Vec<Value>) -> Value {
         panic!("expected integer")
     };
 
-    let Value::Array(len, mut values) = args.pop().unwrap() else {
+    let Value::Array(mut arr) = args.pop().unwrap() else {
         panic!("expected array")
     };
 
     let index = index as usize;
 
-    if index < len {
-        values[index] = value.clone();
+    if index < arr.len() {
+        arr[index] = value.clone();
     }
 
-    Value::Array(len, values)
+    Value::Array(arr)
+}
+
+fn rite_io_error(kind: io::ErrorKind) -> Value {
+    let err = match kind {
+        io::ErrorKind::NotFound => 0,
+        io::ErrorKind::PermissionDenied => 1,
+        _ => 2,
+    };
+
+    Value::Adt(1, vec![Value::Adt(err, Vec::new())])
+}
+
+fn rite_io_error_other() -> Value {
+    Value::Adt(1, vec![Value::Adt(2, Vec::new())])
+}
+
+fn fs_open(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(path) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let mut opts = fs::OpenOptions::new();
+    opts.read(true).write(true).create(true);
+
+    match opts.open(&path) {
+        Ok(file) => {
+            let file = Value::File(RiteFile::new(file));
+            Value::Adt(0, vec![file])
+        }
+        Err(err) => rite_io_error(err.kind()),
+    }
+}
+
+fn fs_close(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::File(file) = args.pop().unwrap() else {
+        panic!("expected file")
+    };
+
+    file.file.lock().unwrap().take();
+
+    Value::Adt(0, vec![Value::Void])
+}
+
+fn fs_read_all(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::File(file) = args.pop().unwrap() else {
+        panic!("expected file")
+    };
+
+    let mut file = file.file.lock().unwrap();
+
+    let mut contents = Vec::new();
+
+    match file.as_mut() {
+        Some(file) => match file.read_to_end(&mut contents) {
+            Ok(_) => {
+                let contents = contents
+                    .into_iter()
+                    .map(|b| b as i64)
+                    .map(Value::Int)
+                    .collect();
+
+                Value::Adt(0, vec![Value::Array(contents)])
+            }
+
+            Err(err) => rite_io_error(err.kind()),
+        },
+        None => rite_io_error_other(),
+    }
+}
+
+fn fs_write_all(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let Value::Array(bytes) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    let Value::File(file) = args.pop().unwrap() else {
+        panic!("expected file")
+    };
+
+    let mut file = file.file.lock().unwrap();
+
+    match file.as_mut() {
+        Some(file) => {
+            let bytes = bytes
+                .iter()
+                .map(|value| {
+                    let Value::Int(b) = value else {
+                        panic!("expected integer")
+                    };
+
+                    *b as u8
+                })
+                .collect::<Vec<_>>();
+
+            match file.write_all(&bytes) {
+                Ok(_) => Value::Adt(0, vec![Value::Void]),
+                Err(err) => rite_io_error(err.kind()),
+            }
+        }
+        None => rite_io_error_other(),
+    }
 }
 
 fn io_print(mut args: Vec<Value>) -> Value {
@@ -476,6 +626,10 @@ impl<'a> Interpreter<'a> {
                     "array:length" => array_length,
                     "array:get" => array_get,
                     "array:set" => array_set,
+                    "fs:open" => fs_open,
+                    "fs:close" => fs_close,
+                    "fs:read_all" => fs_read_all,
+                    "fs:write_all" => fs_write_all,
                     // we allow intrinsics to have pure rite fallbacks.
                     _ => continue,
                 };
