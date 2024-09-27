@@ -116,7 +116,7 @@ pub fn lex(file: &'static str, source: &'static str) -> miette::Result<TokenStre
             }
 
             // Only skip whitespace if we are not in a special context.
-            if matches!(lexer.state, LexerState::Idle) {
+            if !matches!(lexer.state, LexerState::Format(FormatState::ParseString)) {
                 skip_whitespace(&mut lexer);
             }
 
