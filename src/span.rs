@@ -1,13 +1,31 @@
-use std::ops::Range;
+use std::{
+    hash::{Hash, Hasher},
+    ops::Range,
+};
 
 use miette::{LabeledSpan, MietteError, MietteSpanContents, SourceCode, SourceSpan, SpanContents};
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
     pub file: &'static str,
     pub source: &'static str,
+}
+
+impl PartialEq for Span {
+    fn eq(&self, other: &Self) -> bool {
+        self.lo == other.lo && self.hi == other.hi
+    }
+}
+
+impl Eq for Span {}
+
+impl Hash for Span {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.lo.hash(state);
+        self.hi.hash(state);
+    }
 }
 
 impl Span {
