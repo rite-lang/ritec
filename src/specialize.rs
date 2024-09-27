@@ -243,6 +243,7 @@ fn specialize_block(spec: &mut Specializer, block: Block) -> Block<Specific> {
 fn specialize_value(spec: &mut Specializer, value: Value) -> Value<Specific> {
     match value {
         Value::Use(operand) => Value::Use(specialize_operand(spec, operand)),
+        Value::Cast(cast, operand) => Value::Cast(cast, specialize_operand(spec, operand)),
         Value::Func(index, args, generics) => {
             let args = args
                 .into_iter()

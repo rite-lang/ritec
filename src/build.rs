@@ -276,6 +276,7 @@ fn build_place(
         | hir::ExprKind::ListTail(_)
         | hir::ExprKind::ListEmpty(_)
         | hir::ExprKind::Block(_)
+        | hir::ExprKind::As(_, _)
         | hir::ExprKind::IsVariant(_, _)
         | hir::ExprKind::VariantNew(_, _, _)
         | hir::ExprKind::Call(_, _)
@@ -476,6 +477,7 @@ fn build_operand(
         | hir::ExprKind::ListHead(_)
         | hir::ExprKind::ListTail(_)
         | hir::ExprKind::ListEmpty(_)
+        | hir::ExprKind::As(_, _)
         | hir::ExprKind::IsVariant(_, _)
         | hir::ExprKind::VariantNew(_, _, _)
         | hir::ExprKind::Call(_, _)
@@ -600,6 +602,31 @@ fn build_value(
             let expr = build_operand(builder, block, expr)?;
 
             Ok(rir::Value::Unary(op, expr))
+        }
+
+        hir::ExprKind::As(ref expr, ref ty) => {
+            let from_ty = builder.build_ty(&expr.ty)?;
+            let to_ty = builder.build_ty(ty)?;
+            let expr = build_operand(builder, block, expr)?;
+
+            match to_ty {
+                rir::Ty::Int(kind) => {
+                    if !matches!(from_ty, rir::Ty::Int(_)) {
+                        return Err(miette::miette!(
+                            "invalid cast: {:?} as {:?}",
+                            from_ty,
+                            to_ty
+                        ));
+                    }
+
+                    Ok(rir::Value::Cast(rir::Cast::Int(kind), expr))
+                }
+                _ => Err(miette::miette!(
+                    "invalid cast: {:?} as {:?}",
+                    from_ty,
+                    to_ty
+                )),
+            }
         }
 
         hir::ExprKind::Tuple(ref exprs) => {

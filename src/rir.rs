@@ -178,6 +178,7 @@ pub enum Statement<T = Ty> {
 #[derive(Clone, Debug)]
 pub enum Value<T = Ty> {
     Use(Operand<T>),
+    Cast(Cast, Operand<T>),
     Func(usize, Vec<Operand<T>>, Vec<T>),
     List(Vec<Operand<T>>, Option<Operand<T>>),
     ListHead(Operand<T>),
@@ -190,6 +191,12 @@ pub enum Value<T = Ty> {
     Ref(Place<T>),
     Tuple(Vec<Operand<T>>),
     Adt(usize, Vec<Operand<T>>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Cast {
+    Int(IntKind),
+    Float(FloatKind),
 }
 
 #[derive(Clone, Debug)]

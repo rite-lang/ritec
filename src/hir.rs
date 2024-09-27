@@ -199,6 +199,7 @@ pub enum ExprKind {
     ListTail(Box<Expr>),
     ListEmpty(Box<Expr>),
     Block(Vec<Expr>),
+    As(Box<Expr>, Ty),
     Field(Box<Expr>, &'static str),
     VariantField(Box<Expr>, usize, usize),
     TupleField(Box<Expr>, usize),

@@ -125,6 +125,7 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     List(Vec<Expr>, Option<Box<Expr>>, Span),
     Block(Vec<Expr>),
+    As(Box<Expr>, Ty),
     Field(Box<Expr>, &'static str),
     Call(Box<Expr>, Vec<CallArgument>, Option<Box<Expr>>),
     Pipe(Box<Expr>, Vec<Expr>),
@@ -160,6 +161,7 @@ impl Expr {
                 let end = exprs.last().unwrap().span();
                 start.join(end)
             }
+            Expr::As(expr, _) => expr.span(),
             Expr::Field(expr, _) => expr.span(),
             Expr::Call(func, args, _) => {
                 let mut start = func.span();

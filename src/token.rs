@@ -36,6 +36,7 @@ pub enum Token {
     RBrace,
 
     /* keywords */
+    As,
     Assert,
     Bool,
     F32,
@@ -103,6 +104,7 @@ pub enum Token {
 impl Token {
     pub fn keyword_from_str(s: &str) -> Option<Token> {
         Some(match s {
+            "as" => Token::As,
             "assert" => Token::Assert,
             "bool" => Token::Bool,
             "f32" => Token::F32,

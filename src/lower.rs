@@ -764,6 +764,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Tuple(exprs) => lower_tuple(cx, exprs),
         ast::Expr::List(exprs, rest, span) => lower_list(cx, exprs, rest, *span),
         ast::Expr::Block(block) => lower_block(cx, block),
+        ast::Expr::As(expr, ty) => lower_as(cx, expr, ty),
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
         ast::Expr::Call(func, args, spread) => lower_call(cx, func, args, spread.as_deref()),
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
@@ -1098,6 +1099,15 @@ fn lower_block(cx: &mut BodyCx, block: &[ast::Expr]) -> miette::Result<hir::Expr
     let kind = hir::ExprKind::Block(exprs);
     let ty = ty.expect("block should have at least one expression");
 
+    Ok(hir::Expr { kind, ty })
+}
+
+fn lower_as(cx: &mut BodyCx, expr: &ast::Expr, ty: &ast::Ty) -> miette::Result<hir::Expr> {
+    let span = expr.span();
+    let expr = lower_expr(cx, expr)?;
+    let ty = lower_ty(&mut cx.as_ty_cx(), ty, span)?;
+
+    let kind = hir::ExprKind::As(Box::new(expr), ty.clone());
     Ok(hir::Expr { kind, ty })
 }
 

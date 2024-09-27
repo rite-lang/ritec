@@ -772,6 +772,7 @@ impl<'a> Interpreter<'a> {
     fn interpret_value(&self, frame: &mut Frame, value: &rir::Value<Specific>) -> Value {
         match value {
             rir::Value::Use(operand) => self.interpret_operand(frame, operand),
+            rir::Value::Cast(_, operand) => self.interpret_operand(frame, operand),
             rir::Value::Func(index, captures, _) => {
                 let captures = captures
                     .iter()

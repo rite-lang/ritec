@@ -900,7 +900,7 @@ fn parse_binary_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Resul
         _ => {}
     }
 
-    let lhs = parse_unary_expr(tokens, multiline)?;
+    let lhs = parse_as_expr(tokens, multiline)?;
 
     let Some(lop) = get_binop(tokens) else {
         return Ok(lhs);
@@ -951,6 +951,18 @@ fn get_binop(tokens: &TokenStream) -> Option<BinOp> {
         Token::GtEq => BinOp::Ge,
         _ => return None,
     })
+}
+
+fn parse_as_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
+    let lhs = parse_unary_expr(tokens, multiline)?;
+
+    if tokens.take(Token::As).is_none() {
+        return Ok(lhs);
+    }
+
+    let ty = parse_ty(tokens)?;
+
+    Ok(Expr::As(Box::new(lhs), ty))
 }
 
 fn parse_unary_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
