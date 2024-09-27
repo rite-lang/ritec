@@ -40,6 +40,11 @@ pub fn get(array: Array<'a>, index: int) -> Result<'a, void>
 pub fn set(array: Array<'a>, index: int, value: 'a) -> Array<'a>
   panic "array:get builtin not implemented"
 
+/// Slice an array.
+#[language("array:slice")]
+pub fn slice(array: Array<'a>, start: int, end: int) -> Array<'a>
+  panic "array:slice builtin not implemented"
+
 /// Fold over an array.
 pub fn fold(array: Array<'a>, acc: 'b, f: fn('a, 'b) -> 'b) -> 'b
   fold_rec(array, acc, f, 0)

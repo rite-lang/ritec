@@ -5,5 +5,6 @@ import std:io
 
 fn main(args: [str])
   let assert [program, subcommand, ..] = args
+  io:println(f"Running test: {subcommand}")
 
   Ok(void)

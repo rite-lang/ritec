@@ -231,6 +231,29 @@ fn string_length(mut args: Vec<Value>) -> Value {
     Value::Int(s.len() as i64)
 }
 
+fn string_slice(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 3);
+
+    let Value::Int(end) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Int(start) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let start = start as usize;
+    let end = end as usize;
+
+    let s = s[start..end].to_string();
+
+    Value::String(s)
+}
+
 fn string_graphemes(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
@@ -454,6 +477,29 @@ fn array_set(mut args: Vec<Value>) -> Value {
     Value::Array(arr)
 }
 
+fn array_slice(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 3);
+
+    let Value::Int(end) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Int(start) = args.pop().unwrap() else {
+        panic!("expected integer")
+    };
+
+    let Value::Array(arr) = args.pop().unwrap() else {
+        panic!("expected array")
+    };
+
+    let start = start as usize;
+    let end = end as usize;
+
+    let arr = arr[start..end].to_vec();
+
+    Value::Array(arr)
+}
+
 fn rite_io_error(kind: io::ErrorKind) -> Value {
     let err = match kind {
         io::ErrorKind::NotFound => 0,
@@ -608,6 +654,7 @@ impl<'a> Interpreter<'a> {
                     "string:from_bytes" => string_from_bytes,
                     "string:concat" => string_concat,
                     "string:length" => string_length,
+                    "string:slice" => string_slice,
                     "string:graphemes" => string_graphemes,
                     "debug:format" => debug_format,
                     "io:print" => io_print,
@@ -626,6 +673,7 @@ impl<'a> Interpreter<'a> {
                     "array:length" => array_length,
                     "array:get" => array_get,
                     "array:set" => array_set,
+                    "array:slice" => array_slice,
                     "fs:open" => fs_open,
                     "fs:close" => fs_close,
                     "fs:read_all" => fs_read_all,

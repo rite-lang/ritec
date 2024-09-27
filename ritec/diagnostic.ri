@@ -36,9 +36,7 @@ pub fn add_label(
   message:    str
   span:       Span
 ) -> Diagnostic
-  Diagnostic(
-    labels:
-      diagnostic.labels
-      |> list:append(Label(message, span))
-    ..diagnostic
-  )
+  let labels = diagnostic.labels
+    |> list:append(Label(message, span))
+
+  Diagnostic(labels: labels, ..diagnostic)

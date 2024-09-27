@@ -2085,6 +2085,15 @@ fn build_match_tree(
 ) -> miette::Result<hir::Ty> {
     match pat {
         Pat::Bool(value, _) => {
+            let next_pat = pats.next();
+
+            if matches!(tree, Match::Bind(_)) && next_pat.is_none() {
+                let expr = lower_expr(cx, body)?;
+                let ty = expr.ty.clone();
+
+                return Ok(ty);
+            }
+
             let Match::Bool {
                 r#true,
                 r#false,
@@ -2106,14 +2115,14 @@ fn build_match_tree(
                 },
             };
 
-            match pats.next() {
+            match next_pat {
                 Some((input, pat)) => build_match_tree(cx, input, pat, pats, subtree, body, locals),
                 None => {
                     let expr = lower_expr(cx, body)?;
                     let ty = expr.ty.clone();
 
                     if matches!(subtree.as_ref(), Match::None) {
-                        *subtree = Box::new(Match::Leaf(locals, expr));
+                        **subtree = Match::Leaf(locals, expr);
                     }
 
                     Ok(ty)
@@ -2140,6 +2149,23 @@ fn build_match_tree(
             build_match_tree(cx, input, pat, &mut pats, tree, body, locals)
         }
         Pat::Variant(adt, variant, fields, _) => {
+            let fields = fields.into_iter().enumerate().map(|(i, (ty, pat))| {
+                let kind = hir::ExprKind::VariantField(Box::new(input.clone()), variant, i);
+                let ty = ty.clone();
+
+                let input = hir::Expr { kind, ty };
+                (input, pat)
+            });
+
+            let mut pats = fields.chain(pats);
+            let next_pat = pats.next();
+
+            if matches!(tree, Match::Bind(_)) && next_pat.is_none() {
+                let expr = lower_expr(cx, body)?;
+                let ty = expr.ty.clone();
+                return Ok(ty);
+            }
+
             let variants = cx.unit.adts[adt].variants.len();
             let Match::Adt {
                 variants, default, ..
@@ -2163,17 +2189,7 @@ fn build_match_tree(
                 }
             };
 
-            let fields = fields.into_iter().enumerate().map(move |(i, (ty, pat))| {
-                let kind = hir::ExprKind::VariantField(Box::new(input.clone()), variant, i);
-                let ty = ty.clone();
-
-                let input = hir::Expr { kind, ty };
-                (input, pat)
-            });
-
-            let mut pats = fields.chain(pats);
-
-            match pats.next() {
+            match next_pat {
                 Some((input, pat)) => {
                     build_match_tree(cx, input, pat, &mut pats, subtree, body, locals)
                 }
@@ -2189,72 +2205,88 @@ fn build_match_tree(
                 }
             }
         }
-        Pat::List(pat, span) => {
-            let Match::List {
-                some,
-                none,
-                default,
-                ..
-            } = tree.as_list(&input)?
-            else {
-                unreachable!()
-            };
+        Pat::List(pat, span) => match pat.map(|p| *p) {
+            Some((head, tail)) => {
+                let Match::List {
+                    some,
+                    none,
+                    default,
+                    ..
+                } = tree.as_list(&input)?
+                else {
+                    unreachable!()
+                };
 
-            match pat.map(|p| *p) {
-                Some((head, tail)) => {
-                    let some = match none {
-                        Some(_) => default,
-                        None => some.get_or_insert_with(|| Box::new(Match::None)),
-                    };
+                let some = match none {
+                    Some(_) => default,
+                    None => some.get_or_insert_with(|| Box::new(Match::None)),
+                };
 
-                    let head_ty = hir::Ty::any(span);
-                    let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()], span);
+                let head_ty = hir::Ty::any(span);
+                let list_ty = hir::Ty::Partial(hir::Part::List, vec![head_ty.clone()], span);
 
-                    cx.unit.unify(input.ty.clone(), list_ty.clone(), span);
+                cx.unit.unify(input.ty.clone(), list_ty.clone(), span);
 
-                    let head_kind = hir::ExprKind::ListHead(Box::new(input.clone()));
-                    let head_expr = hir::Expr {
-                        kind: head_kind,
-                        ty: head_ty,
-                    };
+                let head_kind = hir::ExprKind::ListHead(Box::new(input.clone()));
+                let head_expr = hir::Expr {
+                    kind: head_kind,
+                    ty: head_ty,
+                };
 
-                    let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
-                    let tail_expr = hir::Expr {
-                        kind: tail_kind,
-                        ty: list_ty,
-                    };
+                let tail_kind = hir::ExprKind::ListTail(Box::new(input.clone()));
+                let tail_expr = hir::Expr {
+                    kind: tail_kind,
+                    ty: list_ty,
+                };
 
-                    let mut pats = [(head_expr, head), (tail_expr, tail)]
-                        .into_iter()
-                        .chain(pats);
+                let mut pats = [(head_expr, head), (tail_expr, tail)]
+                    .into_iter()
+                    .chain(pats);
 
-                    let (input, pat) = pats.next().unwrap();
-                    build_match_tree(cx, input, pat, &mut pats, some, body, locals)
+                let (input, pat) = pats.next().unwrap();
+                build_match_tree(cx, input, pat, &mut pats, some, body, locals)
+            }
+            None => {
+                let next_pat = pats.next();
+
+                if matches!(tree, Match::Bind(_)) && next_pat.is_none() {
+                    let expr = lower_expr(cx, body)?;
+                    let ty = expr.ty.clone();
+                    return Ok(ty);
                 }
-                None => {
-                    let none = match some {
-                        Some(_) => default,
-                        None => none.get_or_insert_with(|| Box::new(Match::None)),
-                    };
 
-                    match pats.next() {
-                        Some((input, pat)) => {
-                            build_match_tree(cx, input, pat, pats, none, body, locals)
+                let Match::List {
+                    some,
+                    none,
+                    default,
+                    ..
+                } = tree.as_list(&input)?
+                else {
+                    unreachable!()
+                };
+
+                let none = match some {
+                    Some(_) => default,
+                    None => none.get_or_insert_with(|| Box::new(Match::None)),
+                };
+
+                match pats.next() {
+                    Some((input, pat)) => {
+                        build_match_tree(cx, input, pat, pats, none, body, locals)
+                    }
+                    None => {
+                        let expr = lower_expr(cx, body)?;
+                        let ty = expr.ty.clone();
+
+                        if matches!(none.as_ref(), Match::None) {
+                            **none = Match::Leaf(locals, expr);
                         }
-                        None => {
-                            let expr = lower_expr(cx, body)?;
-                            let ty = expr.ty.clone();
 
-                            if matches!(none.as_ref(), Match::None) {
-                                *none = Box::new(Match::Leaf(locals, expr));
-                            }
-
-                            Ok(ty)
-                        }
+                        Ok(ty)
                     }
                 }
             }
-        }
+        },
         Pat::Bind(name, span) => {
             if let Some(name) = name {
                 let id = cx.locals.len();

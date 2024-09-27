@@ -10,6 +10,11 @@ pub fn concat(a: str, b: str) -> str
 pub fn length(s: str) -> int
   bytes(s) |> std:array:length
 
+/// Slice a string.
+#[language("string:slice")]
+pub fn slice(s: str, start: int, end: int) -> str
+  bytes(s) |> std:array:slice(start, end) |> from_bytes
+
 /// Convert a string to a list of graphemes.
 ///
 /// A grapheme is a single unit of text that is displayed as a single character.
@@ -28,8 +33,8 @@ pub fn from_bytes(a: array:Array<u8>) -> str
   panic "string:from_bytes builtin not implemented"
 
 /// Join a list of strings with a separator.
-pub fn join(sep: str, xs: [str]) -> str
+pub fn join(xs: [str], sep: str) -> str
   match xs
   | [] -> ""
   | [s] -> s
-  | [s, ..rest] -> concat(s, sep) |> concat(_, join(sep, rest))
+  | [s, ..rest] -> s |> concat(sep) |> concat(join(rest, sep))
