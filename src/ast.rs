@@ -109,6 +109,12 @@ pub struct Generic {
 }
 
 #[derive(Debug)]
+pub enum CallArgument {
+    Positional(Option<Expr>),
+    Named(&'static str, Expr),
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Void(Span),
     String(&'static str, Span),
@@ -120,13 +126,13 @@ pub enum Expr {
     List(Vec<Expr>, Option<Box<Expr>>, Span),
     Block(Vec<Expr>),
     Field(Box<Expr>, &'static str),
-    Call(Box<Expr>, Vec<Option<Expr>>),
+    Call(Box<Expr>, Vec<CallArgument>, Option<Box<Expr>>),
     Pipe(Box<Expr>, Vec<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>, Span),
     Unary(UnOp, Box<Expr>, Span),
     Let(Pat, Option<Ty>, Box<Expr>),
     Mut(&'static str, Option<Ty>, Box<Expr>),
-    LetAssert(Pat, Box<Expr>),
+    LetAssert(Pat, Option<Ty>, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>, Span),
     Closure(Vec<Argument>, Box<Expr>),
@@ -155,11 +161,19 @@ impl Expr {
                 start.join(end)
             }
             Expr::Field(expr, _) => expr.span(),
-            Expr::Call(func, args) => {
+            Expr::Call(func, args, _) => {
                 let mut start = func.span();
 
-                for arg in args.iter().flatten() {
-                    start = start.join(arg.span());
+                for arg in args.iter() {
+                    match arg {
+                        CallArgument::Positional(Some(expr)) => {
+                            start = start.join(expr.span());
+                        }
+                        CallArgument::Positional(None) => {}
+                        CallArgument::Named(_, expr) => {
+                            start = start.join(expr.span());
+                        }
+                    }
                 }
 
                 start
@@ -184,7 +198,7 @@ impl Expr {
             }
             Expr::Let(_, _, expr) => expr.span(),
             Expr::Mut(_, _, expr) => expr.span(),
-            Expr::LetAssert(_, expr) => expr.span(),
+            Expr::LetAssert(_, _, expr) => expr.span(),
             Expr::Assign(lhs, rhs) => {
                 let start = lhs.span();
                 let end = rhs.span();

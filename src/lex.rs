@@ -37,6 +37,10 @@ impl Lexer {
         self.rest().chars().next()
     }
 
+    fn peek_nth(&self, n: usize) -> Option<char> {
+        self.rest().chars().nth(n)
+    }
+
     fn next(&mut self) -> Option<char> {
         let c = self.peek()?;
         self.lo += c.len_utf8();
@@ -314,7 +318,21 @@ fn lex_token(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
     }
 
     if c.is_alphabetic() || c == '_' {
-        let (token, span) = lex_identifier(lexer)?;
+        let (mut token, mut span) = lex_identifier(lexer)?;
+
+        // FIXME: this is beyond ugly, but it works
+        while lexer.peek() == Some(':')
+            && lexer
+                .peek_nth(1)
+                .map_or(false, |c| c.is_alphabetic() || c == '_')
+        {
+            _ = lexer.next();
+
+            let (_, next_span) = lex_identifier(lexer)?;
+
+            token = Token::Path;
+            span = span.join(next_span);
+        }
 
         return match Token::keyword_from_str(span.as_str()) {
             Some(keyword) => Ok((keyword, span)),

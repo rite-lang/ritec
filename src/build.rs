@@ -214,7 +214,9 @@ fn build_place(
                 unreachable!("unexpected field: {:?}", place.ty)
             };
 
-            let (field, _) = builder.hir.adts[*index].find_field(field)?;
+            let Some((field, _)) = builder.hir.adts[*index].find_field(field) else {
+                return Err(miette::miette!("field not found: {:?}", field));
+            };
 
             place.projection.push(rir::Projection {
                 kind: rir::ProjectionKind::Field {

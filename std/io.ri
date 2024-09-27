@@ -1,6 +1,7 @@
 //! IO operations.
 
 import std:string
+import std:array
 
 pub type Error =
   | NotFound
@@ -9,10 +10,10 @@ pub type Error =
 
 /// Print a string to the standard output.
 #[language("io:print")]
-pub fn print(a: str) -> void
+pub fn print(input: str) -> void
   panic
 
 /// Print a string to the standard output followed by a newline.
-pub fn println(a: str) -> void
-  let newline = string:from_bytes(std:array:from_list([10]))
-  print(string:concat(a, newline))
+pub fn println(input: str) -> void
+  let newline = array:from_list([10]) |> string:from_bytes
+  input |> string:concat(newline) |> print

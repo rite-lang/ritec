@@ -1,0 +1,44 @@
+import std:list
+
+import span:Span
+
+pub type Diagnostic(
+  severity: Severity
+  code:     str
+  labels:   [Label]
+  message:  str
+)
+
+pub type Severity =
+  | Error
+  | Warning 
+  | Help
+
+pub type Label(
+  message:  str
+  span:     Span
+)
+
+pub fn new(
+  severity: Severity
+  code:     str
+  message:  str
+) -> Diagnostic
+  Diagnostic(
+    severity: severity
+    code:     code
+    labels:   []
+    message:  message
+  )
+
+pub fn add_label(
+  diagnostic: Diagnostic
+  message:    str
+  span:       Span
+) -> Diagnostic
+  Diagnostic(
+    labels:
+      diagnostic.labels
+      |> list:append(Label(message, span))
+    ..diagnostic
+  )

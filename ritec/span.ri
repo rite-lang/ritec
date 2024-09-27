@@ -1,0 +1,4 @@
+pub type Span(
+  start: int
+  end: int
+)

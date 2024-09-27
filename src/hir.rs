@@ -86,6 +86,12 @@ pub struct Func {
     pub body: Expr,
 }
 
+impl Func {
+    pub fn find_argument(&self, name: &str) -> Option<usize> {
+        self.input.iter().position(|arg| arg.name == name)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Local {
     pub mutable: bool,
@@ -112,6 +118,12 @@ pub enum Vis {
 pub struct Variant {
     pub name: &'static str,
     pub fields: Vec<Argument>,
+}
+
+impl Variant {
+    pub fn find_field(&self, name: &str) -> Option<usize> {
+        self.fields.iter().position(|field| field.name == name)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -258,38 +270,48 @@ impl Adt {
             .ok_or_else(|| miette::miette!("variant not found `{}` in ADT `{}`", name, self.name))
     }
 
-    pub fn find_field(&self, name: &str) -> miette::Result<(usize, Ty)> {
-        let mut index = None;
-        let mut ty = None;
+    pub fn is_field_assessible(&self, field: usize) -> bool {
+        for i in 0..=field {
+            let mut name = None;
+            let mut ty = None;
 
+            for variant in &self.variants {
+                match variant.fields.get(i) {
+                    Some(field) => {
+                        if name.is_none() {
+                            name = Some(field.name);
+                            ty = Some(field.ty.clone());
+                            continue;
+                        }
+
+                        if name != Some(field.name) {
+                            return false;
+                        }
+
+                        if ty != Some(field.ty.clone()) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+        }
+
+        true
+    }
+
+    pub fn find_field(&self, name: &str) -> Option<(usize, Ty)> {
         for variant in &self.variants {
-            let Some(field) = variant.fields.iter().position(|field| field.name == name) else {
-                return Err(miette::miette!(
-                    "field not found `{}` in variant `{}`",
-                    name,
-                    variant.name
-                ));
-            };
+            let field = variant.find_field(name)?;
 
-            if index.is_none() {
-                index = Some(field);
-                ty = Some(variant.fields[field].ty.clone());
+            if !self.is_field_assessible(field) {
                 continue;
             }
 
-            if index != Some(field) {
-                return Err(miette::miette!("ambiguous field"));
-            }
-
-            if ty != Some(variant.fields[field].ty.clone()) {
-                return Err(miette::miette!("ambiguous field"));
-            }
+            return Some((field, variant.fields[field].ty.clone()));
         }
 
-        match (index, ty) {
-            (Some(index), Some(ty)) => Ok((index, ty)),
-            (_, _) => Err(miette::miette!("field not found")),
-        }
+        None
     }
 }
 

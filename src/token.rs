@@ -8,6 +8,7 @@ pub enum Token {
     Pascal,
     Integer,
     Float,
+    Path,
 
     /* strings */
     String,

@@ -16,20 +16,35 @@ mod span;
 mod specialize;
 mod token;
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
+use clap::Parser;
 use hir::{Import, ImportKind, Vis};
 use interner::Interner;
 use interpret::Interpreter;
 use span::Span;
 
+#[derive(Parser)]
+struct Options {
+    #[clap(default_value = "ritec")]
+    project: PathBuf,
+}
+
 fn main() -> miette::Result<()> {
+    let options = Options::parse();
+
     miette::set_panic_hook();
 
     let mut compiler = Compiler::new();
 
+    let name = options.project.file_stem().unwrap();
+    let name = name.to_str().unwrap();
+
     let std = compiler.add_dir("std", Path::new("std"))?;
-    let test = compiler.add_dir("test", Path::new("test"))?;
+    let test = compiler.add_dir(name, &options.project)?;
 
     for import in compiler.unit.modules[test].imports.clone().into_values() {
         if let ImportKind::Module(index) = import.kind {
@@ -45,7 +60,7 @@ fn main() -> miette::Result<()> {
 
     compiler.lower()?;
 
-    let module = &compiler.unit.modules[test].imports["test"];
+    let module = &compiler.unit.modules[test].imports[name];
     let ImportKind::Module(module) = module.kind else {
         panic!();
     };

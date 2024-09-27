@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     cell::RefCell,
-    cmp,
+    cmp, env,
     io::{self, Read, Write},
     iter::Peekable,
     rc::Rc,
@@ -642,9 +642,12 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn interpret(&self, main: usize) -> Value {
+        let args = env::args().map(Value::String).collect();
+        let args = Value::list_from_vec(args);
+
         let mut frame = Frame {
             locals: vec![Value::Void; self.mir.funcs[main].locals.len()],
-            arguments: Vec::new(),
+            arguments: vec![args],
             captured: Vec::new(),
         };
 

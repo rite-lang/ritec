@@ -1,7 +1,9 @@
 import std:fs
 import std:debug
 import std:result:Result
+import std:io
 
-fn main()
-  fs:read_to_string("test/test.ri")? |> std:io:println
+fn main(args: [str])
+  let assert [program, subcommand, ..] = args
+
   Ok(void)

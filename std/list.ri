@@ -14,6 +14,10 @@ pub fn concat(xs: ['a], ys: ['a]) -> ['a]
   | [x, ..xs] -> [x, ..concat(xs, ys)]
   | [] -> ys
 
+/// Append an element to a list.
+pub fn append(xs: ['a], x: 'a) -> ['a]
+  concat(xs, [x])
+
 /// Reverse a list.
 pub fn reverse(xs: ['a]) -> ['a]
   match xs

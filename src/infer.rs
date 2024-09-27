@@ -484,7 +484,16 @@ fn normalize_field(
         }
     };
 
-    let (_, ty) = unit.adts[index].find_field(field)?;
+    let Some((_, ty)) = unit.adts[index].find_field(field) else {
+        return Err(miette::miette!(
+            labels = [constraint_span.label("here")],
+            "field `{}` not found",
+            field
+        )
+        .with_source_code(constraint_span)
+        .into());
+    };
+
     normalize(unit, &ty.specialize(&generics), constraint_span)
 }
 

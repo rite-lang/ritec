@@ -10,6 +10,9 @@ pub fn concat(a: str, b: str) -> str
 pub fn length(s: str) -> int
   bytes(s) |> std:array:length
 
+/// Convert a string to a list of graphemes.
+///
+/// A grapheme is a single unit of text that is displayed as a single character.
 #[language("string:graphemes")]
 pub fn graphemes(s: str) -> [str]
   panic "string_graphemes builtin not implemented"

@@ -1,0 +1,10 @@
+fn main(args: [str])
+  let diagnostic = 
+    diagnostic:new(
+      diagnostic:Error
+      "E0001"
+      "This is an error."
+    ) 
+    |> diagnostic:add_label("This is a label.", span:Span(0, 1))
+
+  std:debug:print(diagnostic)

@@ -473,7 +473,7 @@ fn lower_ty(cx: &mut TyCx, ty: &ast::Ty, span: Span) -> miette::Result<hir::Ty> 
                         .collect::<miette::Result<Vec<_>>>()?
                 }
                 None => {
-                    if !cx.inferring {
+                    if !cx.inferring && !cx.unit.adts[index].generics.is_empty() {
                         return Err(miette::miette!(
                             severity = Severity::Error,
                             code = "invalid::generic",
@@ -765,13 +765,13 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::List(exprs, rest, span) => lower_list(cx, exprs, rest, *span),
         ast::Expr::Block(block) => lower_block(cx, block),
         ast::Expr::Field(expr, name) => lower_field(cx, expr, name),
-        ast::Expr::Call(func, args) => lower_call(cx, func, args),
+        ast::Expr::Call(func, args, spread) => lower_call(cx, func, args, spread.as_deref()),
         ast::Expr::Pipe(expr, exprs) => lower_pipe(cx, expr, exprs),
         ast::Expr::Binary(op, lhs, rhs, span) => lower_binary(cx, *op, lhs, rhs, *span),
         ast::Expr::Unary(op, expr, span) => lower_unary(cx, *op, expr, *span),
         ast::Expr::Let(pat, ty, expr) => lower_let(cx, pat, ty.as_ref(), expr, expr.span()),
         ast::Expr::Mut(name, ty, expr) => lower_mut(cx, name, ty.as_ref(), expr),
-        ast::Expr::LetAssert(pat, expr) => lower_let_assert(cx, pat, expr),
+        ast::Expr::LetAssert(pat, ty, expr) => lower_let_assert(cx, pat, ty.as_ref(), expr),
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
         ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
@@ -1113,32 +1113,203 @@ fn lower_field(cx: &mut BodyCx, expr: &ast::Expr, name: &'static str) -> miette:
 fn lower_call(
     cx: &mut BodyCx,
     func: &ast::Expr,
-    arguments: &[Option<ast::Expr>],
+    arguments: &[ast::CallArgument],
+    spread: Option<&ast::Expr>,
 ) -> miette::Result<hir::Expr> {
     let span = func.span();
     let func = lower_expr(cx, func)?;
 
-    let mut args = Vec::new();
-    let mut tys = Vec::new();
+    let (args, tys) = match func.kind {
+        hir::ExprKind::Func(index) => {
+            if spread.is_some() {
+                return Err(miette::miette!(
+                    severity = Severity::Error,
+                    code = "invalid::call",
+                    labels = vec![span.label("here")],
+                    "spread arguments are only supported when calling type constructors"
+                )
+                .with_source_code(span));
+            }
 
-    for argument in arguments {
-        match argument {
-            Some(argument) => {
-                let arg = lower_expr(cx, argument)?;
-                tys.push(Some(arg.ty.clone()));
-                args.push(Some(arg));
-            }
-            None => {
-                args.push(None);
-                tys.push(None);
-            }
+            let (args, tys) = lower_named_arguments(
+                cx,
+                |cx, name| cx.unit.funcs[index].find_argument(name),
+                arguments,
+                cx.unit.funcs[index].input.len(),
+                span,
+            )?;
+
+            (
+                args.into_iter().flatten().collect(),
+                tys.into_iter().flatten().collect(),
+            )
         }
-    }
+        hir::ExprKind::Variant(adt, index) => {
+            let (mut args, mut tys) = lower_named_arguments(
+                cx,
+                |cx, name| cx.unit.adts[adt].variants[index].find_field(name),
+                arguments,
+                cx.unit.adts[adt].variants[index].fields.len(),
+                span,
+            )?;
+
+            if let Some(spread) = spread {
+                let spread = lower_expr(cx, spread)?;
+
+                for (i, arg) in args.iter_mut().enumerate() {
+                    if arg.is_none() {
+                        let field_name = cx.unit.adts[adt].variants[index].fields[i].name;
+
+                        if !cx.unit.adts[adt].is_field_assessible(i) {
+                            return Err(miette::miette!(
+                                severity = Severity::Error,
+                                code = "invalid::call",
+                                labels = vec![span.label("here")],
+                                "field `{}` is not accessible",
+                                field_name
+                            )
+                            .with_source_code(span));
+                        }
+
+                        let kind = hir::ExprKind::Field(Box::new(spread.clone()), field_name);
+                        let ty = hir::Ty::Field(Box::new(spread.ty.clone()), field_name, span);
+
+                        tys[i] = Some(Some(ty.clone()));
+                        *arg = Some(Some(hir::Expr { kind, ty }));
+                    }
+                }
+            }
+
+            (
+                args.into_iter().flatten().collect(),
+                tys.into_iter().flatten().collect(),
+            )
+        }
+        _ => {
+            if spread.is_some() {
+                return Err(miette::miette!(
+                    severity = Severity::Error,
+                    code = "invalid::call",
+                    labels = vec![span.label("here")],
+                    "spread arguments are only supported when calling type constructors"
+                )
+                .with_source_code(span));
+            }
+
+            let mut args = Vec::new();
+            let mut tys = Vec::new();
+
+            for argument in arguments {
+                match argument {
+                    ast::CallArgument::Positional(Some(argument)) => {
+                        let arg = lower_expr(cx, argument)?;
+                        tys.push(Some(arg.ty.clone()));
+                        args.push(Some(arg));
+                    }
+                    ast::CallArgument::Positional(None) => {
+                        args.push(None);
+                        tys.push(None);
+                    }
+                    ast::CallArgument::Named(_, _) => {
+                        return Err(miette::miette!(
+                            severity = Severity::Error,
+                            code = "invalid::call",
+                            labels = vec![span.label("here")],
+                            "named arguments are not supported when calling dynamic functions"
+                        )
+                        .with_source_code(span));
+                    }
+                }
+            }
+
+            (args, tys)
+        }
+    };
 
     let ty = hir::Ty::Call(Box::new(func.ty.clone()), tys, span);
     let kind = hir::ExprKind::Call(Box::new(func), args);
     cx.unit.normalize(ty.clone(), span);
     Ok(hir::Expr { kind, ty })
+}
+
+type Args = Vec<Option<Option<hir::Expr>>>;
+type Tys = Vec<Option<Option<hir::Ty>>>;
+
+fn lower_named_arguments(
+    cx: &mut BodyCx,
+    find_argument: impl Fn(&BodyCx, &str) -> Option<usize>,
+    arguments: &[ast::CallArgument],
+    argument_count: usize,
+    span: Span,
+) -> miette::Result<(Args, Tys)> {
+    if arguments.len() > argument_count {
+        return Err(miette::miette!(
+            severity = Severity::Error,
+            code = "invalid::call",
+            labels = vec![span.label("here")],
+            "too many arguments"
+        )
+        .with_source_code(span));
+    }
+
+    let mut tys = vec![None; argument_count];
+    let mut args = vec![None; argument_count];
+
+    let mut has_named = false;
+
+    for (i, argument) in arguments.iter().enumerate() {
+        match argument {
+            ast::CallArgument::Positional(Some(argument)) => {
+                if has_named {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "invalid::call",
+                        labels = vec![span.label("here")],
+                        "positional arguments must come before named arguments"
+                    )
+                    .with_source_code(span));
+                }
+
+                let arg = lower_expr(cx, argument)?;
+                tys[i] = Some(Some(arg.ty.clone()));
+                args[i] = Some(Some(arg));
+            }
+            ast::CallArgument::Positional(None) => {
+                tys[i] = Some(None);
+                args[i] = Some(None);
+            }
+            ast::CallArgument::Named(name, argument) => {
+                let Some(index) = find_argument(cx, name) else {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "invalid::call",
+                        labels = vec![span.label("here")],
+                        "argument `{}` not found",
+                        name
+                    )
+                    .with_source_code(span));
+                };
+
+                if args[index].is_some() {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "invalid::call",
+                        labels = vec![span.label("here")],
+                        "argument `{}` specified more than once",
+                        name
+                    )
+                    .with_source_code(span));
+                }
+
+                has_named = true;
+                let arg = lower_expr(cx, argument)?;
+                tys[index] = Some(Some(arg.ty.clone()));
+                args[index] = Some(Some(arg));
+            }
+        }
+    }
+
+    Ok((args, tys))
 }
 
 fn lower_pipe(
@@ -1152,21 +1323,40 @@ fn lower_pipe(
 
     for expr in exprs {
         let (expr, tys, args) = match expr {
-            ast::Expr::Call(func, arguments) => {
+            ast::Expr::Call(func, arguments, spread) => {
+                if spread.is_some() {
+                    return Err(miette::miette!(
+                        severity = Severity::Error,
+                        code = "invalid::call",
+                        labels = vec![span.label("here")],
+                        "spread arguments are not supported when piping"
+                    )
+                    .with_source_code(span));
+                }
+
                 let expr = lower_expr(cx, func)?;
                 let mut tys = Vec::new();
                 let mut args = Vec::new();
 
                 for arg in arguments {
                     match arg {
-                        Some(arg) => {
+                        ast::CallArgument::Positional(Some(arg)) => {
                             let arg = lower_expr(cx, arg)?;
                             tys.push(Some(arg.ty.clone()));
                             args.push(Some(arg));
                         }
-                        None => {
+                        ast::CallArgument::Positional(None) => {
                             tys.push(None);
                             args.push(None);
+                        }
+                        ast::CallArgument::Named(_, _) => {
+                            return Err(miette::miette!(
+                                severity = Severity::Error,
+                                code = "invalid::call",
+                                labels = vec![span.label("here")],
+                                "named arguments are not supported when piping"
+                            )
+                            .with_source_code(span));
                         }
                     }
                 }
@@ -1372,10 +1562,16 @@ fn lower_mut(
 fn lower_let_assert(
     cx: &mut BodyCx,
     ast_pat: &ast::Pat,
+    ty: Option<&ast::Ty>,
     expr: &ast::Expr,
 ) -> miette::Result<hir::Expr> {
     let input = lower_expr(cx, expr)?;
     let pat = lower_pat(cx, ast_pat, &input.ty)?;
+
+    if let Some(ty) = ty {
+        let ty = lower_ty(&mut cx.as_ty_cx(), ty, expr.span())?;
+        cx.unit.unify(input.ty.clone(), ty, expr.span());
+    }
 
     let mut locals = Vec::new();
     build_pat_destructure(cx, input.clone(), &pat, &mut locals)?;
@@ -1866,7 +2062,7 @@ fn build_pat_check(
                         ),
                         ty: hir::Ty::bool(span),
                     })),
-                    None => Ok(Some(empty)),
+                    None => Ok(Some(not_empty)),
                 }
             }
             None => {
