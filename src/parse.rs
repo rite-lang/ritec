@@ -144,6 +144,11 @@ fn parse_func_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
     let (name, span) = parse_snake(tokens)?;
     let input = parse_arguments(tokens)?;
     let output = parse_output(tokens)?;
+
+    while tokens.is(Token::Newline) {
+        tokens.consume();
+    }
+
     let body = parse_body(tokens)?;
 
     Ok(Func {
@@ -210,10 +215,17 @@ fn parse_type_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
 
     let mut variants = Vec::new();
 
-    tokens.expect(Token::Newline)?;
+    while tokens.is(Token::Newline) || tokens.is(Token::DocComment) {
+        tokens.consume();
+    }
+
     tokens.expect(Token::Indent)?;
 
     while !tokens.is(Token::Dedent) {
+        while tokens.is(Token::Newline) || tokens.is(Token::DocComment) {
+            tokens.consume();
+        }
+
         tokens.expect(Token::Pipe)?;
 
         let (name, span) = parse_pascal(tokens)?;
@@ -225,7 +237,7 @@ fn parse_type_decl(tokens: &mut TokenStream, decorators: Vec<Decorator>) -> miet
 
         variants.push(Variant { name, fields, span });
 
-        while !tokens.is(Token::Dedent) && tokens.is(Token::Newline) {
+        while tokens.is(Token::Newline) {
             tokens.consume();
         }
     }
@@ -267,10 +279,17 @@ fn parse_arguments(tokens: &mut TokenStream) -> miette::Result<Vec<Argument>> {
 fn parse_arguments_multiline(tokens: &mut TokenStream) -> miette::Result<Vec<Argument>> {
     let mut arguments = Vec::new();
 
-    tokens.expect(Token::Newline)?;
+    while tokens.is(Token::Newline) || tokens.is(Token::DocComment) {
+        tokens.consume();
+    }
+
     tokens.expect(Token::Indent)?;
 
     while !tokens.is(Token::Dedent) {
+        while tokens.is(Token::Newline) || tokens.is(Token::DocComment) {
+            tokens.consume();
+        }
+
         arguments.push(parse_argument(tokens)?);
 
         tokens.take(Token::Comma);
@@ -330,10 +349,17 @@ fn parse_fields(tokens: &mut TokenStream) -> miette::Result<Vec<Field>> {
 fn parse_fields_multiline(tokens: &mut TokenStream) -> miette::Result<Vec<Field>> {
     let mut fields = Vec::new();
 
-    tokens.expect(Token::Newline)?;
+    while tokens.is(Token::Newline) || tokens.is(Token::DocComment) {
+        tokens.consume();
+    }
+
     tokens.expect(Token::Indent)?;
 
     while !tokens.is(Token::Dedent) {
+        while tokens.is(Token::Newline) || tokens.is(Token::DocComment) {
+            tokens.consume();
+        }
+
         fields.push(parse_field(tokens)?);
 
         tokens.take(Token::Comma);
@@ -562,6 +588,7 @@ fn parse_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::Let => parse_let_expr(tokens, multiline),
         Token::Mut => parse_mut_expr(tokens, multiline),
         Token::Match => parse_match_expr(tokens, multiline),
+        Token::Assert => parse_assert_expr(tokens, multiline),
         _ => parse_assign_expr(tokens, multiline),
     }
 }
@@ -794,6 +821,16 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
         )
         .with_source_code(tokens.peek().1)),
     }
+}
+
+fn parse_assert_expr(tokens: &mut TokenStream, _multiline: bool) -> miette::Result<Expr> {
+    let span = tokens.expect(Token::Assert)?;
+
+    let expr = parse_expr(tokens, false)?;
+
+    let message = tokens.take(Token::String).map(|span| span.as_str());
+
+    Ok(Expr::Assert(Box::new(expr), message, span))
 }
 
 fn parse_assign_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {

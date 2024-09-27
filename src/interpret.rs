@@ -624,6 +624,11 @@ fn debug_format(mut args: Vec<Value>) -> Value {
 
     let arg = args.pop().unwrap();
 
+    // FIXME: this is a disgusting hack...
+    if let Value::String(s) = arg {
+        return Value::String(s);
+    }
+
     Value::String(format!("{}", arg))
 }
 

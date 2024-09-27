@@ -1,7 +1,10 @@
 import std:list
+import std:io
 
 import span:Span
+import span:Sources
 
+/// A diagnostic message.
 pub type Diagnostic(
   severity: Severity
   code:     str
@@ -9,11 +12,13 @@ pub type Diagnostic(
   message:  str
 )
 
+/// The severity of a diagnostic message.
 pub type Severity =
   | Error
   | Warning 
   | Help
 
+/// A label attached to a diagnostic message.
 pub type Label(
   message:  str
   span:     Span
@@ -40,3 +45,16 @@ pub fn add_label(
     |> list:append(Label(message, span))
 
   Diagnostic(labels: labels, ..diagnostic)
+
+pub fn print(diagnostic, sources: Sources)
+  let Diagnostic(severity, code, labels, message) = diagnostic
+
+  let severity_str = severity_to_str(severity)
+
+  io:println(f"{severity_str}[{code}]: {message}")
+
+fn severity_to_str(severity)
+  match severity
+  | Error   -> "error"
+  | Warning -> "warning"
+  | Help    -> "help"

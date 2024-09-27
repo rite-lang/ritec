@@ -3,9 +3,15 @@
 import std:string
 import std:array
 
+/// An error that can occur during IO operations.
 pub type Error =
+  /// The file was not found.
   | NotFound
+
+  /// The file could not be opened.
   | PermissionDenied
+
+  /// Other IO error.
   | Other
 
 /// Print a string to the standard output.

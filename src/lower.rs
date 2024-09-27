@@ -777,6 +777,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
         ast::Expr::Panic(message, span) => lower_panic(cx, message, *span),
+        ast::Expr::Assert(expr, message, span) => lower_assert(cx, expr, *message, *span),
         ast::Expr::Try(expr, span) => lower_try(cx, expr, *span),
     }
 }
@@ -820,6 +821,33 @@ fn lower_string(_cx: &mut BodyCx, value: &'static str, span: Span) -> miette::Re
 fn lower_panic(_cx: &mut BodyCx, message: &'static str, span: Span) -> miette::Result<hir::Expr> {
     let ty = hir::Ty::inferred(hir::Inferred::Any, span);
     let kind = hir::ExprKind::Panic(message);
+    Ok(hir::Expr { kind, ty })
+}
+
+fn lower_assert(
+    cx: &mut BodyCx,
+    expr: &ast::Expr,
+    message: Option<&'static str>,
+    span: Span,
+) -> miette::Result<hir::Expr> {
+    let expr = lower_expr(cx, expr)?;
+
+    cx.unit.unify(expr.ty.clone(), hir::Ty::bool(span), span);
+
+    let success = hir::Expr {
+        kind: hir::ExprKind::Void,
+        ty: hir::Ty::void(span),
+    };
+
+    let failure = hir::Expr {
+        kind: hir::ExprKind::Panic(message.unwrap_or("assertion failed")),
+        ty: hir::Ty::void(span),
+    };
+
+    let r#match = hir::Match::Bool(Box::new(success), Box::new(failure));
+    let kind = hir::ExprKind::Match(Box::new(expr), r#match);
+    let ty = hir::Ty::void(span);
+
     Ok(hir::Expr { kind, ty })
 }
 

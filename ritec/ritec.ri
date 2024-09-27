@@ -1,10 +1,18 @@
-fn main(args: [str])
-  let diagnostic = 
-    diagnostic:new(
-      diagnostic:Error
-      "E0001"
-      "This is an error."
-    ) 
-    |> diagnostic:add_label("This is a label.", span:Span(0, 1))
+import std:result:Result
 
-  std:debug:print(diagnostic)
+fn main(args: [str])
+  let sources = span:new_sources()
+  let sources, id = sources
+    |> span:add_source(span:load_source("test/test.ri")?)
+
+  let span = span:Span(0, 1, 0)
+
+  let diagnostic = diagnostic:new(
+    diagnostic:Error
+    "E0001"
+    "this is an error"
+  ) 
+
+  diagnostic:print(diagnostic, sources)
+
+  Ok(void)

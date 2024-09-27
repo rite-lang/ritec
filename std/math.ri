@@ -1,0 +1,13 @@
+//! Math utilities.
+
+/// Compute the maximum of two numbers.
+pub fn min(a, b)
+  match a < b
+  | true  -> a
+  | false -> b
+
+/// Compute the minimum of two numbers.
+pub fn max(a, b)
+  match a < b
+  | true  -> b
+  | false -> a

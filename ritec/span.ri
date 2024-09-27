@@ -1,4 +1,65 @@
+import std:dict
+import std:dict:Dict
+import std:math
+import std:fs
+import std:io
+import std:result:Result
+
+/// A span in a source file.
 pub type Span(
-  start: int
-  end: int
+  /// The low byte offset.
+  lo:     int
+
+  /// The high byte offset.
+  hi:     int
+
+  /// Id of the source file.
+  source: int
 )
+
+/// A collection of source files.
+pub type Sources(
+  /// The source files.
+  sources: Dict<int, Source>
+)
+
+/// A source file.
+pub type Source(
+  /// The path to the source file.
+  path: str
+
+  /// The contents of the source file.
+  text: str
+)
+
+/// Join two spans.
+pub fn join(a: Span, b: Span) -> Span
+  assert a.source == b.source "cannot join spans from different sources"
+
+  Span(
+    lo:     math:min(a.lo, b.lo)
+    hi:     math:max(a.hi, b.hi)
+    source: a.source
+  )
+
+/// Load a source file.
+pub fn load_source(path: str) -> Result<Source, io:Error>
+  let text = fs:read_to_string(path)?
+  Ok(Source(path: path, text: text))
+
+/// Create a source collection.
+pub fn new_sources() -> Sources
+  Sources(sources: dict:new())
+
+/// Add a source to a source collection.
+pub fn add_source(sources: Sources, source: Source) -> Sources * int
+  let id = dict:length(sources.sources)
+
+  let sources = sources.sources
+    |> dict:insert(id, source)
+  
+  Sources(sources: sources), id
+
+/// Get a source from a source collection.
+pub fn get_source(sources: Sources, id: int) -> Result<Source, void>
+  dict:get(sources.sources, id)

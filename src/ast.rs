@@ -138,6 +138,7 @@ pub enum Expr {
     Match(Box<Expr>, Vec<Arm>, Span),
     Closure(Vec<Argument>, Box<Expr>),
     Panic(&'static str, Span),
+    Assert(Box<Expr>, Option<&'static str>, Span),
     Try(Box<Expr>, Span),
 }
 
@@ -213,6 +214,7 @@ impl Expr {
                 start.join(end)
             }
             Expr::Panic(_, span) => *span,
+            Expr::Assert(expr, _, span) => expr.span().join(*span),
             Expr::Try(expr, span) => expr.span().join(*span),
         }
     }
