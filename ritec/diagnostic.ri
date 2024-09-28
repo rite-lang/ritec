@@ -116,7 +116,7 @@ pub fn print(diagnostic: Diagnostic, sources: Sources) -> void
 /// An example of the output:
 ///
 /// ```plaintext
-///  --> path/to/file.rite:1:2:3
+///  --> path/to/file.rite:1:3
 ///   |
 /// 1 |   let x: int = []
 ///   |   ^^^^^^^^^^^^^^^ expected `int`, found `[_]`
@@ -140,10 +140,11 @@ pub fn print_label(label: Label, severity: Severity, sources: Sources) -> void
 
   // print the source span and the line that the label spans
   //
-  //  --> path/to/file.rite:1:2:3
+  //  --> path/to/file.rite:1:3
   //
   let space = string:repeat(" ", space_count - 1)
-  let source_span = f"{source.path}:{label.span.lo}:{label.span.hi}"
+  let column = span.lo - first.lo + 1
+  let source_span = f"{source.path}:{first.number + 1}:{column}"
   io:println(f"{space}{ansi:blue("-->")} {source_span}")
 
   // print a padding line before the source span
