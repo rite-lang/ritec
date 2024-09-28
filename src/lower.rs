@@ -1751,7 +1751,19 @@ fn lower_match(
     arms: &[ast::Arm],
     span: Span,
 ) -> miette::Result<hir::Expr> {
-    let input = lower_expr(cx, input)?;
+    let expr = lower_expr(cx, input)?;
+
+    let local = cx.locals.len();
+    cx.locals.push(hir::Local {
+        mutable: false,
+        name: "",
+        ty: expr.ty.clone(),
+    });
+
+    let input = hir::Expr {
+        kind: hir::ExprKind::Local(local),
+        ty: expr.ty.clone(),
+    };
 
     let mut tree = Match::None;
     let ty = hir::Ty::any(span);
@@ -1786,7 +1798,16 @@ fn lower_match(
         .with_source_code(span));
     }
 
-    Ok(build_match_expr(cx, tree, span)?.unwrap())
+    let exprs = vec![
+        hir::Expr {
+            kind: hir::ExprKind::Let(local, Box::new(expr)),
+            ty: hir::Ty::void(span),
+        },
+        build_match_expr(cx, tree, span)?.unwrap(),
+    ];
+
+    let kind = hir::ExprKind::Block(exprs);
+    Ok(hir::Expr { kind, ty })
 }
 
 fn lower_pat(cx: &mut BodyCx, pat: &ast::Pat, ty: &hir::Ty) -> miette::Result<Pat> {

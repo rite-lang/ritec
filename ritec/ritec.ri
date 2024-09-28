@@ -5,13 +5,13 @@ fn main(args: [str])
   let sources, id = sources
     |> span:add_source(span:load_source("test/test.ri")?)
 
-  let span = span:Span(0, 1, 0)
+  let span = span:Span(4, 8, 0)
 
   let diagnostic = diagnostic:new(
     diagnostic:Error
     "E0001"
     "this is an error"
-  ) 
+  ) |> diagnostic:add_label("this is a label", span)
 
   diagnostic:print(diagnostic, sources)
 

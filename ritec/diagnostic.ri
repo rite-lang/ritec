@@ -1,21 +1,36 @@
-import std:list
 import std:io
+import std:list
+import std:math
+import std:result:Result
+import std:string
 
-import span:Span
 import span:Sources
+import span:Span
 
 /// A diagnostic message.
 pub type Diagnostic(
+  /// The severity of the diagnostic message.
   severity: Severity
+
+  /// The code associated with the diagnostic message.
   code:     str
+
+  /// A list of labels attached to the diagnostic message.
   labels:   [Label]
+
+  /// The main message of the diagnostic.
   message:  str
 )
 
 /// The severity of a diagnostic message.
 pub type Severity =
+  /// A fatal error.
   | Error
+
+  /// A non-fatal warning.
   | Warning 
+
+  /// A helpful message.
   | Help
 
 /// A label attached to a diagnostic message.
@@ -24,6 +39,7 @@ pub type Label(
   span:     Span
 )
 
+/// Create a new diagnostic message.
 pub fn new(
   severity: Severity
   code:     str
@@ -46,12 +62,107 @@ pub fn add_label(
 
   Diagnostic(labels: labels, ..diagnostic)
 
-pub fn print(diagnostic, sources: Sources)
+/// Print a diagnostic message to the console.
+///
+/// This assumes that the all source files mentioned in the diagnostic
+/// are available in the `sources` argument.
+pub fn print(diagnostic: Diagnostic, sources: Sources)
   let Diagnostic(severity, code, labels, message) = diagnostic
 
   let severity_str = severity_to_str(severity)
 
+  // first print the main message of the diagnostic e.g.
+  //
+  // error[E0001]: this is an error message
+  //
   io:println(f"{severity_str}[{code}]: {message}")
+
+  labels |> list:each(|label|
+    let Label(message, span) = label
+
+    let assert Ok(source) = span:get_source(sources, span.source)
+
+    // get the lines that the label spans
+    let lines = get_lines(source.text, span.lo, span.hi)
+
+    // we only really care about the first and last lines
+    let assert Ok(first) = list:first(lines)
+    let assert Ok(last) = list:last(lines)
+
+    // compute the number of spaces needed to align the source span
+    // this is dependent on the number of digits in the line numbers
+    let space_count = string:length(f"{last.number + 1}") + 1
+    let first_spaces = space_count - string:length(f"{first.number + 1}")
+
+    // print the source span and the line that the label spans
+    //
+    //  --> path/to/file.rite:1:2:3
+    //
+    let space = string:repeat(" ", space_count - 1)
+    let source_span = f"{source.path}:{label.span.lo}:{label.span.hi}"
+    io:println(f"{space}--> {source_span}")
+
+    // print a padding line before the source span
+    //
+    //   |
+    //
+    let space = string:repeat(" ", space_count)
+    io:println(f"{space}| ")
+
+    // print the first line of the label span
+    //
+    // 1 |   let x: int = [] 
+    //
+    let space = string:repeat(" ", first_spaces)
+    let number = f"{first.number + 1}{space}"
+    io:println(f"{number}| {first.text}")
+
+    // compute the number of spaces needed to align the marker
+    // as well as the length of the marker
+    let marker_space_count = span.lo - first.lo
+    let marker_length = span.hi
+      |> math:min(first.hi)
+      |> math:sub(span.lo)
+      |> math:max(1)
+
+    // print the marker and message
+    //
+    //   |   ^^^^^^^^^^^^^^^ expected `int`, found `[]`
+    //
+    let marker = string:repeat("^", marker_length)
+    let marker_space = string:repeat(" ", marker_space_count)
+    let space = string:repeat(" ", space_count)
+    io:println(f"{space}| {marker_space}{marker} {message}")
+  )
+
+type Line(
+  number: int
+  lo:     int
+  hi:     int
+  text:   str
+)
+
+// get the lines that `lo` and `hi` span in `text`
+fn get_lines(text, lo, hi)
+  mut offset = 0
+
+  string:lines(text) 
+    |> list:enumerate
+    |> list:filter_map(|pair|
+      let number, line = pair
+
+      let line_lo = offset
+      let line_hi = offset + string:length(line)
+
+      let line = match line_lo <= lo && hi <= line_hi
+        | true  -> Ok(Line(number, line_lo, line_hi, line))
+        | false -> Err(void)
+
+      // we add 1 to the offset to account for the newline character
+      offset = line_hi + 1
+
+      line
+    )
 
 fn severity_to_str(severity)
   match severity

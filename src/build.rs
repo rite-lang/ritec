@@ -361,12 +361,10 @@ fn build_operand(
             Ok(rir::Operand::Constant(rir::Constant::Void))
         }
 
-        hir::ExprKind::Match(ref expr, ref r#match) => {
-            let input = build_operand(builder, block, expr)?;
-
+        hir::ExprKind::Match(ref input, ref r#match) => {
             let index = builder.locals().len();
             let local = rir::Local {
-                ty: builder.build_ty(&expr.ty)?,
+                ty: builder.build_ty(&input.ty)?,
             };
             builder.locals_mut().push(local);
 
@@ -375,6 +373,8 @@ fn build_operand(
                 projection: Vec::new(),
                 ty: builder.build_ty(&expr.ty)?,
             };
+
+            let input = build_operand(builder, block, input)?;
 
             match r#match {
                 hir::Match::Bool(r#true, r#false) => {

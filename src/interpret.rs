@@ -265,6 +265,25 @@ fn string_graphemes(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(chars)
 }
 
+fn string_split(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 2);
+
+    let Value::String(sep) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let parts = s
+        .split(&sep)
+        .map(|s| Value::String(s.to_string()))
+        .collect();
+
+    Value::list_from_vec(parts)
+}
+
 fn string_concat(args: Vec<Value>) -> Value {
     let mut s = String::new();
 
@@ -633,14 +652,14 @@ fn debug_format(mut args: Vec<Value>) -> Value {
 }
 
 pub struct Interpreter<'a> {
-    mir: &'a Unit<Specific>,
+    rir: &'a Unit<Specific>,
     builtins: HashMap<usize, fn(Vec<Value>) -> Value>,
 }
 
 impl<'a> Interpreter<'a> {
     pub fn new(mir: &'a Unit<Specific>) -> Self {
         Self {
-            mir,
+            rir: mir,
             builtins: Self::find_builtins(mir),
         }
     }
@@ -661,6 +680,7 @@ impl<'a> Interpreter<'a> {
                     "string:length" => string_length,
                     "string:slice" => string_slice,
                     "string:graphemes" => string_graphemes,
+                    "string:split" => string_split,
                     "debug:format" => debug_format,
                     "io:print" => io_print,
                     "dict:new" => dict_new,
@@ -699,12 +719,12 @@ impl<'a> Interpreter<'a> {
         let args = Value::list_from_vec(args);
 
         let mut frame = Frame {
-            locals: vec![Value::Void; self.mir.funcs[main].locals.len()],
+            locals: vec![Value::Void; self.rir.funcs[main].locals.len()],
             arguments: vec![args],
             captured: Vec::new(),
         };
 
-        self.interpret_block(&mut frame, &self.mir.funcs[main].body)
+        self.interpret_block(&mut frame, &self.rir.funcs[main].body)
             .unwrap()
     }
 
@@ -953,7 +973,7 @@ impl<'a> Interpreter<'a> {
                     .collect();
 
                 let mut frame = Frame {
-                    locals: vec![Value::Void; self.mir.funcs[func].locals.len()],
+                    locals: vec![Value::Void; self.rir.funcs[func].locals.len()],
                     arguments: args,
                     captured,
                 };
@@ -962,7 +982,7 @@ impl<'a> Interpreter<'a> {
                     return builtin_func(frame.arguments);
                 }
 
-                self.interpret_block(&mut frame, &self.mir.funcs[func].body)
+                self.interpret_block(&mut frame, &self.rir.funcs[func].body)
                     .unwrap()
             }
             rir::Value::Ref(place) => {

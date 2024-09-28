@@ -22,6 +22,16 @@ pub fn slice(s: str, start: int, end: int) -> str
 pub fn graphemes(s: str) -> [str]
   panic "string_graphemes builtin not implemented"
 
+/// Split a string into substrings using a separator.
+#[language("string:split")]
+pub fn split(s: str, sep: str) -> [str]
+  panic "string:split builtin not implemented"
+
+/// Split a string into lines.
+pub fn lines(s: str) -> [str]
+  let newline = array:from_list([10]) |> from_bytes
+  split(s, newline)
+
 /// Get the array of bytes representing a string.
 #[language("string:bytes")]
 pub fn bytes(a: str) -> array:Array<u8>
@@ -31,6 +41,12 @@ pub fn bytes(a: str) -> array:Array<u8>
 #[language("string:from_bytes")]
 pub fn from_bytes(a: array:Array<u8>) -> str
   panic "string:from_bytes builtin not implemented"
+
+/// Repeat a string n times.
+pub fn repeat(s: str, n: int) -> str
+  match n > 0
+  | true -> s |> concat(repeat(s, n - 1))
+  | false -> ""
 
 /// Join a list of strings with a separator.
 pub fn join(xs: [str], sep: str) -> str

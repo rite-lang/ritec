@@ -11,3 +11,11 @@ pub fn max(a, b)
   match a < b
   | true  -> b
   | false -> a
+
+/// Add two numbers.
+pub fn add(a, b)
+  a + b
+
+/// Subtract two numbers.
+pub fn sub(a, b)
+  a - b

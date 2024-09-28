@@ -8,6 +8,27 @@ pub fn length(xs: ['a]) -> int
   | [_, ..xs] -> 1 + length(xs)
   | [] -> 0
 
+/// Check if a list is empty.
+pub fn is_empty(xs: ['a]) -> bool
+  match xs
+  | [_, ..] -> false
+  | [] -> true
+
+/// Get the first element of a list.
+pub fn first(xs: ['a]) -> Result<'a, void>
+  match xs
+  | [x, ..] -> Ok(x)
+  | [] -> Err(void)
+
+/// Get the last element of a list.
+///
+/// This function runs in O(n) time.
+pub fn last(xs: ['a]) -> Result<'a, void>
+  match xs
+  | [] -> Err(void)
+  | [x] -> Ok(x)
+  | [x, ..xs] -> last(xs)
+
 /// Contatenate two lists.
 pub fn concat(xs: ['a], ys: ['a]) -> ['a]
   match xs
@@ -17,6 +38,16 @@ pub fn concat(xs: ['a], ys: ['a]) -> ['a]
 /// Append an element to a list.
 pub fn append(xs: ['a], x: 'a) -> ['a]
   concat(xs, [x])
+
+/// Prepend an element to a list.
+pub fn prepend(x: 'a, xs: ['a]) -> ['a]
+  concat([x], xs)
+
+/// Repeat an element n times.
+pub fn repeat(x: 'a, n: int) -> ['a]
+  match n > 0
+  | true -> [x, ..repeat(x, n - 1)]
+  | false -> []
 
 /// Reverse a list.
 pub fn reverse(xs: ['a]) -> ['a]
@@ -98,11 +129,29 @@ pub fn chunk_pairs(xs: ['a]) -> ['a * 'a]
   | [x, y, ..xs] -> [(x, y), ..chunk_pairs(xs)]
   | _ -> []
 
+/// Enumerate a list.
+pub fn enumerate(xs: ['a]) -> [int * 'a]
+  enumerate_from(xs, 0)
+
+/// Enumerate a list starting from a given index.
+pub fn enumerate_from(xs: ['a], n: int) -> [int * 'a]
+  match xs
+  | [x, ..xs] -> [(n, x), ..enumerate_from(xs, n + 1)]
+  | [] -> []
+
 /// Map a function over a list.
 pub fn map(xs: ['a], f: fn('a) -> 'b) -> ['b]
   match xs
   | [x, ..xs] -> [f(x), ..map(xs, f)]
   | [] -> []
+
+/// Map a function over a list with the index of each element.
+pub fn map_enumerate(xs: ['a], f: fn(int, 'a) -> 'b) -> ['b]
+  enumerate(xs)
+  |> map(|pair| 
+    let i, x = pair 
+    f(i, x)
+  )
 
 /// Run a function over each element of a list.
 pub fn each(xs: ['a], f: fn('a) -> void) -> void

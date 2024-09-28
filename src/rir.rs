@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::decorator::Decorator;
 use crate::{
     ast::BinOp,
@@ -248,4 +250,422 @@ pub enum ProjectionKind {
         field: usize,
     },
     Deref,
+}
+
+impl Display for Ty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Ty::Void => write!(f, "void"),
+            Ty::Bool => write!(f, "bool"),
+            Ty::Str => write!(f, "str"),
+            Ty::Ref(ty) => write!(f, "&{}", ty),
+            Ty::Int(kind) => write!(f, "{:?}", kind),
+            Ty::Float(kind) => write!(f, "{:?}", kind),
+            Ty::List(ty) => write!(f, "[{}]", ty),
+            Ty::Tuple(tys) => {
+                write!(f, "(")?;
+                for (i, ty) in tys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", ty)?;
+                }
+                write!(f, ")")
+            }
+            Ty::Func(input, output) => {
+                write!(f, "(")?;
+                for (i, ty) in input.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", ty)?;
+                }
+                write!(f, ") -> {}", output)
+            }
+            Ty::Adt(adt, tys) => {
+                write!(f, "adt {}", adt)?;
+                if !tys.is_empty() {
+                    write!(f, "<")?;
+                    for (i, ty) in tys.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", ty)?;
+                    }
+                    write!(f, ">")?;
+                }
+                Ok(())
+            }
+            Ty::Generic(generic) => write!(f, "generic {}", generic),
+        }
+    }
+}
+
+impl Display for Specific {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Specific::Void => write!(f, "void"),
+            Specific::Bool => write!(f, "bool"),
+            Specific::Str => write!(f, "str"),
+            Specific::Ref(specific) => write!(f, "&{}", specific),
+            Specific::Int(kind) => write!(f, "{:?}", kind),
+            Specific::Float(kind) => write!(f, "{:?}", kind),
+            Specific::List(specific) => write!(f, "[{}]", specific),
+            Specific::Tuple(specifics) => {
+                write!(f, "(")?;
+                for (i, specific) in specifics.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", specific)?;
+                }
+                write!(f, ")")
+            }
+            Specific::Func(input, output) => {
+                write!(f, "(")?;
+                for (i, specific) in input.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", specific)?;
+                }
+                write!(f, ") -> {}", output)
+            }
+            Specific::Adt(adt) => write!(f, "adt {}", adt),
+        }
+    }
+}
+
+pub fn dump_unit<T: Display>(unit: &Unit<T>) {
+    let mut dumper = Dumper::new();
+    dumper.dump_unit(unit);
+}
+
+pub struct Dumper {
+    indent: usize,
+}
+
+impl Dumper {
+    pub fn new() -> Self {
+        Self { indent: 0 }
+    }
+
+    pub fn dump_unit<T: Display>(&mut self, unit: &Unit<T>) {
+        for func in &unit.funcs {
+            self.dump_func(func);
+        }
+        for adt in &unit.adts {
+            self.dump_adt(adt);
+        }
+    }
+
+    pub fn dump_func<T: Display>(&mut self, func: &Func<T>) {
+        self.dump_indent();
+        print!("func {}(", func.name);
+        for (i, arg) in func.input.iter().enumerate() {
+            if i > 0 {
+                print!(", ");
+            }
+            print!("{}", arg.ty);
+        }
+        println!(") -> {}", func.output);
+        self.dump_block(&func.body);
+    }
+
+    pub fn dump_adt<T: Display>(&mut self, adt: &Adt<T>) {
+        self.dump_indent();
+        print!("adt {}", adt.name);
+        if !adt.generics.is_empty() {
+            print!("<");
+            for (i, generic) in adt.generics.iter().enumerate() {
+                if i > 0 {
+                    print!(", ");
+                }
+                print!("{:?}", generic);
+            }
+            print!(">");
+        }
+        println!(" {{");
+        self.indent();
+        for variant in &adt.variants {
+            self.dump_indent();
+            print!("variant {{");
+            for (i, field) in variant.fields.iter().enumerate() {
+                if i > 0 {
+                    print!(", ");
+                }
+                print!("{}", field.ty);
+            }
+            println!("}}");
+        }
+        self.dedent();
+        self.dump_indent();
+        println!("}}");
+    }
+
+    pub fn dump_block<T: Display>(&mut self, block: &Block<T>) {
+        self.dump_indent();
+        println!("{{");
+        self.indent();
+        for statement in &block.statements {
+            self.dump_statement(statement);
+        }
+        self.dedent();
+        self.dump_indent();
+        println!("}}");
+    }
+
+    pub fn dump_statement<T: Display>(&mut self, statement: &Statement<T>) {
+        match statement {
+            Statement::Use { value } => {
+                self.dump_indent();
+                print!("use ");
+                self.dump_value(value);
+                println!(";");
+            }
+            Statement::Return { value } => {
+                self.dump_indent();
+                print!("return");
+                if let Some(value) = value {
+                    print!(" ");
+                    self.dump_value(value);
+                }
+                println!(";");
+            }
+            Statement::Panic { message } => {
+                self.dump_indent();
+                println!("panic \"{}\";", message);
+            }
+            Statement::Assign { place, value } => {
+                self.dump_indent();
+                self.dump_place(place);
+                print!(" = ");
+                self.dump_value(value);
+                println!(";");
+            }
+            Statement::MatchBool {
+                input,
+                r#true,
+                r#false,
+            } => {
+                self.dump_indent();
+                print!("match ");
+                self.dump_operand(input);
+                println!(" {{");
+                self.indent();
+                self.dump_indent();
+                println!("true =>");
+                self.dump_block(r#true);
+                self.dump_indent();
+                println!("false =>");
+                self.dump_block(r#false);
+                self.dedent();
+                self.dump_indent();
+                println!("}}");
+            }
+            Statement::MatchAdt {
+                input,
+                variants,
+                default,
+            } => {
+                self.dump_indent();
+                print!("match ");
+                self.dump_operand(input);
+                println!(" {{");
+                self.indent();
+                for (i, variant) in variants.iter().enumerate() {
+                    self.dump_indent();
+                    if let Some(variant) = variant {
+                        print!("variant {} =>", i);
+                        self.dump_block(variant);
+                    } else {
+                        println!("variant {} => {{}}", i);
+                    }
+                }
+                if let Some(default) = default {
+                    self.dump_indent();
+                    println!("_ =>");
+                    self.dump_block(default);
+                }
+                self.dedent();
+                self.dump_indent();
+                println!("}}");
+            }
+        }
+    }
+
+    pub fn dump_indent(&self) {
+        for _ in 0..self.indent {
+            print!("  ");
+        }
+    }
+
+    pub fn indent(&mut self) {
+        self.indent += 1;
+    }
+
+    pub fn dedent(&mut self) {
+        self.indent -= 1;
+    }
+
+    pub fn dump_value<T: Display>(&self, value: &Value<T>) {
+        match value {
+            Value::Use(operand) => self.dump_operand(operand),
+            Value::Cast(cast, operand) => {
+                print!("{:?} ", cast);
+                self.dump_operand(operand);
+            }
+            Value::Func(func, captures, tys) => {
+                print!("func {}(", func);
+                for (i, capture) in captures.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    self.dump_operand(capture);
+                }
+                print!(") -> ");
+                for (i, ty) in tys.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{}", ty);
+                }
+            }
+            Value::List(head, tail) => {
+                print!("[");
+
+                for (i, head) in head.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+
+                    self.dump_operand(head);
+                }
+
+                if let Some(tail) = tail {
+                    print!(", ");
+                    self.dump_operand(tail);
+                }
+                print!("]");
+            }
+            Value::ListHead(operand) => {
+                print!("head ");
+                self.dump_operand(operand);
+            }
+            Value::ListTail(operand) => {
+                print!("tail ");
+                self.dump_operand(operand);
+            }
+            Value::ListEmpty(operand) => {
+                print!("empty ");
+                self.dump_operand(operand);
+            }
+            Value::Binary(op, lhs, rhs) => {
+                print!("{:?} ", op);
+                self.dump_operand(lhs);
+                print!(" ");
+                self.dump_operand(rhs);
+            }
+            Value::Unary(op, operand) => {
+                print!("{:?} ", op);
+                self.dump_operand(operand);
+            }
+            Value::IsVariant(operand, variant) => {
+                print!("is_variant ");
+                self.dump_operand(operand);
+                print!(" {}", variant);
+            }
+            Value::Call(func, args) => {
+                self.dump_operand(func);
+                print!("(");
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    self.dump_operand(arg);
+                }
+                print!(")");
+            }
+            Value::Ref(place) => {
+                print!("&");
+                self.dump_place(place);
+            }
+            Value::Tuple(operands) => {
+                print!("(");
+                for (i, operand) in operands.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    self.dump_operand(operand);
+                }
+                print!(")");
+            }
+            Value::Adt(adt, operands) => {
+                print!("adt {}(", adt);
+                for (i, operand) in operands.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    self.dump_operand(operand);
+                }
+                print!(")");
+            }
+        }
+    }
+
+    pub fn dump_operand<T: Display>(&self, operand: &Operand<T>) {
+        match operand {
+            Operand::Copy(place) => {
+                print!("copy ");
+                self.dump_place(place);
+            }
+            Operand::Move(place) => {
+                print!("move ");
+                self.dump_place(place);
+            }
+            Operand::Constant(constant) => self.dump_constant(constant),
+        }
+    }
+
+    pub fn dump_constant(&self, constant: &Constant) {
+        match constant {
+            Constant::Void => print!("void"),
+            Constant::Bool(value) => print!("{}", value),
+            Constant::Int(signed, base, value, kind) => {
+                if *signed {
+                    print!("-");
+                }
+                print!("{:?}", base);
+                for byte in value {
+                    print!("{:02x}", byte);
+                }
+                print!(" {:?}", kind);
+            }
+            Constant::String(value) => print!("{:?}", value),
+        }
+    }
+
+    pub fn dump_place<T: Display>(&self, place: &Place<T>) {
+        match &place.location {
+            Location::Local(local) => print!("local {}", local),
+            Location::Argument(argument) => print!("argument {}", argument),
+            Location::Capture(capture) => print!("capture {}", capture),
+        }
+
+        for projection in &place.projection {
+            match &projection.kind {
+                ProjectionKind::Field { variant, field } => {
+                    if let Some(variant) = variant {
+                        print!(".variant {} ", variant);
+                    }
+                    print!(".field {}", field);
+                }
+                ProjectionKind::Deref => {
+                    print!(".*");
+                }
+            }
+        }
+
+        print!(": {}", place.ty);
+    }
 }
