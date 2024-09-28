@@ -563,6 +563,10 @@ fn parse_block(tokens: &mut TokenStream) -> miette::Result<Expr> {
     tokens.take(Token::Newline);
     tokens.expect(Token::Indent)?;
 
+    while tokens.is(Token::Newline) {
+        tokens.consume();
+    }
+
     while !tokens.is(Token::Dedent) {
         exprs.push(parse_expr(tokens, true)?);
 
