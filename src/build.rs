@@ -199,8 +199,8 @@ fn build_place(
             Ok(place)
         }
 
-        hir::ExprKind::Field(ref expr, field) => {
-            let mut place = build_place(builder, block, expr)?;
+        hir::ExprKind::Field(ref base, field) => {
+            let mut place = build_place(builder, block, base)?;
 
             while let rir::Ty::Ref(ty) = place.ty() {
                 place.projection.push(rir::Projection {

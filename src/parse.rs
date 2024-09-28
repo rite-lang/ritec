@@ -1137,17 +1137,14 @@ fn parse_call_argument(
 }
 
 fn parse_field_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
-    let base = parse_term_expr(tokens, multiline)?;
+    let mut base = parse_term_expr(tokens, multiline)?;
 
-    if !tokens.is(Token::Dot) {
-        return Ok(base);
+    while tokens.take(Token::Dot).is_some() {
+        let (field, _) = parse_snake(tokens)?;
+        base = Expr::Field(Box::new(base), field);
     }
 
-    tokens.expect(Token::Dot)?;
-
-    let (name, _) = parse_snake(tokens)?;
-
-    Ok(Expr::Field(Box::new(base), name))
+    Ok(base)
 }
 
 fn parse_term_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr> {
