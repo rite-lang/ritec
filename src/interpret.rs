@@ -1059,7 +1059,7 @@ impl<'a> Interpreter<'a> {
         match constant {
             Constant::Void => Value::Void,
             Constant::Bool(b) => Value::Bool(*b),
-            Constant::Int(negative, base, digits) => {
+            Constant::Int(negative, base, digits, _) => {
                 let mut n = 0;
 
                 for &digit in digits.iter() {

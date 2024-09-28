@@ -210,7 +210,7 @@ pub enum Operand<T = Ty> {
 pub enum Constant {
     Void,
     Bool(bool),
-    Int(bool, Base, Vec<u8>),
+    Int(bool, Base, Vec<u8>, IntKind),
     String(&'static str),
 }
 

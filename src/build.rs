@@ -314,9 +314,18 @@ fn build_operand(
 
         hir::ExprKind::String(s) => Ok(rir::Operand::Constant(rir::Constant::String(s))),
 
-        hir::ExprKind::Int(negative, base, ref value) => Ok(rir::Operand::Constant(
-            rir::Constant::Int(negative, base, value.clone()),
-        )),
+        hir::ExprKind::Int(negative, base, ref value) => {
+            let rir::Ty::Int(kind) = builder.build_ty(&expr.ty)? else {
+                unreachable!("unexpected int: {:?}", expr.ty)
+            };
+
+            Ok(rir::Operand::Constant(rir::Constant::Int(
+                negative,
+                base,
+                value.clone(),
+                kind,
+            )))
+        }
 
         hir::ExprKind::Bool(b) => Ok(rir::Operand::Constant(rir::Constant::Bool(b))),
 
