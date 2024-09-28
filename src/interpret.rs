@@ -303,7 +303,7 @@ fn dict_get(mut args: Vec<Value>) -> Value {
     };
 
     match dict.get(&key) {
-        Some(value) => value.clone(),
+        Some(value) => Value::Adt(0, vec![value.clone()]),
         None => Value::Adt(1, vec![Value::Void]),
     }
 }
