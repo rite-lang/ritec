@@ -162,10 +162,10 @@ pub fn print_label(label: Label, severity: Severity, sources: Sources) -> void
   // 1 |   let x: int = [] 
   //
   let space = string:repeat(" ", first_spaces)
-  let number = f"{first.number + 1}{space}"
+  let number = f"{first.number + 1}{space}|"
+    |> ansi:blue
 
-  f"{number}| {first.text}"
-  |> ansi:blue
+  f"{number} {first.text}"
   |> io:println
 
   // compute the number of spaces needed to align the marker
@@ -186,7 +186,9 @@ pub fn print_label(label: Label, severity: Severity, sources: Sources) -> void
   let label = f"{marker} {message}"
     |> ansi:color(severity_color(severity))
     |> ansi:bold
-  io:println(f"{space}{ansi:blue("|")} {marker_space}{label}")
+
+  f"{space}{ansi:blue("|")} {marker_space}{label}"
+  |> io:println
 
 type Line(
   number: int

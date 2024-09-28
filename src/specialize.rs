@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::{
     number::IntKind,
     rir::{
-        self, Adt, Argument, Block, Capture, Func, Local, Operand, Place, Projection, Specific,
-        Statement, Ty, Unit, Value,
+        self, Adt, Argument, Block, Capture, Constant, Func, Local, Operand, Place, Projection,
+        Specific, Statement, Ty, Unit, Value,
     },
 };
 
@@ -322,7 +322,18 @@ fn specialize_operand(spec: &mut Specializer, operand: Operand) -> Operand<Speci
     match operand {
         Operand::Copy(place) => Operand::Copy(specialize_place(spec, place)),
         Operand::Move(place) => Operand::Move(specialize_place(spec, place)),
-        Operand::Constant(constant) => Operand::Constant(constant),
+        Operand::Constant(constant) => Operand::Constant(specialize_constant(spec, constant)),
+    }
+}
+
+fn specialize_constant(spec: &mut Specializer, constant: Constant) -> Constant<Specific> {
+    match constant {
+        Constant::Void => Constant::Void,
+        Constant::Bool(b) => Constant::Bool(b),
+        Constant::Int(negative, base, digits, ty) => {
+            Constant::Int(negative, base, digits, specialize_ty(spec, &ty))
+        }
+        Constant::String(s) => Constant::String(s),
     }
 }
 

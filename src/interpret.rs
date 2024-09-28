@@ -62,6 +62,7 @@ impl Ord for RiteFile {
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Array {
     Void(Vec<()>),
@@ -1350,20 +1351,24 @@ impl<'a> Interpreter<'a> {
         recurse(target, value, place.projection.iter().peekable());
     }
 
-    fn interpret_constant(&self, constant: &Constant) -> Value {
+    fn interpret_constant(&self, constant: &Constant<Specific>) -> Value {
         match constant {
             Constant::Void => Value::Void,
             Constant::Bool(b) => Value::Bool(*b),
-            Constant::Int(negative, base, digits, kind) => {
+            Constant::Int(negative, base, digits, ty) => {
                 let mut n = 0;
 
                 for &digit in digits.iter() {
-                    n = n * base.radix() as i64 + digit as i64;
+                    n = n * base.radix() as isize + digit as isize;
                 }
 
                 if *negative {
                     n = -n;
                 }
+
+                let rir::Specific::Int(kind) = ty else {
+                    panic!("expected integer kind")
+                };
 
                 match kind {
                     IntKind::U8 => Value::Int(Int::U8(n as u8)),
@@ -1374,7 +1379,7 @@ impl<'a> Interpreter<'a> {
                     IntKind::I16 => Value::Int(Int::I16(n as i16)),
                     IntKind::I32 => Value::Int(Int::I32(n as i32)),
                     IntKind::I64 => Value::Int(Int::I64(n as i64)),
-                    IntKind::Int => Value::Int(Int::Int(n as isize)),
+                    IntKind::Int => Value::Int(Int::Int(n)),
                 }
             }
             Constant::String(s) => Value::String(s.to_string()),

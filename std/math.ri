@@ -1,5 +1,7 @@
 //! Math utilities.
 
+import order:Order
+
 /// Compute the maximum of two numbers.
 pub fn min(a, b)
   match a < b
@@ -12,6 +14,19 @@ pub fn max(a, b)
   | true  -> b
   | false -> a
 
+/// Clamp a number to a range.
+pub fn clamp(a, min, max)
+  a |> math:max(min) |> math:min(max)
+
+/// Compare two numbers.
+pub fn cmp(a, b)
+  match a < b
+  | true  -> Lt
+  | false ->
+    match a > b
+    | true  -> Gt
+    | false -> Eq
+
 /// Add two numbers.
 pub fn add(a, b)
   a + b
@@ -19,3 +34,21 @@ pub fn add(a, b)
 /// Subtract two numbers.
 pub fn sub(a, b)
   a - b
+
+/// Multiply two numbers.
+pub fn mul(a, b)
+  a * b
+
+/// Divide two numbers.
+pub fn div(a, b)
+  a / b
+
+/// Compute the remainder of two numbers.
+pub fn rem(a, b)
+  a % b
+
+/// Compute the absolute value of a number.
+pub fn abs(a)
+  match a < 0
+  | true  -> -a
+  | false -> a

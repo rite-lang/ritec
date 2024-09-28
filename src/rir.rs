@@ -205,14 +205,14 @@ pub enum Cast {
 pub enum Operand<T = Ty> {
     Copy(Place<T>),
     Move(Place<T>),
-    Constant(Constant),
+    Constant(Constant<T>),
 }
 
 #[derive(Clone, Debug)]
-pub enum Constant {
+pub enum Constant<T = Ty> {
     Void,
     Bool(bool),
-    Int(bool, Base, Vec<u8>, IntKind),
+    Int(bool, Base, Vec<u8>, T),
     String(&'static str),
 }
 
@@ -627,11 +627,11 @@ impl Dumper {
         }
     }
 
-    pub fn dump_constant(&self, constant: &Constant) {
+    pub fn dump_constant<T: Display>(&self, constant: &Constant<T>) {
         match constant {
             Constant::Void => print!("void"),
             Constant::Bool(value) => print!("{}", value),
-            Constant::Int(signed, base, value, kind) => {
+            Constant::Int(signed, base, value, ty) => {
                 if *signed {
                     print!("-");
                 }
@@ -639,7 +639,7 @@ impl Dumper {
                 for byte in value {
                     print!("{:02x}", byte);
                 }
-                print!(" {:?}", kind);
+                print!(" {}", ty);
             }
             Constant::String(value) => print!("{:?}", value),
         }

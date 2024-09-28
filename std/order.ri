@@ -1,0 +1,12 @@
+//! Ordering constructs.
+
+/// The ordering of two values.
+pub type Order =
+  /// The first value is less than the second.
+  | Lt
+
+  /// The first value is equal to the second.
+  | Eq
+
+  /// The first value is greater than the second.
+  | Gt
