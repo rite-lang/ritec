@@ -62,341 +62,172 @@ impl Ord for RiteFile {
     }
 }
 
-#[allow(clippy::enum_variant_names)]
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Array {
-    Void(Vec<()>),
-    Bool(Vec<bool>),
-    Func(Vec<(usize, Vec<Value>)>),
-    List(Vec<Option<Box<List>>>),
-    Adt(Vec<(usize, Vec<Value>)>),
-    String(Vec<String>),
-    Ref(Vec<Rc<RefCell<Value>>>),
-    Dict(Vec<BTreeMap<Value, Value>>),
-    Array(Vec<Array>),
-    File(Vec<RiteFile>),
+macro_rules! type_map {
+    ("U8") => { u8 };
+    ("U16") => { u16 };
+    ("U32") => { u32 };
+    ("U64") => { u64 };
+    ("I8") => { i8 };
+    ("I16") => { i16 };
+    ("I32") => { i32 };
+    ("I64") => { i64 };
+    ("Int") => { isize };
 
-    U8(Vec<u8>),
-    U16(Vec<u16>),
-    U32(Vec<u32>),
-    U64(Vec<u64>),
-    I8(Vec<i8>),
-    I16(Vec<i16>),
-    I32(Vec<i32>),
-    I64(Vec<i64>),
-    Int(Vec<isize>),
+    ("Void") => { () };
+    ("Bool") => { bool };
+    ("Func") => { (usize, Vec<Value>) };
+    ("List") => { Option<Box<List>> };
+    ("Adt") => { (usize, Vec<Value>) };
+    ("String") => { String };
+    ("Ref") => { Rc<RefCell<Value>> };
+    ("Dict") => { BTreeMap<Value, Value> };
+    ("Array") => { Array };
+    ("File") => { RiteFile };
 }
 
-// Call a function with shared return type on inner vec on array.
-macro_rules! array_vec_call {
-    ($expr:expr, $name:ident, $func:block) => {
-        match $expr {
-            Array::Void($name) => $func,
-            Array::Bool($name) => $func,
-            Array::Func($name) => $func,
-            Array::List($name) => $func,
-            Array::Adt($name) => $func,
-            Array::String($name) => $func,
-            Array::Ref($name) => $func,
-            Array::Dict($name) => $func,
-            Array::Array($name) => $func,
-            Array::File($name) => $func,
-            Array::U8($name) => $func,
-            Array::U16($name) => $func,
-            Array::U32($name) => $func,
-            Array::U64($name) => $func,
-            Array::I8($name) => $func,
-            Array::I16($name) => $func,
-            Array::I32($name) => $func,
-            Array::I64($name) => $func,
-            Array::Int($name) => $func,
+macro_rules! variant_map {
+    ($macro_name:ident) => {
+        $macro_name! {
+            Void => "Void",
+            Bool => "Bool",
+            Func => "Func",
+            List => "List",
+            Adt => "Adt",
+            String => "String",
+            Ref => "Ref",
+            Dict => "Dict",
+            Array => "Array",
+            File => "File",
+            U8 => "U8",
+            U16 => "U16",
+            U32 => "U32",
+            U64 => "U64",
+            I8 => "I8",
+            I16 => "I16",
+            I32 => "I32",
+            I64 => "I64",
+            Int => "Int"
+        }
+    };
+
+  ($macro_name:ident, $($args:tt)*) => {
+        $macro_name! {
+            $($args)*, // Pass along any extra arguments like $value, $a, $block, etc.
+            Void => "Void",
+            Bool => "Bool",
+            Func => "Func",
+            List => "List",
+            Adt => "Adt",
+            String => "String",
+            Ref => "Ref",
+            Dict => "Dict",
+            Array => "Array",
+            File => "File",
+            U8 => "U8",
+            U16 => "U16",
+            U32 => "U32",
+            U64 => "U64",
+            I8 => "I8",
+            I16 => "I16",
+            I32 => "I32",
+            I64 => "I64",
+            Int => "Int"
         }
     };
 }
 
-// Transform an array with an expression on the inner vec.
-macro_rules! array_vec_transform_self {
-    ($m:expr, $name:ident, $expr:expr) => {
-        match $m {
-            Array::Void($name) => Array::Void($expr),
-            Array::Bool($name) => Array::Bool($expr),
-            Array::Func($name) => Array::Func($expr),
-            Array::List($name) => Array::List($expr),
-            Array::Adt($name) => Array::Adt($expr),
-            Array::String($name) => Array::String($expr),
-            Array::Ref($name) => Array::Ref($expr),
-            Array::Dict($name) => Array::Dict($expr),
-            Array::Array($name) => Array::Array($expr),
-            Array::File($name) => Array::File($expr),
-            Array::U8($name) => Array::U8($expr),
-            Array::U16($name) => Array::U16($expr),
-            Array::U32($name) => Array::U32($expr),
-            Array::U64($name) => Array::U64($expr),
-            Array::I8($name) => Array::I8($expr),
-            Array::I16($name) => Array::I16($expr),
-            Array::I32($name) => Array::I32($expr),
-            Array::I64($name) => Array::I64($expr),
-            Array::Int($name) => Array::Int($expr),
+macro_rules! array_enum {
+    ($($variant:ident => $type_str:tt),*) => {
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum Array {
+            $(
+                $variant(Vec<type_map!($type_str)>),
+            )*
         }
     };
 }
 
-// Match an array with a value and call a block with the value.
-macro_rules! array_vec_and_value {
-    ($array:expr, $value:expr, $vec:ident, $name: ident, $block:block) => {
-        match ($array, $value) {
-            (Array::Void($vec), Value::Void) => {
-                let $name = ();
-                $block
-            }
-            (Array::Bool($vec), Value::Bool($name)) => $block,
-            (Array::Func($vec), Value::Func(func, captured)) => {
-                let $name = (func, captured);
-                $block
-            }
-            (Array::List($vec), Value::List($name)) => $block,
-            (Array::Adt($vec), Value::Adt(variant, fields)) => {
-                let $name = (variant, fields);
-                $block
-            }
-            (Array::String($vec), Value::String($name)) => $block,
-            (Array::Ref($vec), Value::Ref($name)) => $block,
-            (Array::Dict($vec), Value::Dict($name)) => $block,
-            (Array::Array($vec), Value::Array($name)) => $block,
-            (Array::File($vec), Value::File($name)) => $block,
-            (Array::U8($vec), Value::Int(Int::U8($name))) => $block,
-            (Array::U16($vec), Value::Int(Int::U16($name))) => $block,
-            (Array::U32($vec), Value::Int(Int::U32($name))) => $block,
-            (Array::U64($vec), Value::Int(Int::U64($name))) => $block,
-            (Array::I8($vec), Value::Int(Int::I8($name))) => $block,
-            (Array::I16($vec), Value::Int(Int::I16($name))) => $block,
-            (Array::I32($vec), Value::Int(Int::I32($name))) => $block,
-            (Array::I64($vec), Value::Int(Int::I64($name))) => $block,
-            (Array::Int($vec), Value::Int(Int::Int($name))) => $block,
-
-            _ => panic!("mismatched types"),
+macro_rules! value_enum {
+    ($($variant:ident => $type_str:tt),*) => {
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum Value {
+            $(
+                $variant(type_map!($type_str)),
+            )*
         }
     };
 }
 
-impl Array {
-    pub fn new(length: usize, default: Value) -> Self {
-        match default {
-            Value::Void => {
-                let v = ();
-                Array::Void(vec![v; length])
-            }
-            Value::Int(k) => match k {
-                Int::U8(v) => Array::U8(vec![v; length]),
-                Int::U16(v) => Array::U16(vec![v; length]),
-                Int::U32(v) => Array::U32(vec![v; length]),
-                Int::U64(v) => Array::U64(vec![v; length]),
-                Int::I8(v) => Array::I8(vec![v; length]),
-                Int::I16(v) => Array::I16(vec![v; length]),
-                Int::I32(v) => Array::I32(vec![v; length]),
-                Int::I64(v) => Array::I64(vec![v; length]),
-                Int::Int(v) => Array::Int(vec![v; length]),
-            },
-            Value::Bool(v) => Array::Bool(vec![v; length]),
-            Value::Func(a, b) => {
-                let v = (a, b);
-                Array::Func(vec![v; length])
-            }
-            Value::List(v) => Array::List(vec![v; length]),
-            Value::Adt(a, b) => {
-                let v = (a, b);
-                Array::Adt(vec![v; length])
-            }
-            Value::String(v) => Array::String(vec![v; length]),
-            Value::Ref(v) => Array::Ref(vec![v; length]),
-            Value::Dict(v) => Array::Dict(vec![v; length]),
-            Value::Array(v) => Array::Array(vec![v; length]),
-            Value::File(v) => Array::File(vec![v; length]),
-        }
-    }
+// Generate the `Array` and `Value` enums.
+variant_map!(value_enum);
+variant_map!(array_enum);
 
-    pub fn len(&self) -> usize {
-        array_vec_call!(self, v, { v.len() })
-    }
-
-    pub fn resize(&mut self, new_len: usize, default: Value) {
-        array_vec_and_value!(self, default, v, d, {
-            v.resize(new_len, d);
-        })
-    }
-
-    pub fn truncate(&mut self, len: usize) {
-        array_vec_call!(self, v, { v.truncate(len) })
-    }
-
-    pub fn slice(&self, start: usize, end: usize) -> Array {
-        array_vec_transform_self!(self, v, v[start..end].to_vec())
-    }
-
-    pub fn get(&self, index: usize) -> Option<Value> {
-        if index >= self.len() {
-            return None;
-        }
-
-        match self {
-            Array::Void(v) => v.get(index).map(|_| Value::Void),
-            Array::Bool(v) => v.get(index).map(|&b| Value::Bool(b)),
-            Array::Func(v) => v
-                .get(index)
-                .map(|(func, captured)| Value::Func(*func, captured.clone())),
-            Array::List(v) => v.get(index).map(|list| Value::List(list.clone())),
-            Array::Adt(v) => v
-                .get(index)
-                .map(|(variant, fields)| Value::Adt(*variant, fields.clone())),
-            Array::String(v) => v.get(index).map(|s| Value::String(s.clone())),
-            Array::Ref(v) => v.get(index).map(|r| Value::Ref(r.clone())),
-            Array::Dict(v) => v.get(index).map(|dict| Value::Dict(dict.clone())),
-            Array::Array(v) => v.get(index).map(|arr| Value::Array(arr.clone())),
-            Array::File(v) => v.get(index).map(|file| Value::File(file.clone())),
-            Array::U8(v) => v.get(index).map(|&n| Value::Int(Int::U8(n))),
-            Array::U16(v) => v.get(index).map(|&n| Value::Int(Int::U16(n))),
-            Array::U32(v) => v.get(index).map(|&n| Value::Int(Int::U32(n))),
-            Array::U64(v) => v.get(index).map(|&n| Value::Int(Int::U64(n))),
-            Array::I8(v) => v.get(index).map(|&n| Value::Int(Int::I8(n))),
-            Array::I16(v) => v.get(index).map(|&n| Value::Int(Int::I16(n))),
-            Array::I32(v) => v.get(index).map(|&n| Value::Int(Int::I32(n))),
-            Array::I64(v) => v.get(index).map(|&n| Value::Int(Int::I64(n))),
-            Array::Int(v) => v.get(index).map(|&n| Value::Int(Int::Int(n))),
-        }
-    }
-
-    pub fn set(&mut self, index: usize, value: Value) {
-        if index >= self.len() {
-            return;
-        }
-
-        array_vec_and_value!(self, value, v, d, {
-            v[index] = d;
-        })
-    }
-}
-
-impl std::fmt::Display for Array {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[")?;
-
-        for i in 0..self.len() {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-
-            write!(f, "{}", self.get(i).unwrap())?;
-        }
-
-        write!(f, "]")
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Int {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    Int(isize),
-}
-
-// Macro for implementing binary operations on Int.
-macro_rules! int_op {
-    ($name:ident, $op:tt) => {
-        fn $name(self, rhs: Int) -> Int {
-            match (self, rhs) {
-                (Int::U8(lhs), Int::U8(rhs)) => Int::U8(lhs $op rhs),
-                (Int::U16(lhs), Int::U16(rhs)) => Int::U16(lhs $op rhs),
-                (Int::U32(lhs), Int::U32(rhs)) => Int::U32(lhs $op rhs),
-                (Int::U64(lhs), Int::U64(rhs)) => Int::U64(lhs $op rhs),
-                (Int::I8(lhs), Int::I8(rhs)) => Int::I8(lhs $op rhs),
-                (Int::I16(lhs), Int::I16(rhs)) => Int::I16(lhs $op rhs),
-                (Int::I32(lhs), Int::I32(rhs)) => Int::I32(lhs $op rhs),
-                (Int::I64(lhs), Int::I64(rhs)) => Int::I64(lhs $op rhs),
-                (Int::Int(lhs), Int::Int(rhs)) => Int::Int(lhs $op rhs),
-                _ => panic!("mismatched integer types"),
-            }
+// Use variant_map! to generate the match_variant_shared_block! macro.
+macro_rules! match_variant_shared_block {
+    // Match only one enum (choose type)
+    ($ty:ident, $value:expr, $a:ident, $block:block, $($variant:ident => $type_str:tt),*) => {
+        match $value {
+            $(
+                $ty::$variant($a) => $block
+            )*
+            #[allow(unreachable_patterns)]
+            _ => panic!("expected matching variant")
         }
     };
-}
 
-impl std::ops::Add for Int {
-    type Output = Int;
-    int_op!(add, +);
-}
-
-impl std::ops::Sub for Int {
-    type Output = Int;
-    int_op!(sub, -);
-}
-
-impl std::ops::Mul for Int {
-    type Output = Int;
-    int_op!(mul, *);
-}
-
-impl std::ops::Div for Int {
-    type Output = Int;
-    int_op!(div, /);
-}
-
-impl std::ops::Rem for Int {
-    type Output = Int;
-    int_op!(rem, %);
-}
-
-impl std::ops::Neg for Int {
-    type Output = Int;
-
-    fn neg(self) -> Int {
-        match self {
-            Int::I8(n) => Int::I8(-n),
-            Int::I16(n) => Int::I16(-n),
-            Int::I32(n) => Int::I32(-n),
-            Int::I64(n) => Int::I64(-n),
-            Int::Int(n) => Int::Int(-n),
-            _ => panic!("mismatched integer types"),
+    // "Convert" variant block converting a value to an array based on the value a.
+    ($x:ident, $y:ident, $value:expr, $a:ident, $block:block, $($variant:ident => $type_str:tt),*) => {
+        match $value {
+            $(
+                $x::$variant($a) => $y::$variant($block),
+            )*
+            #[allow(unreachable_patterns)]
+            _ => panic!("expected matching variant")
         }
-    }
-}
+    };
 
-impl std::fmt::Display for Int {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Int::U8(n) => write!(f, "{}", n),
-            Int::U16(n) => write!(f, "{}", n),
-            Int::U32(n) => write!(f, "{}", n),
-            Int::U64(n) => write!(f, "{}", n),
-            Int::I8(n) => write!(f, "{}", n),
-            Int::I16(n) => write!(f, "{}", n),
-            Int::I32(n) => write!(f, "{}", n),
-            Int::I64(n) => write!(f, "{}", n),
-            Int::Int(n) => write!(f, "{}", n),
+    // Match both enums
+    ($value:expr, $a:ident, $b:ident, $block:block, $($variant:ident => $type_str:tt),*) => {
+        match $value {
+            $(
+                (Array::$variant($a), Value::$variant($b)) => $block
+            )*
+            #[allow(unreachable_patterns)]
+            _ => panic!("expected matching variants")
         }
-    }
-}
+    };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Value {
-    Void,
-    Int(Int),
-    Bool(bool),
-    Func(usize, Vec<Value>),
-    List(Option<Box<List>>),
-    Adt(usize, Vec<Value>),
-    String(String),
-    Ref(Rc<RefCell<Value>>),
-    Dict(BTreeMap<Value, Value>),
-    Array(Array),
-    File(RiteFile),
+   ($ty:ident, $value:expr, $a:ident, $block:block) => {
+       variant_map!(match_variant_shared_block, $ty, $value, $a, $block)
+   };
+
+    ($x:ident, $y:ident, $value:expr, $a:ident, $block:block) => {
+        variant_map!(match_variant_shared_block, $x, $y, $value, $a, $block)
+    };
+
+
+    ($value:expr, $a:ident, $b:ident, $block:block) => {
+        variant_map!(match_variant_shared_block, $value, $a, $b, $block)
+    };
 }
 
 impl Value {
+    pub fn void() -> Value {
+        Value::Void(())
+    }
+
+    pub fn ok(value: Value) -> Value {
+        Value::Adt((0, vec![value]))
+    }
+
+    pub fn err(value: Value) -> Value {
+        Value::Adt((1, vec![value]))
+    }
+
+    pub fn none() -> Value {
+        Value::Adt((1, vec![Value::void()]))
+    }
+
     pub fn list_from_vec(values: Vec<Value>) -> Value {
         let mut list = None;
 
@@ -411,14 +242,79 @@ impl Value {
     }
 }
 
+impl Array {
+    pub fn new(len: usize, default: Value) -> Array {
+        match_variant_shared_block!(Value, Array, default, default, { vec![default; len] })
+    }
+
+    pub fn len(&self) -> usize {
+        match_variant_shared_block!(Array, self, s, { s.len() })
+    }
+
+    pub fn slice(&self, start: usize, end: usize) -> Array {
+        match_variant_shared_block!(Array, Array, self, s, { s[start..end].to_vec() })
+    }
+
+    pub fn resize(&mut self, len: usize, default: Value) {
+        match_variant_shared_block!((self, default), s, v, {
+            s.resize(len, v);
+        })
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        match_variant_shared_block!(Array, self, s, {
+            s.truncate(len);
+        })
+    }
+
+    pub fn set(&mut self, index: usize, value: Value) {
+        match_variant_shared_block!((self, value), s, v, {
+            s[index] = v;
+        })
+    }
+
+    pub fn get(&self, index: usize) -> Option<Value> {
+        if index >= self.len() {
+            return None;
+        }
+
+        match self {
+            Array::Void(_) => return Some(Value::void()),
+            _ => {}
+        }
+
+        Some(match_variant_shared_block!(Array, Value, self, s, {
+            s[index].clone()
+        },
+            // Exclude void.
+            Bool => "Bool",
+            Func => "Func",
+            List => "List",
+            Adt => "Adt",
+            String => "String",
+            Ref => "Ref",
+            Dict => "Dict",
+            Array => "Array",
+            File => "File",
+            U8 => "U8",
+            U16 => "U16",
+            U32 => "U32",
+            U64 => "U64",
+            I8 => "I8",
+            I16 => "I16",
+            I32 => "I32",
+            I64 => "I64",
+            Int => "Int"
+        ))
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Value::Void => write!(f, "void"),
-            Value::Int(n) => write!(f, "{}", n),
-            Value::Bool(b) => write!(f, "{}", b),
+            Value::Void(_) => write!(f, "void"),
             Value::String(s) => write!(f, "\"{}\"", s),
-            Value::Func(func, captured) => write!(
+            Value::Func((func, captured)) => write!(
                 f,
                 "Func({}, [{}])",
                 func,
@@ -430,7 +326,7 @@ impl std::fmt::Display for Value {
             ),
             Value::List(None) => write!(f, "[]"),
             Value::List(Some(list)) => write!(f, "[{}]", list),
-            Value::Adt(variant, fields) => {
+            Value::Adt((variant, fields)) => {
                 write!(f, "{{{}|", variant)?;
 
                 for (i, field) in fields.iter().enumerate() {
@@ -461,8 +357,18 @@ impl std::fmt::Display for Value {
 
                 write!(f, " }}")
             }
-            Value::Array(arr) => write!(f, "{}", arr),
             Value::File(file) => write!(f, "File({})", file.id),
+            Value::Bool(v) => write!(f, "{}", v),
+            Value::Array(v) => write!(f, "{:?}", v),
+            Value::U8(v) => write!(f, "{}", v),
+            Value::U16(v) => write!(f, "{}", v),
+            Value::U32(v) => write!(f, "{}", v),
+            Value::U64(v) => write!(f, "{}", v),
+            Value::I8(v) => write!(f, "{}", v),
+            Value::I16(v) => write!(f, "{}", v),
+            Value::I32(v) => write!(f, "{}", v),
+            Value::I64(v) => write!(f, "{}", v),
+            Value::Int(v) => write!(f, "{}", v),
         }
     }
 }
@@ -524,17 +430,17 @@ fn string_length(mut args: Vec<Value>) -> Value {
         panic!("expected string")
     };
 
-    Value::Int(Int::Int(s.chars().count() as isize))
+    Value::Int(s.chars().count() as isize)
 }
 
 fn string_slice(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
-    let Value::Int(Int::Int(end)) = args.pop().unwrap() else {
+    let Value::Int(end) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
-    let Value::Int(Int::Int(start)) = args.pop().unwrap() else {
+    let Value::Int(start) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -613,7 +519,7 @@ fn dict_length(mut args: Vec<Value>) -> Value {
         panic!("expected dictionary")
     };
 
-    Value::Int(Int::Int(dict.len() as isize))
+    Value::Int(dict.len() as isize)
 }
 
 fn dict_get(mut args: Vec<Value>) -> Value {
@@ -626,8 +532,8 @@ fn dict_get(mut args: Vec<Value>) -> Value {
     };
 
     match dict.get(&key) {
-        Some(value) => Value::Adt(0, vec![value.clone()]),
-        None => Value::Adt(1, vec![Value::Void]),
+        Some(value) => Value::ok(value.clone()),
+        None => Value::none(),
     }
 }
 
@@ -669,7 +575,7 @@ fn dict_pairs(mut args: Vec<Value>) -> Value {
 
     let pairs = dict
         .iter()
-        .map(|(key, value)| Value::Adt(0, vec![key.clone(), value.clone()]))
+        .map(|(key, value)| Value::Adt((0, vec![key.clone(), value.clone()])))
         .collect();
 
     Value::list_from_vec(pairs)
@@ -702,7 +608,7 @@ fn array_new(mut args: Vec<Value>) -> Value {
 
     let default = args.pop().unwrap();
 
-    let Value::Int(Int::Int(len)) = args.pop().unwrap() else {
+    let Value::Int(len) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -719,7 +625,7 @@ fn array_empty(args: Vec<Value>) -> Value {
 fn array_extend(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
-    let Value::Int(Int::Int(len2)) = args.pop().unwrap() else {
+    let Value::Int(len2) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -737,7 +643,7 @@ fn array_extend(mut args: Vec<Value>) -> Value {
 fn array_truncate(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
-    let Value::Int(Int::Int(len2)) = args.pop().unwrap() else {
+    let Value::Int(len2) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -757,13 +663,13 @@ fn array_length(mut args: Vec<Value>) -> Value {
         panic!("expected array")
     };
 
-    Value::Int(Int::Int(arr.len() as isize))
+    Value::Int(arr.len() as isize)
 }
 
 fn array_get(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
-    let Value::Int(Int::Int(index)) = args.pop().unwrap() else {
+    let Value::Int(index) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -772,8 +678,8 @@ fn array_get(mut args: Vec<Value>) -> Value {
     };
 
     match arr.get(index as usize) {
-        Some(value) => Value::Adt(0, vec![value]),
-        None => Value::Adt(1, vec![Value::Void]),
+        Some(value) => Value::ok(value),
+        None => Value::none(),
     }
 }
 
@@ -782,7 +688,7 @@ fn array_set(mut args: Vec<Value>) -> Value {
 
     let value = args.pop().unwrap();
 
-    let Value::Int(Int::Int(index)) = args.pop().unwrap() else {
+    let Value::Int(index) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -798,11 +704,11 @@ fn array_set(mut args: Vec<Value>) -> Value {
 fn array_slice(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
-    let Value::Int(Int::Int(end)) = args.pop().unwrap() else {
+    let Value::Int(end) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
-    let Value::Int(Int::Int(start)) = args.pop().unwrap() else {
+    let Value::Int(start) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -823,11 +729,11 @@ fn rite_io_error(kind: io::ErrorKind) -> Value {
         _ => 2,
     };
 
-    Value::Adt(1, vec![Value::Adt(err, Vec::new())])
+    Value::err(Value::Adt((err, Vec::new())))
 }
 
 fn rite_io_error_other() -> Value {
-    Value::Adt(1, vec![Value::Adt(2, Vec::new())])
+    Value::err(Value::Adt((2, Vec::new())))
 }
 
 fn fs_open(mut args: Vec<Value>) -> Value {
@@ -843,7 +749,7 @@ fn fs_open(mut args: Vec<Value>) -> Value {
     match opts.open(&path) {
         Ok(file) => {
             let file = Value::File(RiteFile::new(file));
-            Value::Adt(0, vec![file])
+            Value::ok(file)
         }
         Err(err) => rite_io_error(err.kind()),
     }
@@ -858,7 +764,7 @@ fn fs_close(mut args: Vec<Value>) -> Value {
 
     file.file.lock().unwrap().take();
 
-    Value::Adt(0, vec![Value::Void])
+    Value::ok(Value::void())
 }
 
 fn fs_read_all(mut args: Vec<Value>) -> Value {
@@ -874,7 +780,7 @@ fn fs_read_all(mut args: Vec<Value>) -> Value {
 
     match file.as_mut() {
         Some(file) => match file.read_to_end(&mut contents) {
-            Ok(_) => Value::Adt(0, vec![Value::Array(Array::U8(contents))]),
+            Ok(_) => Value::ok(Value::Array(Array::U8(contents))),
 
             Err(err) => rite_io_error(err.kind()),
         },
@@ -897,7 +803,7 @@ fn fs_write_all(mut args: Vec<Value>) -> Value {
 
     match file.as_mut() {
         Some(file) => match file.write_all(&bytes) {
-            Ok(_) => Value::Adt(0, vec![Value::Void]),
+            Ok(_) => Value::ok(Value::void()),
             Err(err) => rite_io_error(err.kind()),
         },
         None => rite_io_error_other(),
@@ -911,7 +817,7 @@ fn io_print(mut args: Vec<Value>) -> Value {
 
     print!("{}", s);
 
-    Value::Void
+    Value::void()
 }
 
 fn debug_format(mut args: Vec<Value>) -> Value {
@@ -995,7 +901,7 @@ impl<'a> Interpreter<'a> {
         let args = Value::list_from_vec(args);
 
         let mut frame = Frame {
-            locals: vec![Value::Void; self.rir.funcs[main].locals.len()],
+            locals: vec![Value::void(); self.rir.funcs[main].locals.len()],
             arguments: vec![args],
             captured: Vec::new(),
         };
@@ -1013,7 +919,7 @@ impl<'a> Interpreter<'a> {
                 Statement::Return { value } => {
                     return match value {
                         Some(value) => Some(self.interpret_value(frame, value)),
-                        None => Some(Value::Void),
+                        None => Some(Value::void()),
                     }
                 }
                 Statement::Panic { message } => {
@@ -1050,7 +956,7 @@ impl<'a> Interpreter<'a> {
                     variants,
                     default,
                 } => {
-                    let Value::Adt(variant, _) = self.interpret_operand(frame, input) else {
+                    let Value::Adt((variant, _)) = self.interpret_operand(frame, input) else {
                         panic!("expected adt")
                     };
 
@@ -1080,7 +986,7 @@ impl<'a> Interpreter<'a> {
                     .map(|op| self.interpret_operand(frame, op))
                     .collect();
 
-                Value::Func(*index, captures)
+                Value::Func((*index, captures))
             }
             rir::Value::List(items, tail) => {
                 let mut list = match tail {
@@ -1232,14 +1138,14 @@ impl<'a> Interpreter<'a> {
                 }
             }
             rir::Value::IsVariant(value, variant) => {
-                let Value::Adt(current, _) = self.interpret_operand(frame, value) else {
+                let Value::Adt((current, _)) = self.interpret_operand(frame, value) else {
                     panic!("expected adt")
                 };
 
                 Value::Bool(current == *variant)
             }
             rir::Value::Call(func, args) => {
-                let Value::Func(func, captured) = self.interpret_operand(frame, func) else {
+                let Value::Func((func, captured)) = self.interpret_operand(frame, func) else {
                     panic!("expected function")
                 };
 
@@ -1249,7 +1155,7 @@ impl<'a> Interpreter<'a> {
                     .collect();
 
                 let mut frame = Frame {
-                    locals: vec![Value::Void; self.rir.funcs[func].locals.len()],
+                    locals: vec![Value::void(); self.rir.funcs[func].locals.len()],
                     arguments: args,
                     captured,
                 };
@@ -1271,7 +1177,7 @@ impl<'a> Interpreter<'a> {
                     .map(|op| self.interpret_operand(frame, op))
                     .collect();
 
-                Value::Adt(0, items)
+                Value::Adt((0, items))
             }
             rir::Value::Adt(variant, items) => {
                 let items = items
@@ -1279,7 +1185,7 @@ impl<'a> Interpreter<'a> {
                     .map(|op| self.interpret_operand(frame, op))
                     .collect();
 
-                Value::Adt(*variant, items)
+                Value::Adt((*variant, items))
             }
         }
     }
@@ -1302,7 +1208,7 @@ impl<'a> Interpreter<'a> {
         for projection in place.projection.iter() {
             match projection.kind {
                 ProjectionKind::Field { field, .. } => match &value {
-                    Value::Adt(_, fields) => value = fields[field].clone(),
+                    Value::Adt((_, fields)) => value = fields[field].clone(),
                     _ => todo!(),
                 },
                 ProjectionKind::Deref => {
@@ -1333,7 +1239,7 @@ impl<'a> Interpreter<'a> {
             match projection.next() {
                 Some(proj) => match proj.kind {
                     ProjectionKind::Field { field, .. } => match target {
-                        Value::Adt(_, fields) => recurse(&mut fields[field], value, projection),
+                        Value::Adt((_, fields)) => recurse(&mut fields[field], value, projection),
                         _ => todo!(),
                     },
                     ProjectionKind::Deref => {
@@ -1353,7 +1259,7 @@ impl<'a> Interpreter<'a> {
 
     fn interpret_constant(&self, constant: &Constant<Specific>) -> Value {
         match constant {
-            Constant::Void => Value::Void,
+            Constant::Void => Value::void(),
             Constant::Bool(b) => Value::Bool(*b),
             Constant::Int(negative, base, digits, ty) => {
                 let mut n = 0;
@@ -1371,15 +1277,15 @@ impl<'a> Interpreter<'a> {
                 };
 
                 match kind {
-                    IntKind::U8 => Value::Int(Int::U8(n as u8)),
-                    IntKind::U16 => Value::Int(Int::U16(n as u16)),
-                    IntKind::U32 => Value::Int(Int::U32(n as u32)),
-                    IntKind::U64 => Value::Int(Int::U64(n as u64)),
-                    IntKind::I8 => Value::Int(Int::I8(n as i8)),
-                    IntKind::I16 => Value::Int(Int::I16(n as i16)),
-                    IntKind::I32 => Value::Int(Int::I32(n as i32)),
-                    IntKind::I64 => Value::Int(Int::I64(n as i64)),
-                    IntKind::Int => Value::Int(Int::Int(n)),
+                    IntKind::U8 => Value::U8(n as u8),
+                    IntKind::U16 => Value::U16(n as u16),
+                    IntKind::U32 => Value::U32(n as u32),
+                    IntKind::U64 => Value::U64(n as u64),
+                    IntKind::I8 => Value::I8(n as i8),
+                    IntKind::I16 => Value::I16(n as i16),
+                    IntKind::I32 => Value::I32(n as i32),
+                    IntKind::I64 => Value::I64(n as i64),
+                    IntKind::Int => Value::Int(n),
                 }
             }
             Constant::String(s) => Value::String(s.to_string()),
