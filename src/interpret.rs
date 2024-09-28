@@ -1,3 +1,4 @@
+use crate::number::IntKind;
 use crate::{
     ast::BinOp,
     hir::UnOp,
@@ -62,9 +63,353 @@ impl Ord for RiteFile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Array {
+    Void(Vec<()>),
+    Bool(Vec<bool>),
+    Func(Vec<(usize, Vec<Value>)>),
+    List(Vec<Option<Box<List>>>),
+    Adt(Vec<(usize, Vec<Value>)>),
+    String(Vec<String>),
+    Ref(Vec<Rc<RefCell<Value>>>),
+    Dict(Vec<BTreeMap<Value, Value>>),
+    Array(Vec<Array>),
+    File(Vec<RiteFile>),
+
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+    U64(Vec<u64>),
+    I8(Vec<i8>),
+    I16(Vec<i16>),
+    I32(Vec<i32>),
+    I64(Vec<i64>),
+    Int(Vec<isize>),
+}
+
+
+// Call a function with shared return type on inner vec on array.
+macro_rules! array_vec_call {
+    ($expr:expr, $name:ident, $func:block) => {
+        match $expr {
+            Array::Void($name) => $func,
+            Array::Bool($name) => $func,
+            Array::Func($name) => $func,
+            Array::List($name) => $func,
+            Array::Adt($name) => $func,
+            Array::String($name) => $func,
+            Array::Ref($name) => $func,
+            Array::Dict($name) => $func,
+            Array::Array($name) => $func,
+            Array::File($name) => $func,
+            Array::U8($name) => $func,
+            Array::U16($name) => $func,
+            Array::U32($name) => $func,
+            Array::U64($name) => $func,
+            Array::I8($name) => $func,
+            Array::I16($name) => $func,
+            Array::I32($name) => $func,
+            Array::I64($name) => $func,
+            Array::Int($name) => $func,
+        }
+    };
+}
+
+// Transform an array with an expression on the inner vec.
+macro_rules! array_vec_transform_self {
+    ($m:expr, $name:ident, $expr:expr) => {
+        match $m {
+            Array::Void($name) => Array::Void($expr),
+            Array::Bool($name) => Array::Bool($expr),
+            Array::Func($name) => Array::Func($expr),
+            Array::List($name) => Array::List($expr),
+            Array::Adt($name) => Array::Adt($expr),
+            Array::String($name) => Array::String($expr),
+            Array::Ref($name) => Array::Ref($expr),
+            Array::Dict($name) => Array::Dict($expr),
+            Array::Array($name) => Array::Array($expr),
+            Array::File($name) => Array::File($expr),
+            Array::U8($name) => Array::U8($expr),
+            Array::U16($name) => Array::U16($expr),
+            Array::U32($name) => Array::U32($expr),
+            Array::U64($name) => Array::U64($expr),
+            Array::I8($name) => Array::I8($expr),
+            Array::I16($name) => Array::I16($expr),
+            Array::I32($name) => Array::I32($expr),
+            Array::I64($name) => Array::I64($expr),
+            Array::Int($name) => Array::Int($expr),
+        }
+    };
+}
+
+// Match an array with a value and call a block with the value.
+macro_rules! array_vec_and_value {
+    ($array:expr, $value:expr, $vec:ident, $name: ident, $block:block) => {
+        match ($array, $value) {
+            (Array::Void($vec), Value::Void) => { let $name = (); $block }
+            (Array::Bool($vec), Value::Bool($name)) => { $block }
+            (Array::Func($vec), Value::Func(func, captured)) => { let $name = (func, captured); $block }
+            (Array::List($vec), Value::List($name)) => { $block }
+            (Array::Adt($vec), Value::Adt(variant, fields)) => { let $name = (variant, fields); $block }
+            (Array::String($vec), Value::String($name)) => { $block }
+            (Array::Ref($vec), Value::Ref($name)) => { $block }
+            (Array::Dict($vec), Value::Dict($name)) => { $block }
+            (Array::Array($vec), Value::Array($name)) => { $block }
+            (Array::File($vec), Value::File($name)) => { $block }
+            (Array::U8($vec), Value::Int(Int::U8($name))) => { $block }
+            (Array::U16($vec), Value::Int(Int::U16($name))) => { $block }
+            (Array::U32($vec), Value::Int(Int::U32($name))) => { $block }
+            (Array::U64($vec), Value::Int(Int::U64($name))) => { $block }
+            (Array::I8($vec), Value::Int(Int::I8($name))) => { $block }
+            (Array::I16($vec), Value::Int(Int::I16($name))) => { $block }
+            (Array::I32($vec), Value::Int(Int::I32($name))) => { $block }
+            (Array::I64($vec), Value::Int(Int::I64($name))) => { $block }
+            (Array::Int($vec), Value::Int(Int::Int($name))) => { $block }
+
+            _ => panic!("mismatched types"),
+        }
+    };
+}
+
+impl Array {
+    pub fn new(length: usize, default: Value) -> Self {
+        match default {
+            Value::Void => {
+                let v = ();
+                Array::Void(vec![v; length])
+            }
+            Value::Int(k) => match k {
+                Int::U8(v) => Array::U8(vec![v; length]),
+                Int::U16(v) => Array::U16(vec![v; length]),
+                Int::U32(v) => Array::U32(vec![v; length]),
+                Int::U64(v) => Array::U64(vec![v; length]),
+                Int::I8(v) => Array::I8(vec![v; length]),
+                Int::I16(v) => Array::I16(vec![v; length]),
+                Int::I32(v) => Array::I32(vec![v; length]),
+                Int::I64(v) => Array::I64(vec![v; length]),
+                Int::Int(v) => Array::Int(vec![v; length]),
+            }
+            Value::Bool(v) => Array::Bool(vec![v; length]),
+            Value::Func(a, b) => {
+                let v = (a, b);
+                Array::Func(vec![v; length])
+            }
+            Value::List(v) => Array::List(vec![v; length]),
+            Value::Adt(a, b) => {
+                let v = (a, b);
+                Array::Adt(vec![v; length])
+            }
+            Value::String(v) => Array::String(vec![v; length]),
+            Value::Ref(v) => Array::Ref(vec![v; length]),
+            Value::Dict(v) => Array::Dict(vec![v; length]),
+            Value::Array(v) => Array::Array(vec![v; length]),
+            Value::File(v) => Array::File(vec![v; length]),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        array_vec_call!(self, v, { v.len() })
+    }
+
+    pub fn resize(&mut self, new_len: usize, default: Value) {
+        array_vec_and_value!(self, default, v, d, {
+            v.resize(new_len, d);
+        })
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        array_vec_call!(self, v, { v.truncate(len) })
+    }
+
+    pub fn slice(&self, start: usize, end: usize) -> Array {
+        array_vec_transform_self!(self, v, v[start..end].to_vec())
+    }
+
+    pub fn get(&self, index: usize) -> Option<Value> {
+        if index >= self.len() {
+            return None;
+        }
+
+        match self {
+            Array::Void(v) => {
+                v.get(index).map(|_| Value::Void)
+            }
+            Array::Bool(v) => {
+                v.get(index).map(|&b| Value::Bool(b))
+            }
+            Array::Func(v) => {
+                v.get(index).map(|(func, captured)| Value::Func(*func, captured.clone()))
+            }
+            Array::List(v) => {
+                v.get(index).map(|list| Value::List(list.clone()))
+            }
+            Array::Adt(v) => {
+                v.get(index).map(|(variant, fields)| Value::Adt(*variant, fields.clone()))
+            }
+            Array::String(v) => {
+                v.get(index).map(|s| Value::String(s.clone()))
+            }
+            Array::Ref(v) => {
+                v.get(index).map(|r| Value::Ref(r.clone()))
+            }
+            Array::Dict(v) => {
+                v.get(index).map(|dict| Value::Dict(dict.clone()))
+            }
+            Array::Array(v) => {
+                v.get(index).map(|arr| Value::Array(arr.clone()))
+            }
+            Array::File(v) => {
+                v.get(index).map(|file| Value::File(file.clone()))
+            }
+            Array::U8(v) => {
+                v.get(index).map(|&n| Value::Int(Int::U8(n)))
+            }
+            Array::U16(v) => {
+                v.get(index).map(|&n| Value::Int(Int::U16(n)))
+            }
+            Array::U32(v) => {
+                v.get(index).map(|&n| Value::Int(Int::U32(n)))
+            }
+            Array::U64(v) => {
+                v.get(index).map(|&n| Value::Int(Int::U64(n)))
+            }
+            Array::I8(v) => {
+                v.get(index).map(|&n| Value::Int(Int::I8(n)))
+            }
+            Array::I16(v) => {
+                v.get(index).map(|&n| Value::Int(Int::I16(n)))
+            }
+            Array::I32(v) => {
+                v.get(index).map(|&n| Value::Int(Int::I32(n)))
+            }
+            Array::I64(v) => {
+                v.get(index).map(|&n| Value::Int(Int::I64(n)))
+            }
+            Array::Int(v) => {
+                v.get(index).map(|&n| Value::Int(Int::Int(n)))
+            }
+        }
+    }
+
+    pub fn set(&mut self, index: usize, value: Value) {
+        if index >= self.len() {
+            return;
+        }
+
+        array_vec_and_value!(self, value, v, d, {
+            v[index] = d;
+        })
+    }
+}
+
+impl std::fmt::Display for Array {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[")?;
+
+        for i in 0..self.len() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+
+            write!(f, "{}", self.get(i).unwrap())?;
+        }
+
+        write!(f, "]")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Int {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    Int(isize),
+}
+
+// Macro for implementing binary operations on Int.
+macro_rules! int_op {
+    ($name:ident, $op:tt) => {
+        fn $name(self, rhs: Int) -> Int {
+            match (self, rhs) {
+                (Int::U8(lhs), Int::U8(rhs)) => Int::U8(lhs $op rhs),
+                (Int::U16(lhs), Int::U16(rhs)) => Int::U16(lhs $op rhs),
+                (Int::U32(lhs), Int::U32(rhs)) => Int::U32(lhs $op rhs),
+                (Int::U64(lhs), Int::U64(rhs)) => Int::U64(lhs $op rhs),
+                (Int::I8(lhs), Int::I8(rhs)) => Int::I8(lhs $op rhs),
+                (Int::I16(lhs), Int::I16(rhs)) => Int::I16(lhs $op rhs),
+                (Int::I32(lhs), Int::I32(rhs)) => Int::I32(lhs $op rhs),
+                (Int::I64(lhs), Int::I64(rhs)) => Int::I64(lhs $op rhs),
+                (Int::Int(lhs), Int::Int(rhs)) => Int::Int(lhs $op rhs),
+                _ => panic!("mismatched integer types"),
+            }
+        }
+    };
+}
+
+impl std::ops::Add for Int {
+    type Output = Int;
+    int_op!(add, +);
+}
+
+impl std::ops::Sub for Int {
+    type Output = Int;
+    int_op!(sub, -);
+}
+
+impl std::ops::Mul for Int {
+    type Output = Int;
+    int_op!(mul, *);
+}
+
+impl std::ops::Div for Int {
+    type Output = Int;
+    int_op!(div, /);
+}
+
+impl std::ops::Rem for Int {
+    type Output = Int;
+    int_op!(rem, %);
+}
+
+impl std::ops::Neg for Int {
+    type Output = Int;
+
+    fn neg(self) -> Int {
+        match self {
+            Int::I8(n) => Int::I8(-n),
+            Int::I16(n) => Int::I16(-n),
+            Int::I32(n) => Int::I32(-n),
+            Int::I64(n) => Int::I64(-n),
+            Int::Int(n) => Int::Int(-n),
+            _ => panic!("mismatched integer types"),
+        }
+    }
+}
+
+impl std::fmt::Display for Int {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Int::U8(n) => write!(f, "{}", n),
+            Int::U16(n) => write!(f, "{}", n),
+            Int::U32(n) => write!(f, "{}", n),
+            Int::U64(n) => write!(f, "{}", n),
+            Int::I8(n) => write!(f, "{}", n),
+            Int::I16(n) => write!(f, "{}", n),
+            Int::I32(n) => write!(f, "{}", n),
+            Int::I64(n) => write!(f, "{}", n),
+            Int::Int(n) => write!(f, "{}", n),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     Void,
-    Int(i64),
+    Int(Int),
     Bool(bool),
     Func(usize, Vec<Value>),
     List(Option<Box<List>>),
@@ -72,7 +417,7 @@ pub enum Value {
     String(String),
     Ref(Rc<RefCell<Value>>),
     Dict(BTreeMap<Value, Value>),
-    Array(Vec<Value>),
+    Array(Array),
     File(RiteFile),
 }
 
@@ -141,19 +486,7 @@ impl std::fmt::Display for Value {
 
                 write!(f, " }}")
             }
-            Value::Array(values) => {
-                write!(f, "[")?;
-
-                for (i, value) in values.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-
-                    write!(f, "{}", value)?;
-                }
-
-                write!(f, "]")
-            }
+            Value::Array(arr) => write!(f, "{}", arr),
             Value::File(file) => write!(f, "File({})", file.id),
         }
     }
@@ -192,31 +525,19 @@ fn string_bytes(mut args: Vec<Value>) -> Value {
         panic!("expected string literal")
     };
 
-    let bytes = s
-        .as_bytes()
-        .iter()
-        .map(|&b| Value::Int(b as i64))
-        .collect::<Vec<_>>();
+    let bytes = s.as_bytes().iter().map(|&b| b).collect::<Vec<_>>();
 
-    Value::Array(bytes)
+    Value::Array(Array::U8(bytes))
 }
 
 fn string_from_bytes(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
-    let Value::Array(bytes) = args.pop().unwrap() else {
-        panic!("expected array")
+    let Value::Array(Array::U8(bytes)) = args.pop().unwrap() else {
+        panic!("expected u8 array")
     };
 
-    let s = bytes
-        .iter()
-        .map(|value| {
-            let Value::Int(b) = value else {
-                panic!("expected integer")
-            };
-            *b as u8 as char
-        })
-        .collect::<String>();
+    let s = String::from_utf8(bytes).unwrap();
 
     Value::String(s)
 }
@@ -228,17 +549,17 @@ fn string_length(mut args: Vec<Value>) -> Value {
         panic!("expected string")
     };
 
-    Value::Int(s.len() as i64)
+    Value::Int(Int::Int(s.chars().count() as isize))
 }
 
 fn string_slice(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
-    let Value::Int(end) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(end)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
-    let Value::Int(start) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(start)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -246,10 +567,18 @@ fn string_slice(mut args: Vec<Value>) -> Value {
         panic!("expected string")
     };
 
-    let start = start as usize;
-    let end = end as usize;
+    // Find char indices for the start and end of the range.
+    let start = s
+        .char_indices()
+        .nth(start as usize)
+        .map_or(s.len(), |(i, _)| i);
+    let end = s
+        .char_indices()
+        .nth(end as usize)
+        .map_or(s.len(), |(i, _)| i);
 
-    let s = s[start..end].to_string();
+    // Return an empty string if the range is invalid.
+    let s = s[start..end.max(start)].to_string();
 
     Value::String(s)
 }
@@ -309,7 +638,7 @@ fn dict_length(mut args: Vec<Value>) -> Value {
         panic!("expected dictionary")
     };
 
-    Value::Int(dict.len() as i64)
+    Value::Int(Int::Int(dict.len() as isize))
 }
 
 fn dict_get(mut args: Vec<Value>) -> Value {
@@ -398,25 +727,24 @@ fn array_new(mut args: Vec<Value>) -> Value {
 
     let default = args.pop().unwrap();
 
-    let Value::Int(len) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(len)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
     let len = len as usize;
 
-    Value::Array(vec![default; len])
+    Value::Array(Array::new(len, default))
 }
 
 fn array_empty(args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 0);
-
-    Value::Array(Vec::new())
+    Value::Array(Array::Void(Vec::new()))
 }
 
 fn array_extend(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
-    let Value::Int(len2) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(len2)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -434,7 +762,7 @@ fn array_extend(mut args: Vec<Value>) -> Value {
 fn array_truncate(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
-    let Value::Int(len2) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(len2)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -454,13 +782,13 @@ fn array_length(mut args: Vec<Value>) -> Value {
         panic!("expected array")
     };
 
-    Value::Int(arr.len() as i64)
+    Value::Int(Int::Int(arr.len() as isize))
 }
 
 fn array_get(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
-    let Value::Int(index) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(index)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -469,7 +797,7 @@ fn array_get(mut args: Vec<Value>) -> Value {
     };
 
     match arr.get(index as usize) {
-        Some(value) => Value::Adt(0, vec![value.clone()]),
+        Some(value) => Value::Adt(0, vec![value]),
         None => Value::Adt(1, vec![Value::Void]),
     }
 }
@@ -479,7 +807,7 @@ fn array_set(mut args: Vec<Value>) -> Value {
 
     let value = args.pop().unwrap();
 
-    let Value::Int(index) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(index)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -487,11 +815,7 @@ fn array_set(mut args: Vec<Value>) -> Value {
         panic!("expected array")
     };
 
-    let index = index as usize;
-
-    if index < arr.len() {
-        arr[index] = value.clone();
-    }
+    arr.set(index as usize, value);
 
     Value::Array(arr)
 }
@@ -499,11 +823,11 @@ fn array_set(mut args: Vec<Value>) -> Value {
 fn array_slice(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
-    let Value::Int(end) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(end)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
-    let Value::Int(start) = args.pop().unwrap() else {
+    let Value::Int(Int::Int(start)) = args.pop().unwrap() else {
         panic!("expected integer")
     };
 
@@ -514,9 +838,7 @@ fn array_slice(mut args: Vec<Value>) -> Value {
     let start = start as usize;
     let end = end as usize;
 
-    let arr = arr[start..end].to_vec();
-
-    Value::Array(arr)
+    Value::Array(arr.slice(start, end))
 }
 
 fn rite_io_error(kind: io::ErrorKind) -> Value {
@@ -578,13 +900,7 @@ fn fs_read_all(mut args: Vec<Value>) -> Value {
     match file.as_mut() {
         Some(file) => match file.read_to_end(&mut contents) {
             Ok(_) => {
-                let contents = contents
-                    .into_iter()
-                    .map(|b| b as i64)
-                    .map(Value::Int)
-                    .collect();
-
-                Value::Adt(0, vec![Value::Array(contents)])
+                Value::Adt(0, vec![Value::Array(Array::U8(contents))])
             }
 
             Err(err) => rite_io_error(err.kind()),
@@ -596,8 +912,8 @@ fn fs_read_all(mut args: Vec<Value>) -> Value {
 fn fs_write_all(mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
-    let Value::Array(bytes) = args.pop().unwrap() else {
-        panic!("expected array")
+    let Value::Array(Array::U8(bytes)) = args.pop().unwrap() else {
+        panic!("expected u8 array")
     };
 
     let Value::File(file) = args.pop().unwrap() else {
@@ -607,23 +923,10 @@ fn fs_write_all(mut args: Vec<Value>) -> Value {
     let mut file = file.file.lock().unwrap();
 
     match file.as_mut() {
-        Some(file) => {
-            let bytes = bytes
-                .iter()
-                .map(|value| {
-                    let Value::Int(b) = value else {
-                        panic!("expected integer")
-                    };
-
-                    *b as u8
-                })
-                .collect::<Vec<_>>();
-
-            match file.write_all(&bytes) {
-                Ok(_) => Value::Adt(0, vec![Value::Void]),
-                Err(err) => rite_io_error(err.kind()),
-            }
-        }
+        Some(file) => match file.write_all(&bytes) {
+            Ok(_) => Value::Adt(0, vec![Value::Void]),
+            Err(err) => rite_io_error(err.kind()),
+        },
         None => rite_io_error_other(),
     }
 }
@@ -1052,7 +1355,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {
@@ -1079,7 +1382,7 @@ impl<'a> Interpreter<'a> {
         match constant {
             Constant::Void => Value::Void,
             Constant::Bool(b) => Value::Bool(*b),
-            Constant::Int(negative, base, digits, _) => {
+            Constant::Int(negative, base, digits, kind) => {
                 let mut n = 0;
 
                 for &digit in digits.iter() {
@@ -1090,7 +1393,17 @@ impl<'a> Interpreter<'a> {
                     n = -n;
                 }
 
-                Value::Int(n)
+                match kind {
+                    IntKind::U8 => Value::Int(Int::U8(n as u8)),
+                    IntKind::U16 => Value::Int(Int::U16(n as u16)),
+                    IntKind::U32 => Value::Int(Int::U32(n as u32)),
+                    IntKind::U64 => Value::Int(Int::U64(n as u64)),
+                    IntKind::I8 => Value::Int(Int::I8(n as i8)),
+                    IntKind::I16 => Value::Int(Int::I16(n as i16)),
+                    IntKind::I32 => Value::Int(Int::I32(n as i32)),
+                    IntKind::I64 => Value::Int(Int::I64(n as i64)),
+                    IntKind::Int => Value::Int(Int::Int(n as isize)),
+                }
             }
             Constant::String(s) => Value::String(s.to_string()),
         }

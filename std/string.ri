@@ -54,3 +54,12 @@ pub fn join(xs: [str], sep: str) -> str
   | [] -> ""
   | [s] -> s
   | [s, ..rest] -> s |> concat(sep) |> concat(join(rest, sep))
+
+/// Check if a string starts with a prefix.
+pub fn starts_with(s: str, prefix: str) -> bool
+  prefix == slice(s, 0, length(prefix))
+
+/// Check if a string ends with a suffix.s
+pub fn ends_with(s: str, suffix: str) -> bool
+  let len = length(s)
+  suffix == slice(s, len - length(suffix), len)
