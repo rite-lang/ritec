@@ -113,25 +113,25 @@ macro_rules! variant_map {
   ($macro_name:ident, $($args:tt)*) => {
         $macro_name! {
             $($args)*, // Pass along any extra arguments like $value, $a, $block, etc.
-            Void => "Void",
-            Bool => "Bool",
-            Func => "Func",
-            List => "List",
-            Adt => "Adt",
-            String => "String",
-            Ref => "Ref",
-            Dict => "Dict",
-            Array => "Array",
-            File => "File",
-            U8 => "U8",
-            U16 => "U16",
-            U32 => "U32",
-            U64 => "U64",
-            I8 => "I8",
-            I16 => "I16",
-            I32 => "I32",
-            I64 => "I64",
-            Int => "Int"
+            Void,
+            Bool,
+            Func,
+            List,
+            Adt,
+            String,
+            Ref,
+            Dict,
+            Array,
+            File,
+            U8,
+            U16,
+            U32,
+            U64,
+            I8,
+            I16,
+            I32,
+            I64,
+            Int
         }
     };
 }
@@ -162,52 +162,76 @@ macro_rules! value_enum {
 variant_map!(value_enum);
 variant_map!(array_enum);
 
-// Use variant_map! to generate the match_variant_shared_block! macro.
-macro_rules! match_variant_shared_block {
+macro_rules! match_value {
     // Match only one enum (choose type)
-    ($ty:ident, $value:expr, $a:ident, $block:block, $($variant:ident => $type_str:tt),*) => {
+    ($ty:ident, $value:expr, $a:ident, $block:block, $($variant:ident),*) => {
         match $value {
             $(
                 $ty::$variant($a) => $block
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("expected matching variant")
+            _ => panic!("[1] expected matching variant for {}.", stringify!($ty))
         }
     };
 
     // "Convert" variant block converting a value to an array based on the value a.
-    ($x:ident, $y:ident, $value:expr, $a:ident, $block:block, $($variant:ident => $type_str:tt),*) => {
+    ($value:expr, $x:ident, $y:ident, $a:ident, $block:block, $($variant:ident),*) => {
         match $value {
             $(
                 $x::$variant($a) => $y::$variant($block),
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("expected matching variant")
+            _ => panic!("[2] expected matching ({}, {}) variant.", stringify!($x), stringify!($y))
         }
     };
 
     // Match both enums
-    ($value:expr, $a:ident, $b:ident, $block:block, $($variant:ident => $type_str:tt),*) => {
+    ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
         match $value {
             $(
-                (Array::$variant($a), Value::$variant($b)) => $block
+                ($x::$variant($a), $y::$variant($b)) => $block
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("expected matching variants")
+            _ => panic!("[3] expected matching variants for ({}, {})", stringify!($x), stringify!($y))
         }
     };
 
-   ($ty:ident, $value:expr, $a:ident, $block:block) => {
-       variant_map!(match_variant_shared_block, $ty, $value, $a, $block)
-   };
-
-    ($x:ident, $y:ident, $value:expr, $a:ident, $block:block) => {
-        variant_map!(match_variant_shared_block, $x, $y, $value, $a, $block)
+    // Match two identical variants of the same type and produce the same variant
+    // For binary operations.
+    ($ty:ident, $value:expr, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
+        match $value {
+            $(
+               ($ty::$variant($a), $ty::$variant($b)) => $ty::$variant($block),
+            )*
+            #[allow(unreachable_patterns)]
+            _ => panic!("[4] expected matching variant for {}", stringify!($ty))
+        }
     };
 
+    // Binary operations that produce a different variant.
+    // Match two identical variants of the same type and produce the same variant
+    // For binary operations.
+    ($ty:ident, $out:ident, $value:expr, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
+        match $value {
+            $(
+               ($ty::$variant($a), $ty::$variant($b)) => $ty::$out($block),
+            )*
+            #[allow(unreachable_patterns)]
+            _ => panic!("[5] expected matching variant for {}.", stringify!($ty))
+        }
+    };
 
-    ($value:expr, $a:ident, $b:ident, $block:block) => {
-        variant_map!(match_variant_shared_block, $value, $a, $b, $block)
+    // Short hands to match ALL patterns.
+    ($ty:ident, $value:expr, $a:ident, $block:block) => {
+       variant_map!(match_value, $ty, $value, $a, $block)
+    };
+
+    ($value:expr, $x:ident, $y:ident, $a:ident, $block:block) => {
+        variant_map!(match_value, $value, $x, $y, $a, $block)
+    };
+
+    ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block) => {
+        variant_map!(match_value, $value, $x, $y, $a, $b, $block)
     };
 }
 
@@ -244,31 +268,31 @@ impl Value {
 
 impl Array {
     pub fn new(len: usize, default: Value) -> Array {
-        match_variant_shared_block!(Value, Array, default, default, { vec![default; len] })
+        match_value!(default, Value, Array, default, { vec![default; len] })
     }
 
     pub fn len(&self) -> usize {
-        match_variant_shared_block!(Array, self, s, { s.len() })
+        match_value!(Array, self, s, { s.len() })
     }
 
     pub fn slice(&self, start: usize, end: usize) -> Array {
-        match_variant_shared_block!(Array, Array, self, s, { s[start..end].to_vec() })
+        match_value!(self, Array, Array, s, { s[start..end].to_vec() })
     }
 
     pub fn resize(&mut self, len: usize, default: Value) {
-        match_variant_shared_block!((self, default), s, v, {
+        match_value!((self, default), Array, Value, s, v, {
             s.resize(len, v);
         })
     }
 
     pub fn truncate(&mut self, len: usize) {
-        match_variant_shared_block!(Array, self, s, {
+        match_value!(Array, self, s, {
             s.truncate(len);
         })
     }
 
     pub fn set(&mut self, index: usize, value: Value) {
-        match_variant_shared_block!((self, value), s, v, {
+        match_value!((self, value), Array, Value, s, v, {
             s[index] = v;
         })
     }
@@ -283,28 +307,31 @@ impl Array {
             _ => {}
         }
 
-        Some(match_variant_shared_block!(Array, Value, self, s, {
-            s[index].clone()
-        },
+        Some(match_value!(
+            self,
+            Array,
+            Value,
+            s,
+            { s[index].clone() },
             // Exclude void.
-            Bool => "Bool",
-            Func => "Func",
-            List => "List",
-            Adt => "Adt",
-            String => "String",
-            Ref => "Ref",
-            Dict => "Dict",
-            Array => "Array",
-            File => "File",
-            U8 => "U8",
-            U16 => "U16",
-            U32 => "U32",
-            U64 => "U64",
-            I8 => "I8",
-            I16 => "I16",
-            I32 => "I32",
-            I64 => "I64",
-            Int => "Int"
+            Bool,
+            Func,
+            List,
+            Adt,
+            String,
+            Ref,
+            Dict,
+            Array,
+            File,
+            U8,
+            U16,
+            U32,
+            U64,
+            I8,
+            I16,
+            I32,
+            I64,
+            Int
         ))
     }
 }
@@ -1037,39 +1064,94 @@ impl<'a> Interpreter<'a> {
 
                 match op {
                     BinOp::Add => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Int(lhs + rhs)
+                        match_value!(
+                            Value,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs + rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Sub => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Int(lhs - rhs)
+                        match_value!(
+                            Value,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs - rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Mul => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Int(lhs * rhs)
+                        match_value!(
+                            Value,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs * rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Div => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Int(lhs / rhs)
+                        match_value!(
+                            Value,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs / rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Rem => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Int(lhs % rhs)
+                        match_value!(
+                            Value,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs % rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::And => {
                         let (Value::Bool(lhs), Value::Bool(rhs)) = (lhs, rhs) else {
@@ -1088,32 +1170,80 @@ impl<'a> Interpreter<'a> {
                     BinOp::Eq => Value::Bool(lhs == rhs),
                     BinOp::Ne => Value::Bool(lhs != rhs),
                     BinOp::Lt => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Bool(lhs < rhs)
+                        match_value!(
+                            Value,
+                            Bool,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs < rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Le => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Bool(lhs <= rhs)
+                        match_value!(
+                            Value,
+                            Bool,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs <= rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Gt => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Bool(lhs > rhs)
+                        match_value!(
+                            Value,
+                            Bool,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs > rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     BinOp::Ge => {
-                        let (Value::Int(lhs), Value::Int(rhs)) = (lhs, rhs) else {
-                            panic!("expected integers")
-                        };
-
-                        Value::Bool(lhs >= rhs)
+                        match_value!(
+                            Value,
+                            Bool,
+                            (lhs, rhs),
+                            lhs,
+                            rhs,
+                            { lhs >= rhs },
+                            U8,
+                            U16,
+                            U32,
+                            U64,
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                 }
             }
@@ -1122,11 +1252,7 @@ impl<'a> Interpreter<'a> {
 
                 match op {
                     UnOp::Neg => {
-                        let Value::Int(operand) = operand else {
-                            panic!("expected integer")
-                        };
-
-                        Value::Int(-operand)
+                        match_value!(operand, Value, Value, o, { -o }, I8, I16, I32, I64, Int)
                     }
                     UnOp::Not => {
                         let Value::Bool(operand) = operand else {
