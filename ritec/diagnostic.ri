@@ -1,3 +1,5 @@
+//! A module for creating and printing diagnostic messages.
+
 import std:io
 import std:list
 import std:math
@@ -15,11 +17,11 @@ pub type Diagnostic(
   /// The code associated with the diagnostic message.
   code:     str
 
-  /// A list of labels attached to the diagnostic message.
-  labels:   [Label]
-
   /// The main message of the diagnostic.
   message:  str
+
+  /// A list of labels attached to the diagnostic message.
+  labels:   [Label]  
 )
 
 /// The severity of a diagnostic message.
@@ -35,7 +37,10 @@ pub type Severity =
 
 /// A label attached to a diagnostic message.
 pub type Label(
+  /// The message of the label.
   message:  str
+
+  /// The span of the label.
   span:     Span
 )
 
@@ -52,6 +57,7 @@ pub fn new(
     message:  message
   )
 
+/// Add a label to a diagnostic message.
 pub fn add_label(
   diagnostic: Diagnostic
   message:    str
@@ -62,78 +68,124 @@ pub fn add_label(
 
   Diagnostic(labels: labels, ..diagnostic)
 
+/// Add a span to a diagnostic message.
+///
+/// This is a convenience function for adding a label with an empty message.
+pub fn add_span(
+  diagnostic: Diagnostic
+  span:       Span
+) -> Diagnostic
+  add_label(diagnostic, "", span)
+
 /// Print a diagnostic message to the console.
 ///
 /// This assumes that the all source files mentioned in the diagnostic
 /// are available in the `sources` argument.
-pub fn print(diagnostic: Diagnostic, sources: Sources)
-  let Diagnostic(severity, code, labels, message) = diagnostic
+///
+/// An example of the output:
+///
+/// ```plaintext
+/// error[E0001]: this is an error message
+///  --> path/to/file.rite:1:2:3
+///   |
+/// 1 |   let x: int = []
+///   |   ^^^^^^^^^^^^^^^ expected `int`, found `[_]`
+/// ```
+pub fn print(diagnostic: Diagnostic, sources: Sources) -> void
+  let Diagnostic(severity, code, message, labels) = diagnostic
 
-  let severity_str = severity_to_str(severity)
+  let severity_str = severity_str(severity)
+  let severity_color = severity_color(severity)
 
   // first print the main message of the diagnostic e.g.
   //
   // error[E0001]: this is an error message
   //
-  io:println(f"{severity_str}[{code}]: {message}")
+  let severity_code = f"{severity_str}[{code}]"
+    |> ansi:color(severity_color)
+    |> ansi:bold
+  io:println(f"{severity_code}: {ansi:bold(message)}")
 
-  labels |> list:each(|label|
-    let Label(message, span) = label
+  labels |> list:each(|label| print_label(label, severity, sources))
 
-    let assert Ok(source) = span:get_source(sources, span.source)
+/// Print a label to the console.
+///
+/// This assumes that the source file mentioned in the labels span is available
+/// in the `sources` argument.
+///
+/// An example of the output:
+///
+/// ```plaintext
+///  --> path/to/file.rite:1:2:3
+///   |
+/// 1 |   let x: int = []
+///   |   ^^^^^^^^^^^^^^^ expected `int`, found `[_]`
+/// ```
+pub fn print_label(label: Label, severity: Severity, sources: Sources) -> void 
+  let Label(message, span) = label
 
-    // get the lines that the label spans
-    let lines = get_lines(source.text, span.lo, span.hi)
+  let assert Ok(source) = span:get_source(sources, span.source)
 
-    // we only really care about the first and last lines
-    let assert Ok(first) = list:first(lines)
-    let assert Ok(last) = list:last(lines)
+  // get the lines that the label spans
+  let lines = get_lines(source.text, span.lo, span.hi)
 
-    // compute the number of spaces needed to align the source span
-    // this is dependent on the number of digits in the line numbers
-    let space_count = string:length(f"{last.number + 1}") + 1
-    let first_spaces = space_count - string:length(f"{first.number + 1}")
+  // we only really care about the first and last lines
+  let assert Ok(first) = list:first(lines)
+  let assert Ok(last) = list:last(lines)
 
-    // print the source span and the line that the label spans
-    //
-    //  --> path/to/file.rite:1:2:3
-    //
-    let space = string:repeat(" ", space_count - 1)
-    let source_span = f"{source.path}:{label.span.lo}:{label.span.hi}"
-    io:println(f"{space}--> {source_span}")
+  // compute the number of spaces needed to align the source span
+  // this is dependent on the number of digits in the line numbers
+  let space_count = string:length(f"{last.number + 1}") + 1
+  let first_spaces = space_count - string:length(f"{first.number + 1}")
 
-    // print a padding line before the source span
-    //
-    //   |
-    //
-    let space = string:repeat(" ", space_count)
-    io:println(f"{space}| ")
+  // print the source span and the line that the label spans
+  //
+  //  --> path/to/file.rite:1:2:3
+  //
+  let space = string:repeat(" ", space_count - 1)
+  let source_span = f"{source.path}:{label.span.lo}:{label.span.hi}"
+  io:println(f"{space}{ansi:blue("-->")} {source_span}")
 
-    // print the first line of the label span
-    //
-    // 1 |   let x: int = [] 
-    //
-    let space = string:repeat(" ", first_spaces)
-    let number = f"{first.number + 1}{space}"
-    io:println(f"{number}| {first.text}")
+  // print a padding line before the source span
+  //
+  //   |
+  //
+  let space = string:repeat(" ", space_count)
 
-    // compute the number of spaces needed to align the marker
-    // as well as the length of the marker
-    let marker_space_count = span.lo - first.lo
-    let marker_length = span.hi
-      |> math:min(first.hi)
-      |> math:sub(span.lo)
-      |> math:max(1)
+  f"{space}|"
+  |> ansi:blue
+  |> io:println
 
-    // print the marker and message
-    //
-    //   |   ^^^^^^^^^^^^^^^ expected `int`, found `[]`
-    //
-    let marker = string:repeat("^", marker_length)
-    let marker_space = string:repeat(" ", marker_space_count)
-    let space = string:repeat(" ", space_count)
-    io:println(f"{space}| {marker_space}{marker} {message}")
-  )
+  // print the first line of the label span
+  //
+  // 1 |   let x: int = [] 
+  //
+  let space = string:repeat(" ", first_spaces)
+  let number = f"{first.number + 1}{space}"
+
+  f"{number}| {first.text}"
+  |> ansi:blue
+  |> io:println
+
+  // compute the number of spaces needed to align the marker
+  // as well as the length of the marker
+  let marker_space_count = span.lo - first.lo
+  let marker_length = span.hi
+    |> math:min(first.hi)
+    |> math:sub(span.lo)
+    |> math:max(1)
+
+  // print the marker and message
+  //
+  //   |   ^^^^^^^^^^^^^^^ expected `int`, found `[]`
+  //
+  let marker = string:repeat("^", marker_length)
+  let marker_space = string:repeat(" ", marker_space_count)
+  let space = string:repeat(" ", space_count)
+  let label = f"{marker} {message}"
+    |> ansi:color(severity_color(severity))
+    |> ansi:bold
+  io:println(f"{space}{ansi:blue("|")} {marker_space}{label}")
 
 type Line(
   number: int
@@ -164,8 +216,14 @@ fn get_lines(text, lo, hi)
       line
     )
 
-fn severity_to_str(severity)
+fn severity_str(severity)
   match severity
   | Error   -> "error"
-  | Warning -> "warning"
   | Help    -> "help"
+  | Warning -> "warning"
+
+fn severity_color(severity)
+  match severity
+  | Error   -> ansi:Red
+  | Help    -> ansi:Green
+  | Warning -> ansi:Yellow

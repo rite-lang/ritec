@@ -1208,11 +1208,25 @@ fn parse_integer_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
         .with_source_code(span)
     })?;
 
-    let base = Base::Dec;
+    let mut base = Base::Dec;
     let mut digits = Vec::new();
 
-    for c in span.as_str().chars() {
-        digits.push(c.to_digit(base.radix()).unwrap() as u8);
+    let mut string = span.as_str();
+
+    if string.starts_with("0x") {
+        base = Base::Hex;
+        string = &string[2..];
+    } else if string.starts_with("0b") {
+        base = Base::Bin;
+        string = &string[2..];
+    } else if string.starts_with("0o") {
+        base = Base::Oct;
+        string = &string[2..];
+    }
+
+    for c in string.chars() {
+        let digit = c.to_digit(base.radix()).unwrap();
+        digits.push(digit as u8);
     }
 
     Ok(Expr::Int(false, base, digits, span))

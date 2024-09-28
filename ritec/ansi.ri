@@ -1,0 +1,92 @@
+//! ANSI escape codes for terminal text formatting.
+
+import std:string
+import std:array
+
+/// A color for terminal text.
+pub type Color =
+  | Black
+  | Red
+  | Green
+  | Yellow
+  | Blue
+  | Magenta
+  | Cyan
+  | White
+
+/// Create an ANSI escape code.
+pub fn escape(code: str) -> str
+  string:from_bytes(array:from_list([0x1b]))
+  |> string:concat(f"[{code}m") 
+
+/// Colorize text with an `Color`.
+pub fn color(text: str, color: Color) -> str
+  let color = match color
+    | Black   -> escape("30")
+    | Red     -> escape("31")
+    | Green   -> escape("32")
+    | Yellow  -> escape("33")
+    | Blue    -> escape("34")
+    | Magenta -> escape("35")
+    | Cyan    -> escape("36")
+    | White   -> escape("37")
+
+  color
+  |> string:concat(text)
+  |> string:concat(escape("0"))
+
+/// Colorize text with black.
+pub fn black(text: str) -> str
+  color(text, Black)
+
+/// Colorize text with red.
+pub fn red(text: str) -> str
+  color(text, Red)
+
+/// Colorize text with green.
+pub fn green(text: str) -> str
+  color(text, Green)
+
+/// Colorize text with yellow.
+pub fn yellow(text: str) -> str
+  color(text, Yellow)
+
+/// Colorize text with blue.
+pub fn blue(text: str) -> str
+  color(text, Blue)
+
+/// Colorize text with magenta.
+pub fn magenta(text: str) -> str
+  color(text, Magenta)
+
+/// Colorize text with cyan.
+pub fn cyan(text: str) -> str
+  color(text, Cyan)
+
+/// Colorize text with white.
+pub fn white(text: str) -> str
+  color(text, White)
+
+/// Make text bold.
+pub fn bold(text: str) -> str
+  escape("1")
+  |> string:concat(text)
+  |> string:concat(escape("0"))
+
+/// Make text italic.
+pub fn italic(text: str) -> str
+  escape("3")
+  |> string:concat(text)
+  |> string:concat(escape("0"))
+
+/// Make text underlined.
+pub fn underline(text: str) -> str
+  escape("4")
+  |> string:concat(text)
+  |> string:concat(escape("0"))
+
+/// Make text strikethrough.
+pub fn strikethrough(text: str) -> str
+  escape("9")
+  |> string:concat(text)
+  |> string:concat(escape("0"))

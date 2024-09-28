@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use miette::{LabeledSpan, NamedSource, Severity};
 
 use crate::{
+    number::Base,
     span::Span,
     token::{Token, TokenStream},
 };
@@ -405,10 +406,25 @@ fn lex_identifier(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
 }
 
 fn lex_integer(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
+    let mut base = Base::Dec;
     let lo = lexer.lo;
 
+    if lexer.rest().starts_with("0x") {
+        base = Base::Hex;
+        _ = lexer.next();
+        _ = lexer.next();
+    } else if lexer.rest().starts_with("0b") {
+        base = Base::Bin;
+        _ = lexer.next();
+        _ = lexer.next();
+    } else if lexer.rest().starts_with("0o") {
+        base = Base::Oct;
+        _ = lexer.next();
+        _ = lexer.next();
+    }
+
     while let Some(c) = lexer.peek() {
-        if c.is_ascii_digit() {
+        if c.is_digit(base.radix()) {
             _ = lexer.next();
         } else {
             break;
@@ -574,7 +590,8 @@ fn lex_format(lexer: &mut Lexer) -> miette::Result<(Token, Span)> {
 
     let span = Span {
         lo,
-        hi: lexer.lo - 1,
+        // FIXME: having to do this hurts my soul
+        hi: lexer.lo - !matches!(lexer.state, LexerState::Format(FormatState::End)) as usize,
         file: lexer.file,
         source: lexer.source,
     };
