@@ -86,7 +86,6 @@ pub enum Array {
     Int(Vec<isize>),
 }
 
-
 // Call a function with shared return type on inner vec on array.
 macro_rules! array_vec_call {
     ($expr:expr, $name:ident, $func:block) => {
@@ -145,25 +144,34 @@ macro_rules! array_vec_transform_self {
 macro_rules! array_vec_and_value {
     ($array:expr, $value:expr, $vec:ident, $name: ident, $block:block) => {
         match ($array, $value) {
-            (Array::Void($vec), Value::Void) => { let $name = (); $block }
-            (Array::Bool($vec), Value::Bool($name)) => { $block }
-            (Array::Func($vec), Value::Func(func, captured)) => { let $name = (func, captured); $block }
-            (Array::List($vec), Value::List($name)) => { $block }
-            (Array::Adt($vec), Value::Adt(variant, fields)) => { let $name = (variant, fields); $block }
-            (Array::String($vec), Value::String($name)) => { $block }
-            (Array::Ref($vec), Value::Ref($name)) => { $block }
-            (Array::Dict($vec), Value::Dict($name)) => { $block }
-            (Array::Array($vec), Value::Array($name)) => { $block }
-            (Array::File($vec), Value::File($name)) => { $block }
-            (Array::U8($vec), Value::Int(Int::U8($name))) => { $block }
-            (Array::U16($vec), Value::Int(Int::U16($name))) => { $block }
-            (Array::U32($vec), Value::Int(Int::U32($name))) => { $block }
-            (Array::U64($vec), Value::Int(Int::U64($name))) => { $block }
-            (Array::I8($vec), Value::Int(Int::I8($name))) => { $block }
-            (Array::I16($vec), Value::Int(Int::I16($name))) => { $block }
-            (Array::I32($vec), Value::Int(Int::I32($name))) => { $block }
-            (Array::I64($vec), Value::Int(Int::I64($name))) => { $block }
-            (Array::Int($vec), Value::Int(Int::Int($name))) => { $block }
+            (Array::Void($vec), Value::Void) => {
+                let $name = ();
+                $block
+            }
+            (Array::Bool($vec), Value::Bool($name)) => $block,
+            (Array::Func($vec), Value::Func(func, captured)) => {
+                let $name = (func, captured);
+                $block
+            }
+            (Array::List($vec), Value::List($name)) => $block,
+            (Array::Adt($vec), Value::Adt(variant, fields)) => {
+                let $name = (variant, fields);
+                $block
+            }
+            (Array::String($vec), Value::String($name)) => $block,
+            (Array::Ref($vec), Value::Ref($name)) => $block,
+            (Array::Dict($vec), Value::Dict($name)) => $block,
+            (Array::Array($vec), Value::Array($name)) => $block,
+            (Array::File($vec), Value::File($name)) => $block,
+            (Array::U8($vec), Value::Int(Int::U8($name))) => $block,
+            (Array::U16($vec), Value::Int(Int::U16($name))) => $block,
+            (Array::U32($vec), Value::Int(Int::U32($name))) => $block,
+            (Array::U64($vec), Value::Int(Int::U64($name))) => $block,
+            (Array::I8($vec), Value::Int(Int::I8($name))) => $block,
+            (Array::I16($vec), Value::Int(Int::I16($name))) => $block,
+            (Array::I32($vec), Value::Int(Int::I32($name))) => $block,
+            (Array::I64($vec), Value::Int(Int::I64($name))) => $block,
+            (Array::Int($vec), Value::Int(Int::Int($name))) => $block,
 
             _ => panic!("mismatched types"),
         }
@@ -187,7 +195,7 @@ impl Array {
                 Int::I32(v) => Array::I32(vec![v; length]),
                 Int::I64(v) => Array::I64(vec![v; length]),
                 Int::Int(v) => Array::Int(vec![v; length]),
-            }
+            },
             Value::Bool(v) => Array::Bool(vec![v; length]),
             Value::Func(a, b) => {
                 let v = (a, b);
@@ -230,63 +238,29 @@ impl Array {
         }
 
         match self {
-            Array::Void(v) => {
-                v.get(index).map(|_| Value::Void)
-            }
-            Array::Bool(v) => {
-                v.get(index).map(|&b| Value::Bool(b))
-            }
-            Array::Func(v) => {
-                v.get(index).map(|(func, captured)| Value::Func(*func, captured.clone()))
-            }
-            Array::List(v) => {
-                v.get(index).map(|list| Value::List(list.clone()))
-            }
-            Array::Adt(v) => {
-                v.get(index).map(|(variant, fields)| Value::Adt(*variant, fields.clone()))
-            }
-            Array::String(v) => {
-                v.get(index).map(|s| Value::String(s.clone()))
-            }
-            Array::Ref(v) => {
-                v.get(index).map(|r| Value::Ref(r.clone()))
-            }
-            Array::Dict(v) => {
-                v.get(index).map(|dict| Value::Dict(dict.clone()))
-            }
-            Array::Array(v) => {
-                v.get(index).map(|arr| Value::Array(arr.clone()))
-            }
-            Array::File(v) => {
-                v.get(index).map(|file| Value::File(file.clone()))
-            }
-            Array::U8(v) => {
-                v.get(index).map(|&n| Value::Int(Int::U8(n)))
-            }
-            Array::U16(v) => {
-                v.get(index).map(|&n| Value::Int(Int::U16(n)))
-            }
-            Array::U32(v) => {
-                v.get(index).map(|&n| Value::Int(Int::U32(n)))
-            }
-            Array::U64(v) => {
-                v.get(index).map(|&n| Value::Int(Int::U64(n)))
-            }
-            Array::I8(v) => {
-                v.get(index).map(|&n| Value::Int(Int::I8(n)))
-            }
-            Array::I16(v) => {
-                v.get(index).map(|&n| Value::Int(Int::I16(n)))
-            }
-            Array::I32(v) => {
-                v.get(index).map(|&n| Value::Int(Int::I32(n)))
-            }
-            Array::I64(v) => {
-                v.get(index).map(|&n| Value::Int(Int::I64(n)))
-            }
-            Array::Int(v) => {
-                v.get(index).map(|&n| Value::Int(Int::Int(n)))
-            }
+            Array::Void(v) => v.get(index).map(|_| Value::Void),
+            Array::Bool(v) => v.get(index).map(|&b| Value::Bool(b)),
+            Array::Func(v) => v
+                .get(index)
+                .map(|(func, captured)| Value::Func(*func, captured.clone())),
+            Array::List(v) => v.get(index).map(|list| Value::List(list.clone())),
+            Array::Adt(v) => v
+                .get(index)
+                .map(|(variant, fields)| Value::Adt(*variant, fields.clone())),
+            Array::String(v) => v.get(index).map(|s| Value::String(s.clone())),
+            Array::Ref(v) => v.get(index).map(|r| Value::Ref(r.clone())),
+            Array::Dict(v) => v.get(index).map(|dict| Value::Dict(dict.clone())),
+            Array::Array(v) => v.get(index).map(|arr| Value::Array(arr.clone())),
+            Array::File(v) => v.get(index).map(|file| Value::File(file.clone())),
+            Array::U8(v) => v.get(index).map(|&n| Value::Int(Int::U8(n))),
+            Array::U16(v) => v.get(index).map(|&n| Value::Int(Int::U16(n))),
+            Array::U32(v) => v.get(index).map(|&n| Value::Int(Int::U32(n))),
+            Array::U64(v) => v.get(index).map(|&n| Value::Int(Int::U64(n))),
+            Array::I8(v) => v.get(index).map(|&n| Value::Int(Int::I8(n))),
+            Array::I16(v) => v.get(index).map(|&n| Value::Int(Int::I16(n))),
+            Array::I32(v) => v.get(index).map(|&n| Value::Int(Int::I32(n))),
+            Array::I64(v) => v.get(index).map(|&n| Value::Int(Int::I64(n))),
+            Array::Int(v) => v.get(index).map(|&n| Value::Int(Int::Int(n))),
         }
     }
 
@@ -899,9 +873,7 @@ fn fs_read_all(mut args: Vec<Value>) -> Value {
 
     match file.as_mut() {
         Some(file) => match file.read_to_end(&mut contents) {
-            Ok(_) => {
-                Value::Adt(0, vec![Value::Array(Array::U8(contents))])
-            }
+            Ok(_) => Value::Adt(0, vec![Value::Array(Array::U8(contents))]),
 
             Err(err) => rite_io_error(err.kind()),
         },
@@ -1355,7 +1327,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {
