@@ -29,10 +29,12 @@ pub fn type_register_ast(
                 ast::Vis::Private => hir::Vis::Private,
             };
 
+            let (generics, _) = lower_generics(adt.generics.as_ref());
+
             let id = unit.push_adt(hir::Adt {
                 decorators: adt.decorators.clone(),
                 name: adt.name,
-                generics: Vec::new(),
+                generics,
                 variants: Vec::new(),
                 span: adt.span,
             });
@@ -56,10 +58,12 @@ pub fn type_register_ast(
                 ast::Vis::Private => hir::Vis::Private,
             };
 
+            let (generics, _) = lower_generics(single.generics.as_ref());
+
             let id = unit.push_adt(hir::Adt {
                 decorators: single.decorators.clone(),
                 name: single.name,
-                generics: Vec::new(),
+                generics,
                 variants: Vec::new(),
                 span: single.span,
             });

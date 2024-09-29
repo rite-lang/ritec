@@ -62,8 +62,6 @@ fn main() -> miette::Result<()> {
         module.imports.insert("std", std_import.clone());
     }
 
-    (compiler.unit.modules[module].imports).insert("std", std_import);
-
     compiler.lower()?;
 
     let module = &compiler.unit.modules[module].imports["main"];

@@ -1,9 +1,8 @@
 //! Extend array type with helper functions for dynamic data allocation.
 
-import std:array
-import std:array:Array
+import array:Array
 
-import std:result:Result
+import result:Result
 
 /// A dynamically sized array.
 pub type Vec<'a>(
