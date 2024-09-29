@@ -7,6 +7,7 @@ use crate::{
         Statement, Unit,
     },
 };
+use std::fmt::Formatter;
 use std::{
     cell::RefCell,
     cmp, env,
@@ -22,7 +23,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
 };
-use std::fmt::{Formatter};
 
 #[derive(Clone, Debug)]
 pub struct RiteFile {
@@ -64,53 +64,28 @@ impl Ord for RiteFile {
 }
 
 macro_rules! type_map {
-    ("U8") => { u8 };
-    ("U16") => { u16 };
-    ("U32") => { u32 };
-    ("U64") => { u64 };
-    ("I8") => { i8 };
-    ("I16") => { i16 };
-    ("I32") => { i32 };
-    ("I64") => { i64 };
-    ("Int") => { isize };
-
-    ("Void") => { () };
-    ("Bool") => { bool };
-    ("Func") => { (usize, Vec<Value>) };
-    ("List") => { Option<Box<List>> };
-    ("Adt") => { (usize, Vec<Value>) };
-    ("String") => { String };
-    ("Ref") => { Rc<RefCell<Value>> };
-    ("Dict") => { BTreeMap<Value, Value> };
-    ("Array") => { Array };
-    ("File") => { RiteFile };
+    (U8) => { u8 };
+    (U16) => { u16 };
+    (U32) => { u32 };
+    (U64) => { u64 };
+    (I8) => { i8 };
+    (I16) => { i16 };
+    (I32) => { i32 };
+    (I64) => { i64 };
+    (Int) => { isize };
+    (Void) => { () };
+    (Bool) => { bool };
+    (Func) => { (usize, Vec<Value>) };
+    (List) => { Option<Box<List>> };
+    (Adt) => { (usize, Vec<Value>) };
+    (String) => { String };
+    (Ref) => { Rc<RefCell<Value>> };
+    (Dict) => { BTreeMap<Value, Value> };
+    (Array) => { Array };
+    (File) => { RiteFile };
 }
 
 macro_rules! variant_map {
-    ($macro_name:ident) => {
-        $macro_name! {
-            Void => "Void",
-            Bool => "Bool",
-            Func => "Func",
-            List => "List",
-            Adt => "Adt",
-            String => "String",
-            Ref => "Ref",
-            Dict => "Dict",
-            Array => "Array",
-            File => "File",
-            U8 => "U8",
-            U16 => "U16",
-            U32 => "U32",
-            U64 => "U64",
-            I8 => "I8",
-            I16 => "I16",
-            I32 => "I32",
-            I64 => "I64",
-            Int => "Int"
-        }
-    };
-
   ($macro_name:ident, $($args:tt)*) => {
         $macro_name! {
             $($args)*, // Pass along any extra arguments like $value, $a, $block, etc.
@@ -138,44 +113,44 @@ macro_rules! variant_map {
 }
 
 macro_rules! array_enum {
-    ($($variant:ident => $type_str:tt),*) => {
+    ($extra:tt, $($variant:ident),*) => {
         #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum Array {
             $(
-                $variant(Vec<type_map!($type_str)>),
+                $variant(Vec<type_map!($variant)>),
             )*
         }
     };
 }
 
 macro_rules! value_enum {
-    ($($variant:ident => $type_str:tt),*) => {
+    ($extra:tt, $($variant:ident),*) => {
         #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum Value {
             $(
-                $variant(type_map!($type_str)),
+                $variant(type_map!($variant)),
             )*
         }
     };
 }
 
 // Generate the `Array` and `Value` enums.
-variant_map!(value_enum);
-variant_map!(array_enum);
+variant_map!(value_enum, extra);
+variant_map!(array_enum, extra);
 
 /// Match variant with shared block.
 macro_rules! match_value_block {
     ($value:expr, $ty:ident, $a:ident, $block:block, $($variant:ident),*) => {
         {
-        let value = $value;
-        match value {
-            $(
-                $ty::$variant($a) => $block
-            )*
-            #[allow(unreachable_patterns)]
-            _ => panic!("[1] Unexpected variant {:?} when matching {}.", value, stringify!($ty))
+            let value = $value;
+            match value {
+                $(
+                    $ty::$variant($a) => $block
+                )*
+                #[allow(unreachable_patterns)]
+                _ => panic!("[1] Unexpected variant {:?} when matching {}.", value, stringify!($ty))
+            }
         }
-    }
     };
 
     ($value:expr, $ty:ident, $a:ident, $block:block) => {
@@ -188,14 +163,14 @@ macro_rules! match_value_convert {
     ($value:expr, $x:ident, $y:ident, $a:ident, $block:block, $($variant:ident),*) => {
         {
             let value = $value;
-        match value {
-            $(
-                $x::$variant($a) => $y::$variant($block),
-            )*
-            #[allow(unreachable_patterns)]
-            _ => panic!("[2] Unexpected variant {:?} when converting {} to {}.", value, stringify!($x), stringify!($y))
+            match value {
+                $(
+                    $x::$variant($a) => $y::$variant($block),
+                )*
+                #[allow(unreachable_patterns)]
+                _ => panic!("[2] Unexpected variant {:?} when converting {} to {}.", value, stringify!($x), stringify!($y))
+            }
         }
-    }
     };
 
     ($value:expr, $x:ident, $y:ident, $a:ident, $block:block) => {
@@ -207,15 +182,15 @@ macro_rules! match_value_convert {
 macro_rules! match_two_value_block {
     ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
         {
-        let value = $value;
-        match value {
-            $(
-                ($x::$variant($a), $y::$variant($b)) => $block
-            )*
-            #[allow(unreachable_patterns)]
-            _ => panic!("[3] Unexpected variant {:?} when matching for ({}, {})", value, stringify!($x), stringify!($y))
+            let value = $value;
+            match value {
+                $(
+                    ($x::$variant($a), $y::$variant($b)) => $block
+                )*
+                #[allow(unreachable_patterns)]
+                _ => panic!("[3] Unexpected variant {:?} when matching for ({}, {})", value, stringify!($x), stringify!($y))
+            }
         }
-    }
     };
 
      ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block) => {
@@ -228,15 +203,15 @@ macro_rules! match_value_binary_op {
     // Match two identical variants of the same type and produce the same variant
     ($value:expr, $ty:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
         {
-        let value = $value;
-        match value {
-            $(
-               ($ty::$variant($a), $ty::$variant($b)) => $ty::$variant($block),
-            )*
-            #[allow(unreachable_patterns)]
-            _ => panic!("[4] Unexpected variant {:?} when matching for paired {}.", value, stringify!($ty))
+            let value = $value;
+            match value {
+                $(
+                   ($ty::$variant($a), $ty::$variant($b)) => $ty::$variant($block),
+                )*
+                #[allow(unreachable_patterns)]
+                _ => panic!("[4] Unexpected variant {:?} when matching for paired {}.", value, stringify!($ty))
+            }
         }
-    }
     };
 
     ($value:expr, $ty:ident, $a:ident, $b:ident, $block:block) => {
@@ -262,14 +237,14 @@ macro_rules! match_value_binary_op {
     ($value:expr, $ty:ident, $out:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
         {
         let value = $value;
-        match value {
-            $(
-               ($ty::$variant($a), $ty::$variant($b)) => $ty::$out($block),
-            )*
-            #[allow(unreachable_patterns)]
-            _ => panic!("[5] Unexpected variant {:?} when matching for paired {}.", value, stringify!($ty))
+            match value {
+                $(
+                   ($ty::$variant($a), $ty::$variant($b)) => $ty::$out($block),
+                )*
+                #[allow(unreachable_patterns)]
+                _ => panic!("[5] Unexpected variant {:?} when matching for paired {}.", value, stringify!($ty))
+            }
         }
-    }
     };
 
     ($value:expr, $ty:ident, $out:ident, $a:ident, $b:ident, $block:block) => {
@@ -310,6 +285,10 @@ impl Value {
         Value::Adt((1, vec![Value::void()]))
     }
 
+    pub fn tuple(values: Vec<Value>) -> Value {
+        Value::Adt((0, values))
+    }
+
     pub fn list_from_vec(values: Vec<Value>) -> Value {
         let mut list = None;
 
@@ -323,7 +302,6 @@ impl Value {
         Value::List(list)
     }
 }
-
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -375,7 +353,7 @@ impl std::fmt::Display for Value {
             }
             Value::File(file) => write!(f, "File({})", file.id),
             Value::Bool(v) => write!(f, "{}", v),
-            Value::Array(v) => write!(f, "{:?}", v),
+            Value::Array(v) => write!(f, "{}", v),
             Value::U8(v) => write!(f, "{}", v),
             Value::U16(v) => write!(f, "{}", v),
             Value::U32(v) => write!(f, "{}", v),
@@ -1309,7 +1287,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {
