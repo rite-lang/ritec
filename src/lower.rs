@@ -1603,13 +1603,26 @@ fn lower_let_assert(
     ty: Option<&ast::Ty>,
     expr: &ast::Expr,
 ) -> miette::Result<hir::Expr> {
-    let input = lower_expr(cx, expr)?;
-    let pat = lower_pat(cx, ast_pat, &input.ty)?;
+    let span = expr.span();
+    let expr = lower_expr(cx, expr)?;
+    let pat = lower_pat(cx, ast_pat, &expr.ty)?;
 
     if let Some(ty) = ty {
-        let ty = lower_ty(&mut cx.as_ty_cx(), ty, expr.span())?;
-        cx.unit.unify(input.ty.clone(), ty, expr.span());
+        let ty = lower_ty(&mut cx.as_ty_cx(), ty, span)?;
+        cx.unit.unify(expr.ty.clone(), ty, span);
     }
+
+    let local = cx.locals.len();
+    cx.locals.push(hir::Local {
+        mutable: false,
+        name: "",
+        ty: expr.ty.clone(),
+    });
+
+    let input = hir::Expr {
+        kind: hir::ExprKind::Local(local),
+        ty: expr.ty.clone(),
+    };
 
     let mut locals = Vec::new();
     build_pat_destructure(cx, input.clone(), &pat, &mut locals)?;
@@ -1637,22 +1650,34 @@ fn lower_let_assert(
     let kind = hir::ExprKind::Block(exprs);
     let ty = hir::Ty::void(ast_pat.span);
 
-    let expr = hir::Expr { kind, ty };
+    let output = hir::Expr { kind, ty };
 
-    match check {
+    let output = match check {
         Some(check) => {
             let panic = hir::Expr {
                 kind: hir::ExprKind::Panic("assertion failed"),
                 ty: hir::Ty::void(ast_pat.span),
             };
 
-            let r#match = hir::Match::Bool(Box::new(expr), Box::new(panic));
+            let r#match = hir::Match::Bool(Box::new(output), Box::new(panic));
             let kind = hir::ExprKind::Match(Box::new(check), r#match);
             let ty = hir::Ty::void(ast_pat.span);
-            Ok(hir::Expr { kind, ty })
+            hir::Expr { kind, ty }
         }
-        None => Ok(expr),
-    }
+        None => output,
+    };
+
+    let exprs = vec![
+        hir::Expr {
+            kind: hir::ExprKind::Let(local, Box::new(expr)),
+            ty: hir::Ty::void(span),
+        },
+        output,
+    ];
+
+    let kind = hir::ExprKind::Block(exprs);
+    let ty = hir::Ty::void(span);
+    Ok(hir::Expr { kind, ty })
 }
 
 fn lower_assign(cx: &mut BodyCx, lhs: &ast::Expr, rhs: &ast::Expr) -> miette::Result<hir::Expr> {

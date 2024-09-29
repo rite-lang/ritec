@@ -230,10 +230,10 @@ fn build_place(
             Ok(place)
         }
 
-        hir::ExprKind::VariantField(ref expr, variant, field) => {
-            let mut place = build_place(builder, block, expr)?;
+        hir::ExprKind::VariantField(ref base, variant, field) => {
+            let mut place = build_place(builder, block, base)?;
 
-            assert!(matches!(place.ty, rir::Ty::Adt(_, _)));
+            assert!(matches!(place.ty(), rir::Ty::Adt(_, _)));
 
             place.projection.push(rir::Projection {
                 kind: rir::ProjectionKind::Field {
@@ -247,10 +247,10 @@ fn build_place(
             Ok(place)
         }
 
-        hir::ExprKind::TupleField(ref expr, index) => {
-            let mut place = build_place(builder, block, expr)?;
+        hir::ExprKind::TupleField(ref base, index) => {
+            let mut place = build_place(builder, block, base)?;
 
-            assert!(matches!(place.ty, rir::Ty::Tuple(_)));
+            assert!(matches!(place.ty(), rir::Ty::Tuple(_)));
 
             place.projection.push(rir::Projection {
                 kind: rir::ProjectionKind::Field {

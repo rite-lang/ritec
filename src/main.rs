@@ -58,10 +58,8 @@ fn main() -> miette::Result<()> {
         },
     };
 
-    for import in compiler.unit.modules[module].imports.clone().into_values() {
-        if let ImportKind::Module(index) = import.kind {
-            (compiler.unit.modules[index].imports).insert("std", std_import.clone());
-        }
+    for module in &mut compiler.unit.modules {
+        module.imports.insert("std", std_import.clone());
     }
 
     (compiler.unit.modules[module].imports).insert("std", std_import);

@@ -29,6 +29,15 @@ pub fn last(xs: ['a]) -> Result<'a, void>
   | [x] -> Ok(x)
   | [x, ..xs] -> last(xs)
 
+/// Get the nth element of a list.
+pub fn nth(xs: ['a], n: int) -> Result<'a, void>
+  match xs
+  | [x, ..xs] ->
+    match n > 0
+    | true -> nth(xs, n - 1)
+    | false -> Ok(x)
+  | [] -> Err(void)
+
 /// Contatenate two lists.
 pub fn concat(xs: ['a], ys: ['a]) -> ['a]
   match xs
