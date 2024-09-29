@@ -1,11 +1,5 @@
-import std:fs
-import std:debug
-import std:array
-import std:string
-import std:result:Result
-import std:io
-import std:list
-
+import std:vec
 
 fn main(args: [str])
-  std:fs:list_dir(".") |> std:debug:print
+ let v: vec:Vec<str> = vec:new() |> vec:push("hello") |> vec:push("world")
+ v |> std:debug:print

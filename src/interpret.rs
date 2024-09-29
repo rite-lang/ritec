@@ -1,4 +1,5 @@
 use crate::number::IntKind;
+use crate::rir::Func;
 use crate::{
     ast::BinOp,
     hir::UnOp,
@@ -481,7 +482,7 @@ struct Frame {
 }
 
 // Standard library bindings.
-fn string_bytes(mut args: Vec<Value>) -> Value {
+fn string_bytes(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::String(s) = args.pop().unwrap() else {
@@ -493,7 +494,7 @@ fn string_bytes(mut args: Vec<Value>) -> Value {
     Value::Array(Array::U8(bytes))
 }
 
-fn string_from_bytes(mut args: Vec<Value>) -> Value {
+fn string_from_bytes(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::Array(Array::U8(bytes)) = args.pop().unwrap() else {
@@ -505,7 +506,7 @@ fn string_from_bytes(mut args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
-fn string_length(mut args: Vec<Value>) -> Value {
+fn string_length(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::String(s) = args.pop().unwrap() else {
@@ -515,7 +516,7 @@ fn string_length(mut args: Vec<Value>) -> Value {
     Value::Int(s.chars().count() as isize)
 }
 
-fn string_slice(mut args: Vec<Value>) -> Value {
+fn string_slice(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
     let Value::Int(end) = args.pop().unwrap() else {
@@ -546,7 +547,7 @@ fn string_slice(mut args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
-fn string_graphemes(mut args: Vec<Value>) -> Value {
+fn string_graphemes(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::String(s) = args.pop().unwrap() else {
@@ -557,7 +558,7 @@ fn string_graphemes(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(chars)
 }
 
-fn string_split(mut args: Vec<Value>) -> Value {
+fn string_split(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let Value::String(sep) = args.pop().unwrap() else {
@@ -576,7 +577,7 @@ fn string_split(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(parts)
 }
 
-fn string_concat(args: Vec<Value>) -> Value {
+fn string_concat(_: &Func<Specific>, args: Vec<Value>) -> Value {
     let mut s = String::new();
 
     for arg in args {
@@ -589,12 +590,12 @@ fn string_concat(args: Vec<Value>) -> Value {
     Value::String(s)
 }
 
-fn dict_new(args: Vec<Value>) -> Value {
+fn dict_new(_: &Func<Specific>, args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 0);
     Value::Dict(BTreeMap::new())
 }
 
-fn dict_length(mut args: Vec<Value>) -> Value {
+fn dict_length(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::Dict(dict) = args.pop().unwrap() else {
@@ -604,7 +605,7 @@ fn dict_length(mut args: Vec<Value>) -> Value {
     Value::Int(dict.len() as isize)
 }
 
-fn dict_get(mut args: Vec<Value>) -> Value {
+fn dict_get(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let key = args.pop().unwrap();
@@ -619,7 +620,7 @@ fn dict_get(mut args: Vec<Value>) -> Value {
     }
 }
 
-fn dict_insert(mut args: Vec<Value>) -> Value {
+fn dict_insert(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
     let value = args.pop().unwrap();
@@ -634,7 +635,7 @@ fn dict_insert(mut args: Vec<Value>) -> Value {
     Value::Dict(dict)
 }
 
-fn dict_remove(mut args: Vec<Value>) -> Value {
+fn dict_remove(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let key = args.pop().unwrap();
@@ -648,7 +649,7 @@ fn dict_remove(mut args: Vec<Value>) -> Value {
     Value::Dict(dict)
 }
 
-fn dict_pairs(mut args: Vec<Value>) -> Value {
+fn dict_pairs(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::Dict(dict) = args.pop().unwrap() else {
@@ -663,7 +664,7 @@ fn dict_pairs(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(pairs)
 }
 
-fn dict_keys(mut args: Vec<Value>) -> Value {
+fn dict_keys(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::Dict(dict) = args.pop().unwrap() else {
@@ -674,7 +675,7 @@ fn dict_keys(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(keys)
 }
 
-fn dict_values(mut args: Vec<Value>) -> Value {
+fn dict_values(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::Dict(dict) = args.pop().unwrap() else {
@@ -685,7 +686,7 @@ fn dict_values(mut args: Vec<Value>) -> Value {
     Value::list_from_vec(values)
 }
 
-fn array_new(mut args: Vec<Value>) -> Value {
+fn array_new(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let default = args.pop().unwrap();
@@ -699,13 +700,47 @@ fn array_new(mut args: Vec<Value>) -> Value {
     Value::Array(Array::new(len, default))
 }
 
-fn array_empty(args: Vec<Value>) -> Value {
+fn array_empty(signature: &Func<Specific>, args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 0);
-    Value::Array(Array::Void(Vec::new()))
+
+    println!("{:?}", signature.output);
+
+    let Specific::Adt(_, generics) = &signature.output else {
+        panic!("expected array type");
+    };
+
+    assert_eq!(generics.len(), 1);
+
+    let arr = match &generics[0] {
+        Specific::Void => Array::Void(Vec::new()),
+        Specific::Bool => Array::Bool(Vec::new()),
+        Specific::Str => Array::String(Vec::new()),
+        Specific::Ref(_) => Array::Ref(Vec::new()),
+        Specific::Int(k) => match k {
+            IntKind::U8 => Array::U8(Vec::new()),
+            IntKind::U16 => Array::U16(Vec::new()),
+            IntKind::U32 => Array::U32(Vec::new()),
+            IntKind::U64 => Array::U64(Vec::new()),
+            IntKind::I8 => Array::I8(Vec::new()),
+            IntKind::I16 => Array::I16(Vec::new()),
+            IntKind::I32 => Array::I32(Vec::new()),
+            IntKind::I64 => Array::I64(Vec::new()),
+            IntKind::Int => Array::Int(Vec::new()),
+        }
+        Specific::List(_) => Array::List(Vec::new()),
+        Specific::Tuple(_) => Array::Adt(Vec::new()),
+        Specific::Func(_, _) => Array::Func(Vec::new()),
+        Specific::Adt(_, _) => Array::Adt(Vec::new()),
+        Specific::Float(_) => panic!("floats not supported"),
+    };
+
+    Value::Array(arr)
 }
 
-fn array_extend(mut args: Vec<Value>) -> Value {
+fn array_extend(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
+
+    let default = args.pop().unwrap();
 
     let Value::Int(len2) = args.pop().unwrap() else {
         panic!("expected integer")
@@ -715,14 +750,12 @@ fn array_extend(mut args: Vec<Value>) -> Value {
         panic!("expected array")
     };
 
-    let default = args.pop().unwrap();
-
     arr.resize(arr.len() + len2 as usize, default);
 
     Value::Array(arr)
 }
 
-fn array_truncate(mut args: Vec<Value>) -> Value {
+fn array_truncate(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let Value::Int(len2) = args.pop().unwrap() else {
@@ -738,7 +771,7 @@ fn array_truncate(mut args: Vec<Value>) -> Value {
     Value::Array(arr)
 }
 
-fn array_length(mut args: Vec<Value>) -> Value {
+fn array_length(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::Array(arr) = args.pop().unwrap() else {
@@ -748,7 +781,7 @@ fn array_length(mut args: Vec<Value>) -> Value {
     Value::Int(arr.len() as isize)
 }
 
-fn array_get(mut args: Vec<Value>) -> Value {
+fn array_get(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let Value::Int(index) = args.pop().unwrap() else {
@@ -765,7 +798,7 @@ fn array_get(mut args: Vec<Value>) -> Value {
     }
 }
 
-fn array_set(mut args: Vec<Value>) -> Value {
+fn array_set(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
     let value = args.pop().unwrap();
@@ -783,7 +816,7 @@ fn array_set(mut args: Vec<Value>) -> Value {
     Value::Array(arr)
 }
 
-fn array_slice(mut args: Vec<Value>) -> Value {
+fn array_slice(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 3);
 
     let Value::Int(end) = args.pop().unwrap() else {
@@ -818,7 +851,7 @@ fn rite_io_error_other() -> Value {
     Value::err(Value::Adt((2, Vec::new())))
 }
 
-fn fs_open(mut args: Vec<Value>) -> Value {
+fn fs_open(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::String(path) = args.pop().unwrap() else {
@@ -837,7 +870,7 @@ fn fs_open(mut args: Vec<Value>) -> Value {
     }
 }
 
-fn fs_close(mut args: Vec<Value>) -> Value {
+fn fs_close(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::File(file) = args.pop().unwrap() else {
@@ -849,7 +882,7 @@ fn fs_close(mut args: Vec<Value>) -> Value {
     Value::ok(Value::void())
 }
 
-fn fs_read_all(mut args: Vec<Value>) -> Value {
+fn fs_read_all(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::File(file) = args.pop().unwrap() else {
@@ -870,7 +903,7 @@ fn fs_read_all(mut args: Vec<Value>) -> Value {
     }
 }
 
-fn fs_write_all(mut args: Vec<Value>) -> Value {
+fn fs_write_all(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 2);
 
     let Value::Array(Array::U8(bytes)) = args.pop().unwrap() else {
@@ -892,7 +925,7 @@ fn fs_write_all(mut args: Vec<Value>) -> Value {
     }
 }
 
-fn fs_list_dir(mut args: Vec<Value>) -> Value {
+fn fs_list_dir(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let Value::String(path) = args.pop().unwrap() else {
@@ -923,7 +956,7 @@ fn fs_list_dir(mut args: Vec<Value>) -> Value {
     }
 }
 
-fn io_print(mut args: Vec<Value>) -> Value {
+fn io_print(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     let Value::String(s) = args.pop().unwrap() else {
         panic!("expected string")
     };
@@ -933,7 +966,7 @@ fn io_print(mut args: Vec<Value>) -> Value {
     Value::void()
 }
 
-fn debug_format(mut args: Vec<Value>) -> Value {
+fn debug_format(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
     assert_eq!(args.len(), 1);
 
     let arg = args.pop().unwrap();
@@ -948,21 +981,25 @@ fn debug_format(mut args: Vec<Value>) -> Value {
 
 pub struct Interpreter<'a> {
     rir: &'a Unit<Specific>,
-    builtins: HashMap<usize, fn(Vec<Value>) -> Value>,
+    stack: Vec<Frame>,
+    builtins: HashMap<usize, fn(&Func<Specific>, Vec<Value>) -> Value>,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(mir: &'a Unit<Specific>) -> Self {
+    pub fn new(rir: &'a Unit<Specific>) -> Self {
         Self {
-            rir: mir,
-            builtins: Self::find_builtins(mir),
+            rir,
+            stack: Vec::new(),
+            builtins: Self::find_builtins(rir),
         }
     }
 
-    /// Find builtin functions in the MIR based on the `extern intrinsic` decorator.
-    fn find_builtins(mir: &'a Unit<Specific>) -> HashMap<usize, fn(Vec<Value>) -> Value> {
+    /// Find builtin functions in the IR based on the `extern intrinsic` decorator.
+    fn find_builtins(
+        rir: &'a Unit<Specific>,
+    ) -> HashMap<usize, fn(&Func<Specific>, Vec<Value>) -> Value> {
         let mut builtins = HashMap::new();
-        for (index, value) in mir.funcs.iter().enumerate() {
+        for (index, value) in rir.funcs.iter().enumerate() {
             // find extern intrinsic decorator.
             let decorator = value.decorators.iter().find(|d| d.name == "language");
 
@@ -1246,7 +1283,7 @@ impl<'a> Interpreter<'a> {
                 };
 
                 if let Some(builtin_func) = self.builtins.get(&func) {
-                    return builtin_func(frame.arguments);
+                    return builtin_func(&self.rir.funcs[func], frame.arguments);
                 }
 
                 self.interpret_block(&mut frame, &self.rir.funcs[func].body)

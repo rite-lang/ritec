@@ -134,7 +134,7 @@ pub enum Specific {
     List(Box<Specific>),
     Tuple(Vec<Specific>),
     Func(Vec<Specific>, Box<Specific>),
-    Adt(usize),
+    Adt(usize, Vec<Specific>),
 }
 
 #[derive(Clone, Debug)]
@@ -331,7 +331,21 @@ impl Display for Specific {
                 }
                 write!(f, ") -> {}", output)
             }
-            Specific::Adt(adt) => write!(f, "adt {}", adt),
+            Specific::Adt(adt, generics) => {
+                write!(f, "adt")?;
+                if !generics.is_empty() {
+                    write!(f, "<")?;
+                    for (i, generic) in generics.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", generic)?;
+                    }
+                    write!(f, ">")?;
+                }
+
+                write!(f, "({})", adt)
+            }
         }
     }
 }

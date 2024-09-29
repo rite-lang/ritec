@@ -172,7 +172,8 @@ fn specialize_ty(spec: &mut Specializer, ty: &Ty) -> Specific {
         }
         Ty::Adt(adt, args) => {
             let args: Vec<_> = args.iter().map(|ty| specialize_ty(spec, ty)).collect();
-            Specific::Adt(specialize_adt(spec, *adt, &args))
+            let adt = specialize_adt(spec, *adt, &args);
+            Specific::Adt(adt, args)
         }
         Ty::Generic(index) => {
             if spec.generics.len() <= *index {

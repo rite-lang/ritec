@@ -11,3 +11,4 @@ pub import order
 pub import path
 pub import result
 pub import string
+pub import vec

@@ -1,0 +1,47 @@
+//! Extend array type with helper functions for dynamic data allocation.
+
+import std:array
+import std:array:Array
+
+import std:result:Result
+
+/// A dynamically sized array.
+pub type Vec<'a>(
+  size: int
+  capacity: int
+  data: Array<'a>
+)
+
+/// Create a new empty vec.
+pub fn new() -> Vec<'a>
+  Vec(0, 0, array:empty())
+
+/// Optionally extend the capacity of the array.
+pub fn push(vec: Vec<'a>, value: 'a) -> Vec<'a>
+  let data = match vec.capacity == vec.size
+    | true -> array:extend(vec.data, vec.capacity + 1, value)
+    | false -> vec.data
+
+  Vec(
+    size: vec.size + 1
+    capacity: array:length(data)
+    data: array:set(data, vec.size, value)
+  )
+
+/// Retrieve element and mutate the vec
+pub fn pop(vec: Vec<'a>)
+  match vec.size == 0
+  | true -> Err(void)
+  | false -> Ok((array:get(vec.data, vec.size - 1), Vec(vec.size - 1, vec.capacity, vec.data)))
+
+/// Access element at index.
+pub fn get(vec: Vec<'a>, index: int) -> Result<'a, void>
+  array:get(vec.data, index)
+
+/// Set element at index.
+pub fn set(vec: Vec<'a>, index: int, value: 'a) -> Vec<'a>
+  Vec(vec.size, vec.capacity, array:set(vec.data, index, value))
+
+pub fn len(vec: Vec<'a>) -> int
+  vec.size
+
