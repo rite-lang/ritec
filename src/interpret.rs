@@ -22,6 +22,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
 };
+use std::fmt::{Formatter};
 
 #[derive(Clone, Debug)]
 pub struct RiteFile {
@@ -162,76 +163,133 @@ macro_rules! value_enum {
 variant_map!(value_enum);
 variant_map!(array_enum);
 
-macro_rules! match_value {
-    // Match only one enum (choose type)
-    ($ty:ident, $value:expr, $a:ident, $block:block, $($variant:ident),*) => {
-        match $value {
+/// Match variant with shared block.
+macro_rules! match_value_block {
+    ($value:expr, $ty:ident, $a:ident, $block:block, $($variant:ident),*) => {
+        {
+        let value = $value;
+        match value {
             $(
                 $ty::$variant($a) => $block
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("[1] expected matching variant for {}.", stringify!($ty))
+            _ => panic!("[1] Unexpected variant {:?} when matching {}.", value, stringify!($ty))
         }
+    }
     };
 
-    // "Convert" variant block converting a value to an array based on the value a.
+    ($value:expr, $ty:ident, $a:ident, $block:block) => {
+       variant_map!(match_value_block, $value, $ty, $a, $block)
+    };
+}
+
+/// Convert a value/array from one to another.
+macro_rules! match_value_convert {
     ($value:expr, $x:ident, $y:ident, $a:ident, $block:block, $($variant:ident),*) => {
-        match $value {
+        {
+            let value = $value;
+        match value {
             $(
                 $x::$variant($a) => $y::$variant($block),
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("[2] expected matching ({}, {}) variant.", stringify!($x), stringify!($y))
+            _ => panic!("[2] Unexpected variant {:?} when converting {} to {}.", value, stringify!($x), stringify!($y))
         }
+    }
     };
 
-    // Match both enums
+    ($value:expr, $x:ident, $y:ident, $a:ident, $block:block) => {
+        variant_map!(match_value_convert, $value, $x, $y, $a, $block)
+    };
+}
+
+/// Match two values of different types with the same variant.
+macro_rules! match_two_value_block {
     ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
-        match $value {
+        {
+        let value = $value;
+        match value {
             $(
                 ($x::$variant($a), $y::$variant($b)) => $block
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("[3] expected matching variants for ({}, {})", stringify!($x), stringify!($y))
+            _ => panic!("[3] Unexpected variant {:?} when matching for ({}, {})", value, stringify!($x), stringify!($y))
         }
+    }
     };
 
+     ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block) => {
+        variant_map!(match_two_value_block, $value, $x, $y, $a, $b, $block)
+    };
+}
+
+/// Operate on either on ('a, 'a) -> 'a or ('a, 'a) -> fixed.
+macro_rules! match_value_binary_op {
     // Match two identical variants of the same type and produce the same variant
-    // For binary operations.
-    ($ty:ident, $value:expr, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
-        match $value {
+    ($value:expr, $ty:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
+        {
+        let value = $value;
+        match value {
             $(
                ($ty::$variant($a), $ty::$variant($b)) => $ty::$variant($block),
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("[4] expected matching variant for {}", stringify!($ty))
+            _ => panic!("[4] Unexpected variant {:?} when matching for paired {}.", value, stringify!($ty))
         }
+    }
     };
 
-    // Binary operations that produce a different variant.
-    // Match two identical variants of the same type and produce the same variant
-    // For binary operations.
-    ($ty:ident, $out:ident, $value:expr, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
-        match $value {
+    ($value:expr, $ty:ident, $a:ident, $b:ident, $block:block) => {
+        match_value_binary_op!(
+            $value,
+            $ty,
+            $a,
+            $b,
+            $block,
+            U8,
+            U16,
+            U32,
+            U64,
+            I8,
+            I16,
+            I32,
+            I64,
+            Int
+        )
+    };
+
+    // Binary operations that produce a shared different variant.
+    ($value:expr, $ty:ident, $out:ident, $a:ident, $b:ident, $block:block, $($variant:ident),*) => {
+        {
+        let value = $value;
+        match value {
             $(
                ($ty::$variant($a), $ty::$variant($b)) => $ty::$out($block),
             )*
             #[allow(unreachable_patterns)]
-            _ => panic!("[5] expected matching variant for {}.", stringify!($ty))
+            _ => panic!("[5] Unexpected variant {:?} when matching for paired {}.", value, stringify!($ty))
         }
+    }
     };
 
-    // Short hands to match ALL patterns.
-    ($ty:ident, $value:expr, $a:ident, $block:block) => {
-       variant_map!(match_value, $ty, $value, $a, $block)
-    };
-
-    ($value:expr, $x:ident, $y:ident, $a:ident, $block:block) => {
-        variant_map!(match_value, $value, $x, $y, $a, $block)
-    };
-
-    ($value:expr, $x:ident, $y:ident, $a:ident, $b:ident, $block:block) => {
-        variant_map!(match_value, $value, $x, $y, $a, $b, $block)
+    ($value:expr, $ty:ident, $out:ident, $a:ident, $b:ident, $block:block) => {
+        match_value_binary_op!(
+            $value,
+            $ty,
+            $out,
+            $a,
+            $b,
+            $block,
+            U8,
+            U16,
+            U32,
+            U64,
+            I8,
+            I16,
+            I32,
+            I64,
+            Int
+        )
     };
 }
 
@@ -266,75 +324,6 @@ impl Value {
     }
 }
 
-impl Array {
-    pub fn new(len: usize, default: Value) -> Array {
-        match_value!(default, Value, Array, default, { vec![default; len] })
-    }
-
-    pub fn len(&self) -> usize {
-        match_value!(Array, self, s, { s.len() })
-    }
-
-    pub fn slice(&self, start: usize, end: usize) -> Array {
-        match_value!(self, Array, Array, s, { s[start..end].to_vec() })
-    }
-
-    pub fn resize(&mut self, len: usize, default: Value) {
-        match_value!((self, default), Array, Value, s, v, {
-            s.resize(len, v);
-        })
-    }
-
-    pub fn truncate(&mut self, len: usize) {
-        match_value!(Array, self, s, {
-            s.truncate(len);
-        })
-    }
-
-    pub fn set(&mut self, index: usize, value: Value) {
-        match_value!((self, value), Array, Value, s, v, {
-            s[index] = v;
-        })
-    }
-
-    pub fn get(&self, index: usize) -> Option<Value> {
-        if index >= self.len() {
-            return None;
-        }
-
-        match self {
-            Array::Void(_) => return Some(Value::void()),
-            _ => {}
-        }
-
-        Some(match_value!(
-            self,
-            Array,
-            Value,
-            s,
-            { s[index].clone() },
-            // Exclude void.
-            Bool,
-            Func,
-            List,
-            Adt,
-            String,
-            Ref,
-            Dict,
-            Array,
-            File,
-            U8,
-            U16,
-            U32,
-            U64,
-            I8,
-            I16,
-            I32,
-            I64,
-            Int
-        ))
-    }
-}
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -397,6 +386,94 @@ impl std::fmt::Display for Value {
             Value::I64(v) => write!(f, "{}", v),
             Value::Int(v) => write!(f, "{}", v),
         }
+    }
+}
+
+impl Array {
+    pub fn new(len: usize, default: Value) -> Array {
+        match_value_convert!(default, Value, Array, default, { vec![default; len] })
+    }
+
+    pub fn len(&self) -> usize {
+        match_value_block!(self, Self, s, { s.len() })
+    }
+
+    pub fn slice(&self, start: usize, end: usize) -> Array {
+        match_value_convert!(self, Array, Array, s, { s[start..end].to_vec() })
+    }
+
+    pub fn resize(&mut self, len: usize, default: Value) {
+        match_two_value_block!((self, default), Array, Value, vec, value, {
+            vec.resize(len, value);
+        })
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        match_value_block!(self, Self, s, {
+            s.truncate(len);
+        })
+    }
+
+    pub fn set(&mut self, index: usize, value: Value) {
+        match_two_value_block!((self, value), Array, Value, vec, value, {
+            vec[index] = value;
+        })
+    }
+
+    pub fn get(&self, index: usize) -> Option<Value> {
+        if index >= self.len() {
+            return None;
+        }
+
+        match self {
+            Array::Void(_) => return Some(Value::void()),
+            _ => {}
+        }
+
+        Some(match_value_convert!(
+            self,
+            Array,
+            Value,
+            s,
+            { s[index].clone() },
+            // Exclude void.
+            Bool,
+            Func,
+            List,
+            Adt,
+            String,
+            Ref,
+            Dict,
+            Array,
+            File,
+            U8,
+            U16,
+            U32,
+            U64,
+            I8,
+            I16,
+            I32,
+            I64,
+            Int
+        ))
+    }
+}
+
+impl std::fmt::Display for Array {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match_value_block!(self, Self, s, {
+            write!(f, "[")?;
+
+            for (i, value) in s.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+
+                write!(f, "{:?}", value)?;
+            }
+
+            write!(f, "]")
+        })
     }
 }
 
@@ -1064,94 +1141,19 @@ impl<'a> Interpreter<'a> {
 
                 match op {
                     BinOp::Add => {
-                        match_value!(
-                            Value,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs + rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, lhs, rhs, { lhs + rhs })
                     }
                     BinOp::Sub => {
-                        match_value!(
-                            Value,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs - rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, lhs, rhs, { lhs - rhs })
                     }
                     BinOp::Mul => {
-                        match_value!(
-                            Value,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs * rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, lhs, rhs, { lhs * rhs })
                     }
                     BinOp::Div => {
-                        match_value!(
-                            Value,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs / rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, lhs, rhs, { lhs / rhs })
                     }
                     BinOp::Rem => {
-                        match_value!(
-                            Value,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs % rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, lhs, rhs, { lhs % rhs })
                     }
                     BinOp::And => {
                         let (Value::Bool(lhs), Value::Bool(rhs)) = (lhs, rhs) else {
@@ -1170,80 +1172,16 @@ impl<'a> Interpreter<'a> {
                     BinOp::Eq => Value::Bool(lhs == rhs),
                     BinOp::Ne => Value::Bool(lhs != rhs),
                     BinOp::Lt => {
-                        match_value!(
-                            Value,
-                            Bool,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs < rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, Bool, lhs, rhs, { lhs < rhs })
                     }
                     BinOp::Le => {
-                        match_value!(
-                            Value,
-                            Bool,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs <= rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, Bool, lhs, rhs, { lhs <= rhs })
                     }
                     BinOp::Gt => {
-                        match_value!(
-                            Value,
-                            Bool,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs > rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, Bool, lhs, rhs, { lhs > rhs })
                     }
                     BinOp::Ge => {
-                        match_value!(
-                            Value,
-                            Bool,
-                            (lhs, rhs),
-                            lhs,
-                            rhs,
-                            { lhs >= rhs },
-                            U8,
-                            U16,
-                            U32,
-                            U64,
-                            I8,
-                            I16,
-                            I32,
-                            I64,
-                            Int
-                        )
+                        match_value_binary_op!((lhs, rhs), Value, Bool, lhs, rhs, { lhs >= rhs })
                     }
                 }
             }
@@ -1252,7 +1190,18 @@ impl<'a> Interpreter<'a> {
 
                 match op {
                     UnOp::Neg => {
-                        match_value!(operand, Value, Value, o, { -o }, I8, I16, I32, I64, Int)
+                        match_value_convert!(
+                            operand,
+                            Value,
+                            Value,
+                            o,
+                            { -o },
+                            I8,
+                            I16,
+                            I32,
+                            I64,
+                            Int
+                        )
                     }
                     UnOp::Not => {
                         let Value::Bool(operand) = operand else {
@@ -1360,7 +1309,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {
