@@ -1,8 +1,5 @@
 //! IO operations.
 
-import std:string
-import std:array
-
 /// An error that can occur during IO operations.
 pub type Error =
   /// The file was not found.

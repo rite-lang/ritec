@@ -1,0 +1,15 @@
+pub type TokenTree =
+  | Token(token: Token)
+  | Group(group: Group)
+
+pub type Token
+
+pub type Group(
+  delimiter: Delimiter,
+  tokens: [TokenTree]
+)
+
+pub type Delimiter =
+  | Parentheses
+  | Brackets
+  | Braces

@@ -17,6 +17,7 @@ mod specialize;
 mod token;
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -44,26 +45,29 @@ fn main() -> miette::Result<()> {
     let name = name.to_str().unwrap();
 
     let std = compiler.add_dir("std", Path::new("std"))?;
-    let test = compiler.add_dir(name, &options.project)?;
+    let module = compiler.add_dir(name, &options.project)?;
 
-    for import in compiler.unit.modules[test].imports.clone().into_values() {
+    let std_import = Import {
+        vis: Vis::Private,
+        kind: ImportKind::Module(std),
+        span: Span {
+            lo: 0,
+            hi: 0,
+            file: "",
+            source: "",
+        },
+    };
+
+    for import in compiler.unit.modules[module].imports.clone().into_values() {
         if let ImportKind::Module(index) = import.kind {
-            let import = Import {
-                vis: Vis::Private,
-                kind: ImportKind::Module(std),
-                span: import.span,
-            };
-
-            compiler.unit.modules[index].imports.insert("std", import);
+            (compiler.unit.modules[index].imports).insert("std", std_import.clone());
         }
     }
 
+    (compiler.unit.modules[module].imports).insert("std", std_import);
+
     compiler.lower()?;
 
-    let module = &compiler.unit.modules[test].imports[name];
-    let ImportKind::Module(module) = module.kind else {
-        panic!();
-    };
     let module = &compiler.unit.modules[module].imports["main"];
     let ImportKind::Func(main) = module.kind else {
         panic!();
@@ -95,12 +99,74 @@ impl Compiler {
     fn add_dir(&mut self, name: &str, path: &Path) -> miette::Result<usize> {
         let name = self.interner.intern(name);
         let index = self.unit.push_module(hir::Module::new(name));
+        self.add_dir_internal(name, index, path, true)?;
+        Ok(index)
+    }
+
+    fn add_dir_internal(
+        &mut self,
+        name: &'static str,
+        index: usize,
+        path: &Path,
+        is_root: bool,
+    ) -> miette::Result<()> {
+        let mut modules = HashMap::new();
 
         for entry in fs::read_dir(path).map_err(|err| miette::miette!("{}", err.to_string()))? {
             let entry = entry.map_err(|err| miette::miette!("{}", err.to_string()))?;
             let file_type = entry
                 .file_type()
                 .map_err(|err| miette::miette!("{}", err.to_string()))?;
+
+            let subpath = entry.path();
+            let subname = subpath.file_stem().unwrap();
+            let subpath = self.interner.intern(subpath.to_str().unwrap());
+            let subname = self.interner.intern(subname.to_str().unwrap());
+
+            let submodule = match modules.get(subname) {
+                Some(module) => *module,
+                None => {
+                    if is_root && subname == name {
+                        index
+                    } else {
+                        let mut submodule = hir::Module::new(subname);
+
+                        let import = Import {
+                            vis: Vis::Private,
+                            kind: ImportKind::Module(index),
+                            span: Span {
+                                lo: 0,
+                                hi: 0,
+                                file: "",
+                                source: "",
+                            },
+                        };
+                        submodule.imports.insert(name, import);
+
+                        let submodule = self.unit.push_module(submodule);
+                        self.unit.modules[index].imports.insert(
+                            subname,
+                            Import {
+                                vis: Vis::Private,
+                                kind: ImportKind::Module(submodule),
+                                span: Span {
+                                    lo: 0,
+                                    hi: 0,
+                                    file: "",
+                                    source: "",
+                                },
+                            },
+                        );
+
+                        modules.insert(subname, submodule);
+                        submodule
+                    }
+                }
+            };
+
+            if file_type.is_dir() {
+                self.add_dir_internal(subname, submodule, &entry.path(), false)?;
+            }
 
             if file_type.is_file() {
                 if !entry.path().extension().map_or(false, |ext| ext == "ri") {
@@ -111,56 +177,31 @@ impl Compiler {
                     .map_err(|err| miette::miette!("{}", err.to_string()))?;
                 let source = self.interner.intern(source);
 
-                let subpath = entry.path();
-                let subname = subpath.file_stem().unwrap();
-                let subpath = self.interner.intern(subpath.to_str().unwrap());
-                let subname = self.interner.intern(subname.to_str().unwrap());
-
                 let mut tokens = lex::lex(subpath, source)?;
                 let ast = parse::parse(&mut tokens)?;
 
-                let mut submodule = hir::Module::new(subname);
-
-                let import = Import {
-                    vis: Vis::Private,
-                    kind: ImportKind::Module(index),
-                    span: Span {
-                        lo: 0,
-                        hi: source.len(),
-                        file: subpath,
-                        source,
-                    },
-                };
-                submodule.imports.insert(name, import);
-
-                let submodule = self.unit.push_module(submodule);
                 self.modules.push((submodule, ast));
-
-                let import = Import {
-                    vis: Vis::Public,
-                    kind: ImportKind::Module(submodule),
-                    span: Span {
-                        lo: 0,
-                        hi: source.len(),
-                        file: subpath,
-                        source,
-                    },
-                };
-
-                self.unit.modules[index].imports.insert(subname, import);
             }
         }
-
-        let module = &self.unit.modules[index];
-        let modules = module.imports.clone();
 
         for module in modules.values() {
-            if let ImportKind::Module(module) = module.kind {
-                self.unit.modules[module].imports.extend(modules.clone());
+            for (name, submodule) in modules.iter() {
+                let import = Import {
+                    vis: Vis::Private,
+                    kind: ImportKind::Module(*submodule),
+                    span: Span {
+                        lo: 0,
+                        hi: 0,
+                        file: "",
+                        source: "",
+                    },
+                };
+
+                self.unit.modules[*module].imports.insert(name, import);
             }
         }
 
-        Ok(index)
+        Ok(())
     }
 
     fn lower(&mut self) -> miette::Result<()> {

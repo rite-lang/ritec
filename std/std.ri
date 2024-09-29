@@ -1,0 +1,13 @@
+//! The rite standard library.
+
+pub import array
+pub import debug
+pub import dict
+pub import fs
+pub import io
+pub import list
+pub import math
+pub import order
+pub import path
+pub import result
+pub import string
