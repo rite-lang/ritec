@@ -892,6 +892,37 @@ fn fs_write_all(mut args: Vec<Value>) -> Value {
     }
 }
 
+fn fs_list_dir(mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(path) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    match fs::read_dir(&path) {
+        Ok(entries) => {
+            // Return list of Adt(file = 0, dir = 1, [path]).
+            let entries = entries
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    let path = entry.path().to_string_lossy().to_string();
+
+                    let variant = if entry.file_type().unwrap().is_dir() {
+                        1
+                    } else {
+                        0
+                    };
+
+                    Value::Adt((variant, vec![Value::String(path)]))
+                })
+                .collect();
+
+            Value::ok(Value::list_from_vec(entries))
+        }
+        Err(err) => rite_io_error(err.kind()),
+    }
+}
+
 fn io_print(mut args: Vec<Value>) -> Value {
     let Value::String(s) = args.pop().unwrap() else {
         panic!("expected string")
@@ -967,6 +998,7 @@ impl<'a> Interpreter<'a> {
                     "fs:close" => fs_close,
                     "fs:read_all" => fs_read_all,
                     "fs:write_all" => fs_write_all,
+                    "fs:list_dir" => fs_list_dir,
                     // we allow intrinsics to have pure rite fallbacks.
                     _ => continue,
                 };
@@ -1287,7 +1319,7 @@ impl<'a> Interpreter<'a> {
         fn recurse<'a>(
             target: &mut Value,
             value: Value,
-            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
+            mut projection: Peekable<impl Iterator<Item=&'a Projection<Specific>>>,
         ) {
             match projection.next() {
                 Some(proj) => match proj.kind {

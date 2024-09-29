@@ -2,4 +2,10 @@
 
 /// Join two strings with path semantics.
 pub fn join(a: str, b: str) -> str
-  a
+  let trailing_slash = std:string:ends_with(a, "/")
+  let leading_slash = std:string:starts_with(b, "/")
+
+  match (trailing_slash, leading_slash)
+  | (true, true) -> a |> std:string:concat(std:string:slice(b, 1, std:string:length(b)))
+  | (false, false) -> a |> std:string:concat("/") |> std:string:concat(b)
+  | _ -> a |> std:string:concat(b)

@@ -40,3 +40,14 @@ pub fn write_from_string(path: str, contents: str) -> Result<void, io:Error>
   let result = write_all(file, bytes)
   close(file)?
   result
+
+
+/// Singular result for a directory entry.
+pub type DirEntry =
+  | File(path: str)
+  | Dir(path: str)
+
+/// List the contents of a directory.
+#[language("fs:list_dir")]
+pub fn list_dir(path: str) -> Result<[DirEntry], io:Error>
+  panic "fs:list_dir builtin not implemented"
