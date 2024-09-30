@@ -141,7 +141,7 @@ impl Compiler {
                         let mut submodule = hir::Module::new(subname);
 
                         let import = Import {
-                            vis: Vis::Private,
+                            vis: Vis::Public,
                             kind: ImportKind::Module(index),
                             span: Span {
                                 lo: 0,
@@ -156,7 +156,7 @@ impl Compiler {
                         self.unit.modules[index].imports.insert(
                             subname,
                             Import {
-                                vis: Vis::Private,
+                                vis: Vis::Public,
                                 kind: ImportKind::Module(submodule),
                                 span: Span {
                                     lo: 0,

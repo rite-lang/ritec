@@ -441,7 +441,15 @@ impl Dumper {
                 self.dump_value(value);
                 println!(";");
             }
-            Statement::Call { func, args, .. } => {
+            Statement::Call { func, args, place } => {
+                self.dump_indent();
+
+                print!("call ");
+
+                self.dump_place(place);
+
+                print!(" = ");
+
                 self.dump_operand(func);
                 print!("(");
                 for (i, arg) in args.iter().enumerate() {
@@ -450,7 +458,7 @@ impl Dumper {
                     }
                     self.dump_operand(arg);
                 }
-                print!(")");
+                println!(")");
             }
             Statement::Return { value } => {
                 self.dump_indent();

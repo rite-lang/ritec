@@ -228,6 +228,7 @@ impl NestedProgramCounter {
 #[derive(Debug)]
 enum ControlFlow {
     Continue,
+    StackTrace(String),
     Yield,
 }
 
@@ -293,9 +294,22 @@ impl<'a> Interpreter<'a> {
                 match self.interpret_block(frame, block, &mut pc) {
                     // End of block, continue to the next block.
                     Err(ControlFlow::Yield) => {}
+                    Err(ControlFlow::StackTrace(message)) => {
+                        for frame in stack.iter() {
+                            let func = &self.rir.funcs[frame.func];
+
+                            println!("Function: {}", func.name);
+                            println!("Pc: {}", frame.return_address.current());
+                        }
+
+                        panic!("Stack trace: {}", message);
+                    }
                     _ => {
-                        pc.pcs.truncate(1);
-                        pc.increment();
+                        if pc.pcs.len() > 1 {
+                            pc.pop();
+                            pc.increment();
+                            pc.needs_restore = true;
+                        }
                     }
                 }
 
@@ -435,6 +449,9 @@ impl<'a> Interpreter<'a> {
                             ControlFlow::Continue => {
                                 pc.pop();
                             }
+                            ControlFlow::StackTrace(m) => {
+                                return Err(ControlFlow::StackTrace(m));
+                            }
                         },
                     }
                 }
@@ -444,7 +461,10 @@ impl<'a> Interpreter<'a> {
                     default,
                 } => {
                     let Value::Adt((variant, _)) = self.interpret_operand(frame, input) else {
-                        panic!("expected adt")
+                        return Err(ControlFlow::StackTrace(format!(
+                            "expected adt got {:?}",
+                            input
+                        )));
                     };
 
                     // Get the block to execute based on the variant
@@ -477,6 +497,9 @@ impl<'a> Interpreter<'a> {
                             }
                             ControlFlow::Continue => {
                                 pc.pop();
+                            }
+                            ControlFlow::StackTrace(m) => {
+                                return Err(ControlFlow::StackTrace(m));
                             }
                         },
                     }

@@ -29,6 +29,11 @@ impl IntrinsicMap {
                     "string:length" => string_length,
                     "string:slice" => string_slice,
                     "string:graphemes" => string_graphemes,
+                    "string:is_whitespace" => string_is_whitespace,
+                    "string:is_alphabetic" => string_is_alphabetic,
+                    "string:is_numeric" => string_is_numeric,
+                    "string:is_lowercase" => string_is_lowercase,
+                    "string:is_uppercase" => string_is_uppercase,
                     "string:split" => string_split,
                     "debug:format" => debug_format,
                     "io:print" => io_print,
@@ -144,6 +149,66 @@ fn string_graphemes(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
 
     let chars = s.chars().map(|c| Value::String(String::from(c))).collect();
     Value::list_from_vec(chars)
+}
+
+fn string_is_whitespace(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let is_whitespace = s.chars().all(char::is_whitespace);
+
+    Value::Bool(is_whitespace)
+}
+
+fn string_is_alphabetic(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let is_alphabetic = s.chars().all(char::is_alphabetic);
+
+    Value::Bool(is_alphabetic)
+}
+
+fn string_is_numeric(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let is_numeric = s.chars().all(char::is_numeric);
+
+    Value::Bool(is_numeric)
+}
+
+fn string_is_lowercase(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let is_lowercase = s.chars().all(char::is_lowercase);
+
+    Value::Bool(is_lowercase)
+}
+
+fn string_is_uppercase(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
+    assert_eq!(args.len(), 1);
+
+    let Value::String(s) = args.pop().unwrap() else {
+        panic!("expected string")
+    };
+
+    let is_uppercase = s.chars().all(char::is_uppercase);
+
+    Value::Bool(is_uppercase)
 }
 
 fn string_split(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
