@@ -196,6 +196,18 @@ fn specialize_block(spec: &mut Specializer, block: Block) -> Block<Specific> {
             Statement::Use { value } => Statement::Use {
                 value: specialize_value(spec, value),
             },
+            Statement::Call { place, func, args } => {
+                let place = specialize_place(spec, place);
+
+                let func = specialize_operand(spec, func);
+
+                let args = args
+                    .into_iter()
+                    .map(|arg| specialize_operand(spec, arg))
+                    .collect();
+
+                Statement::Call { place, func, args }
+            }
             Statement::Return { value } => Statement::Return {
                 value: value.map(|value| specialize_value(spec, value)),
             },
@@ -288,16 +300,6 @@ fn specialize_value(spec: &mut Specializer, value: Value) -> Value<Specific> {
         Value::Unary(op, operand) => Value::Unary(op, specialize_operand(spec, operand)),
         Value::IsVariant(operand, variant) => {
             Value::IsVariant(specialize_operand(spec, operand), variant)
-        }
-        Value::Call(func, args) => {
-            let func = specialize_operand(spec, func);
-
-            let args = args
-                .into_iter()
-                .map(|arg| specialize_operand(spec, arg))
-                .collect();
-
-            Value::Call(func, args)
         }
         Value::Ref(place) => Value::Ref(specialize_place(spec, place)),
         Value::Tuple(items) => {

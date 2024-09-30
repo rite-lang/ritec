@@ -25,7 +25,7 @@ use std::{
 use clap::Parser;
 use hir::{Import, ImportKind, Vis};
 use interner::Interner;
-use interpret::Interpreter;
+use interpret::interpret::Interpreter;
 use span::Span;
 
 #[derive(Parser)]

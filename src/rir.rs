@@ -155,6 +155,11 @@ pub enum Statement<T = Ty> {
     Use {
         value: Value<T>,
     },
+    Call {
+        place: Place<T>,
+        func: Operand<T>,
+        args: Vec<Operand<T>>,
+    },
     Return {
         value: Option<Value<T>>,
     },
@@ -189,7 +194,6 @@ pub enum Value<T = Ty> {
     Binary(BinOp, Operand<T>, Operand<T>),
     Unary(UnOp, Operand<T>),
     IsVariant(Operand<T>, usize),
-    Call(Operand<T>, Vec<Operand<T>>),
     Ref(Place<T>),
     Tuple(Vec<Operand<T>>),
     Adt(usize, Vec<Operand<T>>),
@@ -437,6 +441,17 @@ impl Dumper {
                 self.dump_value(value);
                 println!(";");
             }
+            Statement::Call { func, args, .. } => {
+                self.dump_operand(func);
+                print!("(");
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    self.dump_operand(arg);
+                }
+                print!(")");
+            }
             Statement::Return { value } => {
                 self.dump_indent();
                 print!("return");
@@ -589,17 +604,7 @@ impl Dumper {
                 self.dump_operand(operand);
                 print!(" {}", variant);
             }
-            Value::Call(func, args) => {
-                self.dump_operand(func);
-                print!("(");
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        print!(", ");
-                    }
-                    self.dump_operand(arg);
-                }
-                print!(")");
-            }
+
             Value::Ref(place) => {
                 print!("&");
                 self.dump_place(place);

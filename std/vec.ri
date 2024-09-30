@@ -28,10 +28,10 @@ pub fn push(vec: Vec<'a>, value: 'a) -> Vec<'a>
   )
 
 /// Retrieve element and mutate the vec
-pub fn pop(vec: Vec<'a>)
+pub fn pop(vec: Vec<'a>) -> Result<'a * Vec<'a>, void>
   match vec.size == 0
   | true -> Err(void)
-  | false -> Ok((array:get(vec.data, vec.size - 1), Vec(vec.size - 1, vec.capacity, vec.data)))
+  | false -> Ok((std:array:get(vec.data, vec.size - 1)?, Vec(vec.size - 1, vec.capacity, vec.data)))
 
 /// Access element at index.
 pub fn get(vec: Vec<'a>, index: int) -> Result<'a, void>

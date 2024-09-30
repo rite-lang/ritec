@@ -1,5 +1,6 @@
-import std:vec
-
 fn main(args: [str])
- let v: vec:Vec<str> = vec:new() |> vec:push("hello") |> vec:push("world")
- v |> std:debug:print
+  let v: std:vec:Vec<int> = std:vec:new()
+  let v = std:vec:push(v, 1)
+  let v = std:vec:push(v, 2)
+  let v = std:vec:push(v, 3)
+  v |> std:vec:pop() |> std:debug:print

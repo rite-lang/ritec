@@ -727,6 +727,8 @@ fn build_value(
                 unreachable!("unexpected call: {:?}", func_ty)
             };
 
+            let output = output.as_ref().clone();
+
             if !args.iter().any(Option::is_none) && args.len() == input.len() {
                 let args = args
                     .iter()
@@ -735,10 +737,16 @@ fn build_value(
                     .map(|arg| build_operand(builder, block, arg))
                     .collect::<miette::Result<_>>()?;
 
-                return Ok(rir::Value::Call(func, args));
-            }
+                let temp = builder.make_temp(output);
 
-            let output = output.as_ref().clone();
+                block.statements.push(rir::Statement::Call {
+                    place: temp.clone(),
+                    func,
+                    args,
+                });
+
+                return Ok(rir::Value::Use(rir::Operand::Move(temp)));
+            }
 
             let mut arguments = Vec::new();
             let mut captured = Vec::new();
@@ -812,10 +820,23 @@ fn build_value(
                 ty: func_ty,
             };
 
+            let temp = rir::Place {
+                location: rir::Location::Local(0),
+                projection: Vec::new(),
+                ty: output.clone(),
+            };
+
             let body = rir::Block {
-                statements: vec![rir::Statement::Return {
-                    value: Some(rir::Value::Call(rir::Operand::Copy(func), operands)),
-                }],
+                statements: vec![
+                    rir::Statement::Call {
+                        place: temp.clone(),
+                        func: rir::Operand::Copy(func),
+                        args: operands,
+                    },
+                    rir::Statement::Return {
+                        value: Some(rir::Value::Use(rir::Operand::Move(temp))),
+                    },
+                ],
             };
 
             let func = rir::Func {
@@ -823,8 +844,8 @@ fn build_value(
                 name: String::new(),
                 generics: builder.generics.iter().map(|(_, g)| g.clone()).collect(),
                 input: arguments,
+                locals: vec![rir::Local { ty: output.clone() }],
                 output,
-                locals: Vec::new(),
                 captures,
                 body,
             };
@@ -841,7 +862,7 @@ fn build_value(
             let rhs_ty = builder.build_ty(&rhs.ty)?;
             let rhs = build_operand(builder, block, rhs)?;
 
-            let rir::Ty::Func(ref input, _) = rhs_ty else {
+            let rir::Ty::Func(ref input, ref output) = rhs_ty else {
                 unreachable!("unexpected pipe: {:?}", rhs_ty)
             };
 
@@ -868,7 +889,17 @@ fn build_value(
                     }
                 }
 
-                return Ok(rir::Value::Call(rhs, operands));
+                // Emit a temporary local to safe the results of the call
+                // Return the value of the temporary local
+                let temp = builder.make_temp(output.as_ref().clone());
+
+                block.statements.push(rir::Statement::Call {
+                    place: temp.clone(),
+                    func: rhs,
+                    args: operands,
+                });
+
+                return Ok(rir::Value::Use(rir::Operand::Move(temp)));
             }
 
             let lhs = build_place(builder, block, lhs)?;
@@ -914,7 +945,16 @@ fn build_value(
                 }
             }
 
-            Ok(rir::Value::Call(rhs, operands))
+            // Make function call by assigning to temp variable and returning that.
+            let temp = builder.make_temp(output.as_ref().clone());
+
+            block.statements.push(rir::Statement::Call {
+                place: temp.clone(),
+                func: rhs,
+                args: operands,
+            });
+
+            Ok(rir::Value::Use(rir::Operand::Move(temp)))
         }
 
         hir::ExprKind::Ref(ref expr) => {
