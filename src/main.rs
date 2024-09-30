@@ -84,7 +84,7 @@ fn main() -> miette::Result<()> {
 
     let (main, rir) = compiler.compile(main)?;
 
-    let interpreter = Interpreter::new(&rir);
+    let mut interpreter = Interpreter::new(&rir);
     interpreter.interpret(main);
 
     Ok(())

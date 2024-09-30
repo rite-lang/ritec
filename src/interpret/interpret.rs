@@ -10,7 +10,6 @@ use crate::rir::{
 };
 use crate::{match_value_binary_op, match_value_convert, rir};
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::env;
 use std::iter::Peekable;
 use std::rc::Rc;
@@ -24,37 +23,40 @@ struct Frame {
     captured: Rc<SmallVec<[Value; 4]>>,
 
     func: usize,
-    actions: VecDeque<Action>,
     return_address: NestedProgramCounter,
-    return_value: Option<Value>,
     return_place: Option<Place<Specific>>,
 }
 
 impl Frame {
     fn copy(&mut self, place: &Place<Specific>) -> Value {
-        let mut value = match place.location {
-            Location::Local(i) => self.locals[i].clone(),
-            Location::Argument(i) => self.arguments[i].clone(),
-            Location::Capture(i) => self.captured[i].clone(),
-        };
-
-        for projection in place.projection.iter() {
-            match projection.kind {
-                ProjectionKind::Field { field, .. } => match &value {
-                    Value::Adt((_, fields)) => value = fields[field].clone(),
-                    _ => todo!(),
+        fn recurse<'a>(
+            target: &Value,
+            mut projection: Peekable<impl Iterator<Item = &'a Projection<Specific>>>,
+        ) -> Value {
+            match projection.next() {
+                Some(proj) => match proj.kind {
+                    ProjectionKind::Field { field, .. } => match target {
+                        Value::Adt((_, fields)) => recurse(&fields[field], projection),
+                        _ => panic!("Matched non-adt value {:?}", target),
+                    },
+                    ProjectionKind::Deref => {
+                        let Value::Ref(ref target) = target else {
+                            panic!("expected mutable reference");
+                        };
+                        recurse(&target.borrow(), projection)
+                    }
                 },
-                ProjectionKind::Deref => {
-                    let Value::Ref(mut_value) = value else {
-                        panic!("expected mutable reference");
-                    };
-
-                    value = mut_value.borrow().clone();
-                }
+                None => target.clone(),
             }
         }
 
-        value
+        let value = match place.location {
+            Location::Local(i) => &self.locals[i],
+            Location::Argument(i) => &self.arguments[i],
+            Location::Capture(i) => &self.captured[i],
+        };
+
+        recurse(value, place.projection.iter().peekable())
     }
 
     fn assign(&mut self, place: &Place<Specific>, value: Value) {
@@ -91,17 +93,6 @@ impl Frame {
 
         recurse(target, value, place.projection.iter().peekable());
     }
-}
-
-#[derive(Debug)]
-enum Action {
-    Enter {
-        place: Place<Specific>,
-        func: usize,
-        args: Vec<Value>,
-        captures: Rc<SmallVec<[Value; 4]>>,
-    },
-    Exit,
 }
 
 #[derive(Clone, Debug)]
@@ -238,6 +229,8 @@ enum ControlFlow {
 
 pub struct Interpreter<'a> {
     rir: &'a Unit<Specific>,
+    pc: NestedProgramCounter,
+    stack: Vec<Frame>,
     builtins: IntrinsicMap,
 }
 
@@ -245,11 +238,13 @@ impl<'a> Interpreter<'a> {
     pub fn new(rir: &'a Unit<Specific>) -> Self {
         Self {
             rir,
+            pc: NestedProgramCounter::new(),
+            stack: Vec::new(),
             builtins: IntrinsicMap::new(rir),
         }
     }
 
-    pub(crate) fn interpret(&self, main: usize) -> Value {
+    pub(crate) fn interpret(&mut self, main: usize) -> Value {
         let args = env::args().map(Value::String).collect();
         let args = Value::list_from_vec(args);
 
@@ -260,160 +255,138 @@ impl<'a> Interpreter<'a> {
             arguments: vec![args],
             captured: Rc::new(SmallVec::new()),
             func: main,
-            actions: VecDeque::new(),
             return_address: NestedProgramCounter::new(),
-            return_value: None,
             return_place: None,
         };
 
-        let mut pc = NestedProgramCounter::new();
-        let mut stack = vec![frame];
-        let mut last_value = Value::void();
+        self.stack.push(frame);
 
         loop {
-            let Some(frame) = stack.last_mut() else {
+            let Some(frame) = self.stack.last() else {
                 break;
             };
 
             // If no actions are pending we continue interpreting the current function.
-            let Some(action) = frame.actions.pop_front() else {
-                let func = &self.rir.funcs[frame.func];
+            let func = &self.rir.funcs[frame.func];
 
-                // If we reached the end of the function, exit.
-                if pc.is_at_end(&func.body) {
-                    panic!(
-                        "End of function without return invalid program counter! {:?}",
-                        pc
-                    );
-                }
+            if let Some(builtin) = self.builtins.map.get(&frame.func) {
+                // Take ownership of the frame and call builtin without closing args.
+                let frame = self.stack.pop().unwrap();
+                let value = builtin(func, frame.arguments);
 
-                if let Some(builtin) = self.builtins.map.get(&frame.func) {
-                    frame.return_value = Some(builtin(func, frame.arguments.clone()));
-                    frame.actions.push_back(Action::Exit);
-                    continue;
-                }
+                // We restore the program counter from the previous frame.
+                self.pc = frame.return_address;
 
-                let block = pc.restore_block(&func.body);
-
-                match self.interpret_block(frame, block, &mut pc) {
-                    // End of block, continue to the next block.
-                    Err(ControlFlow::Yield) => {}
-                    Err(ControlFlow::StackTrace(message)) => {
-                        for frame in stack.iter() {
-                            let func = &self.rir.funcs[frame.func];
-
-                            println!("Function: {}", func.name);
-                            println!("Pc: {}", frame.return_address.current());
-                        }
-
-                        panic!("Stack trace: {}", message);
-                    }
-                    _ => {
-                        if pc.pcs.len() > 1 {
-                            pc.pop();
-                            pc.increment();
-                            pc.needs_restore = true;
-                        }
-                    }
+                // Assign the return value to the return place.
+                if let (Some(place), Some(current_frame)) =
+                    (frame.return_place, self.stack.last_mut())
+                {
+                    current_frame.assign(&place, value);
                 }
 
                 continue;
-            };
+            }
 
-            match action {
-                Action::Enter {
-                    place,
-                    func,
-                    args,
-                    captures,
-                } => {
-                    let specific_func = &self.rir.funcs[func];
-                    let locals_count = specific_func.locals.len();
+            assert!(
+                !self.pc.is_at_end(&func.body),
+                "End of function without return"
+            );
 
-                    // The saved program counter will start at the next instruction.
-                    let mut saved_pc = pc.store();
-                    saved_pc.increment();
+            let block = self.pc.restore_block(&func.body);
+            let flag = self.interpret_block(block);
 
-                    stack.push(Frame {
-                        locals: vec![Value::void(); locals_count],
-                        arguments: args,
-                        captured: captures,
-                        func,
-                        actions: VecDeque::new(),
-                        return_address: saved_pc,
-                        return_value: None,
-                        return_place: Some(place.clone()),
-                    });
-
-                    // We fully reset the program counter to call the next function.
-                    pc.reset();
+            match flag {
+                // End of block, continue to the next block.
+                Err(ControlFlow::Yield) => {}
+                Err(ControlFlow::StackTrace(message)) => {
+                    panic!("{}", message);
                 }
-                Action::Exit => {
-                    let frame = stack.pop().unwrap();
-                    // We store the return value from the last frame.
-                    last_value = frame.return_value.unwrap();
-
-                    // We restore the program counter from the previous frame.
-                    pc = frame.return_address;
-
-                    // Assign the return value to the return place.
-                    if let (Some(place), Some(current_frame)) =
-                        (frame.return_place, stack.last_mut())
-                    {
-                        current_frame.assign(&place, last_value.clone());
+                _ => {
+                    if self.pc.pcs.len() > 1 {
+                        self.pc.pop();
+                        self.pc.increment();
+                        self.pc.needs_restore = true;
                     }
                 }
             }
+
+            continue;
         }
 
-        last_value
+        Value::void()
     }
 
-    fn interpret_block(
-        &self,
-        frame: &mut Frame,
-        block: &rir::Block<Specific>,
-        pc: &mut NestedProgramCounter,
-    ) -> Result<Value, ControlFlow> {
+    fn enter_frame(
+        &mut self,
+        func: usize,
+        args: Vec<Value>,
+        captures: Rc<SmallVec<[Value; 4]>>,
+        place: Place<Specific>,
+    ) {
+        let specific_func = &self.rir.funcs[func];
+        let locals_count = specific_func.locals.len();
+
+        // The saved program counter will start at the next instruction.
+        let mut saved_pc = self.pc.store();
+        saved_pc.increment();
+
+        self.stack.push(Frame {
+            locals: vec![Value::void(); locals_count],
+            arguments: args,
+            captured: captures,
+            func,
+            return_address: saved_pc,
+            return_place: Some(place.clone()),
+        });
+
+        // We fully reset the program counter to call the next function.
+        self.pc.reset();
+    }
+
+    fn exit_frame(&mut self, value: Value) {
+        // We store the return value from the last frame.
+        let frame = self.stack.pop().unwrap();
+
+        // We restore the program counter from the previous frame.
+        self.pc = frame.return_address;
+
+        // Assign the return value to the return place.
+        if let (Some(place), Some(current_frame)) = (frame.return_place, self.stack.last_mut()) {
+            current_frame.assign(&place, value);
+        }
+    }
+
+    fn interpret_block(&mut self, block: &rir::Block<Specific>) -> Result<Value, ControlFlow> {
         for (i, statement) in block.statements.iter().enumerate() {
-            if i < pc.current() {
+            if i < self.pc.current() {
                 continue;
             }
 
             // We increment the program counter after each statement
             // as we use the program counter to index into the block.
-            pc.set(i);
+            self.pc.set(i);
 
             match statement {
                 Statement::Use { value } => {
-                    self.interpret_value(frame, value);
+                    self.interpret_value(value);
                 }
                 Statement::Call {
                     place, args, func, ..
                 } => {
-                    let Value::Func((func, captures)) = self.interpret_operand(frame, func) else {
+                    let Value::Func((func, captures)) = self.interpret_operand(func) else {
                         panic!("expected function")
                     };
 
-                    let args = args
-                        .iter()
-                        .map(|op| self.interpret_operand(frame, op))
-                        .collect();
+                    let args = args.iter().map(|op| self.interpret_operand(op)).collect();
 
-                    frame.actions.push_back(Action::Enter {
-                        place: place.clone(),
-                        func,
-                        args,
-                        captures,
-                    });
+                    self.enter_frame(func, args, captures, place.clone());
 
                     return Err(ControlFlow::Yield);
                 }
                 Statement::Return { value } => {
                     if let Some(value1) = value {
-                        let value = self.interpret_value(frame, value1);
-                        frame.return_value = Some(value);
-                        frame.actions.push_back(Action::Exit);
+                        let value = self.interpret_value(value1);
+                        self.exit_frame(value);
                         return Err(ControlFlow::Yield);
                     }
                 }
@@ -421,91 +394,26 @@ impl<'a> Interpreter<'a> {
                     panic!("{}", message);
                 }
                 Statement::Assign { place, value } => {
-                    let value = self.interpret_value(frame, value);
+                    let value = self.interpret_value(value);
+                    let frame = self.stack.last_mut().unwrap();
                     frame.assign(place, value);
                 }
-                Statement::MatchBool {
-                    input,
-                    r#true,
-                    r#false,
-                } => {
-                    let value = self.interpret_operand(frame, input);
-                    let Value::Bool(input) = value else {
-                        panic!("expected boolean got {:?}", value)
-                    };
-
-                    pc.push(0, ProgramCounterPath::Bool { value: input });
-
-                    let block = match input {
-                        true => r#true,
-                        false => r#false,
-                    };
-
-                    match self.interpret_block(frame, block, pc) {
+                Statement::MatchBool { .. } | Statement::MatchAdt { .. } => {
+                    // When we return from a match block statement with a value
+                    // or to the next statement in the block we need to pop the pc
+                    // path to restore its state. When we are calling a function
+                    // or need to get back into the black at a later time we keep the path.
+                    match self.interpret_match_block(statement) {
                         Ok(value) => {
-                            pc.pop();
+                            self.pc.pop();
                             return Ok(value);
                         }
-                        Err(err) => match err {
-                            ControlFlow::Yield => {
-                                return Err(ControlFlow::Yield);
-                            }
-                            ControlFlow::Continue => {
-                                pc.pop();
-                            }
-                            ControlFlow::StackTrace(m) => {
-                                return Err(ControlFlow::StackTrace(m));
-                            }
-                        },
-                    }
-                }
-                Statement::MatchAdt {
-                    input,
-                    variants,
-                    default,
-                } => {
-                    let Value::Adt((variant, _)) = self.interpret_operand(frame, input) else {
-                        return Err(ControlFlow::StackTrace(format!(
-                            "expected adt got {:?}",
-                            input
-                        )));
-                    };
-
-                    // Get the block to execute based on the variant
-                    let block = match (&variants[variant], default) {
-                        (Some(block), _) => {
-                            pc.push(
-                                0,
-                                ProgramCounterPath::Adt {
-                                    variant: Some(variant),
-                                },
-                            );
-
-                            block
+                        Err(ControlFlow::Continue) => {
+                            self.pc.pop();
                         }
-                        (None, Some(block)) => {
-                            pc.push(0, ProgramCounterPath::Adt { variant: None });
-                            block
+                        Err(err) => {
+                            return Err(err);
                         }
-                        _ => panic!("expected either variant or default"),
-                    };
-
-                    match self.interpret_block(frame, block, pc) {
-                        Ok(value) => {
-                            pc.pop();
-                            return Ok(value);
-                        }
-                        Err(err) => match err {
-                            ControlFlow::Yield => {
-                                return Err(ControlFlow::Yield);
-                            }
-                            ControlFlow::Continue => {
-                                pc.pop();
-                            }
-                            ControlFlow::StackTrace(m) => {
-                                return Err(ControlFlow::StackTrace(m));
-                            }
-                        },
                     }
                 }
             };
@@ -514,15 +422,76 @@ impl<'a> Interpreter<'a> {
         Err(ControlFlow::Continue)
     }
 
+    /// Interpret a match statement by choosing the correct block to execute.
+    /// Here we also push the program counter path to the stack.
+    fn interpret_match_block(
+        &mut self,
+        statement: &Statement<Specific>,
+    ) -> Result<Value, ControlFlow> {
+        let block = match statement {
+            Statement::MatchBool {
+                input,
+                r#true,
+                r#false,
+            } => {
+                let value = self.interpret_operand(input);
+                let Value::Bool(input) = value else {
+                    panic!("expected boolean got {:?}", value)
+                };
+
+                self.pc.push(0, ProgramCounterPath::Bool { value: input });
+
+                match input {
+                    true => r#true,
+                    false => r#false,
+                }
+            }
+            Statement::MatchAdt {
+                input,
+                variants,
+                default,
+            } => {
+                let Value::Adt((variant, _)) = self.interpret_operand(input) else {
+                    return Err(ControlFlow::StackTrace(format!(
+                        "expected adt got {:?}",
+                        input
+                    )));
+                };
+
+                // Get the block to execute based on the variant
+                match (&variants[variant], default) {
+                    (Some(block), _) => {
+                        self.pc.push(
+                            0,
+                            ProgramCounterPath::Adt {
+                                variant: Some(variant),
+                            },
+                        );
+
+                        block
+                    }
+                    (None, Some(block)) => {
+                        self.pc.push(0, ProgramCounterPath::Adt { variant: None });
+                        block
+                    }
+                    _ => panic!("expected either variant or default"),
+                }
+            }
+            _ => panic!("unexpected statement"),
+        };
+
+        self.interpret_block(block)
+    }
+
     /// Resolve values from IR to runtime values (and perform logical operations on them).
-    fn interpret_value(&self, frame: &mut Frame, value: &rir::Value<Specific>) -> Value {
+    fn interpret_value(&mut self, value: &rir::Value<Specific>) -> Value {
         match value {
-            rir::Value::Use(operand) => self.interpret_operand(frame, operand),
-            rir::Value::Cast(_, operand) => self.interpret_operand(frame, operand),
+            rir::Value::Use(operand) => self.interpret_operand(operand),
+            rir::Value::Cast(_, operand) => self.interpret_operand(operand),
             rir::Value::Func(index, captures, _) => {
                 let captures = captures
                     .iter()
-                    .map(|op| self.interpret_operand(frame, op))
+                    .map(|op| self.interpret_operand(op))
                     .collect();
 
                 Value::Func((*index, Rc::new(captures)))
@@ -530,7 +499,7 @@ impl<'a> Interpreter<'a> {
             rir::Value::List(items, tail) => {
                 let mut list = match tail {
                     Some(tail) => {
-                        let Value::List(tail) = self.interpret_operand(frame, tail) else {
+                        let Value::List(tail) = self.interpret_operand(tail) else {
                             panic!("expected list")
                         };
 
@@ -540,7 +509,7 @@ impl<'a> Interpreter<'a> {
                 };
 
                 for item in items.iter().rev() {
-                    let item = self.interpret_operand(frame, item);
+                    let item = self.interpret_operand(item);
                     list = Some(Rc::new(List {
                         head: item,
                         tail: list,
@@ -550,29 +519,29 @@ impl<'a> Interpreter<'a> {
                 Value::List(list)
             }
             rir::Value::ListHead(list) => {
-                let Value::List(list) = self.interpret_operand(frame, list) else {
+                let Value::List(list) = self.interpret_operand(list) else {
                     panic!("expected list")
                 };
 
                 list.unwrap().head.clone()
             }
             rir::Value::ListTail(tail) => {
-                let Value::List(list) = self.interpret_operand(frame, tail) else {
+                let Value::List(list) = self.interpret_operand(tail) else {
                     panic!("expected list")
                 };
 
                 Value::List(list.unwrap().tail.clone())
             }
             rir::Value::ListEmpty(tail) => {
-                let Value::List(list) = self.interpret_operand(frame, tail) else {
+                let Value::List(list) = self.interpret_operand(tail) else {
                     panic!("expected list")
                 };
 
                 Value::Bool(list.is_none())
             }
             rir::Value::Binary(op, lhs, rhs) => {
-                let lhs = self.interpret_operand(frame, lhs);
-                let rhs = self.interpret_operand(frame, rhs);
+                let lhs = self.interpret_operand(lhs);
+                let rhs = self.interpret_operand(rhs);
 
                 match op {
                     BinOp::Add => {
@@ -621,7 +590,7 @@ impl<'a> Interpreter<'a> {
                 }
             }
             rir::Value::Unary(op, operand) => {
-                let operand = self.interpret_operand(frame, operand);
+                let operand = self.interpret_operand(operand);
 
                 match op {
                     UnOp::Neg => {
@@ -648,7 +617,7 @@ impl<'a> Interpreter<'a> {
                 }
             }
             rir::Value::IsVariant(value, variant) => {
-                let Value::Adt((current, _)) = self.interpret_operand(frame, value) else {
+                let Value::Adt((current, _)) = self.interpret_operand(value) else {
                     panic!("expected adt")
                 };
 
@@ -656,29 +625,26 @@ impl<'a> Interpreter<'a> {
             }
 
             rir::Value::Ref(place) => {
+                let frame = self.stack.last_mut().unwrap();
                 let value = frame.copy(place);
                 Value::Ref(Rc::new(RefCell::new(value)))
             }
             rir::Value::Tuple(items) => {
-                let items = items
-                    .iter()
-                    .map(|op| self.interpret_operand(frame, op))
-                    .collect();
+                let items = items.iter().map(|op| self.interpret_operand(op)).collect();
 
                 Value::Adt((0, Rc::new(items)))
             }
             rir::Value::Adt(variant, items) => {
-                let items = items
-                    .iter()
-                    .map(|op| self.interpret_operand(frame, op))
-                    .collect();
+                let items = items.iter().map(|op| self.interpret_operand(op)).collect();
 
                 Value::Adt((*variant, Rc::new(items)))
             }
         }
     }
 
-    fn interpret_operand(&self, frame: &mut Frame, operand: &Operand<Specific>) -> Value {
+    fn interpret_operand(&mut self, operand: &Operand<Specific>) -> Value {
+        let frame = self.stack.last_mut().unwrap();
+
         match operand {
             Operand::Copy(place) => frame.copy(place),
             Operand::Move(place) => frame.copy(place),
@@ -686,7 +652,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn interpret_constant(&self, constant: &Constant<Specific>) -> Value {
+    fn interpret_constant(&mut self, constant: &Constant<Specific>) -> Value {
         match constant {
             Constant::Void => Value::void(),
             Constant::Bool(b) => Value::Bool(*b),
