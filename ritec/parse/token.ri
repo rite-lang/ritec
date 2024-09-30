@@ -2,8 +2,12 @@ import std:array
 import std:dict
 import std:list
 import std:string
+import std:result:Result
 
 import ritec:span:Span
+import ritec:diagnostic
+import ritec:diagnostic:Diagnostic
+import ritec:diagnostic:Severity
 
 /// A token stream.
 ///
@@ -28,6 +32,7 @@ pub type Base =
   | Hex
 
 pub type TokenTree =
+  | Eof
   | Doc(level: Doc, comment: str)
   | Snake(snake: str)
   | Pascal(pascal: str)
@@ -37,16 +42,11 @@ pub type TokenTree =
   | Integer(base: Base, integer: int)
   | Punct(punct: Punct)
   | Keyword(keyword: Keyword)
-  | Group(group: Group)
+  | Group(delimiter: Delimiter, tokens: TokenStream)
 
 pub type Doc =
   | Module
   | Item
-
-pub type Group(
-  delimiter: Delimiter
-  tokens: TokenStream
-)
 
 pub type Delimiter =
   | Parentheses
@@ -121,6 +121,149 @@ pub type Punct =
   | Under
   | Pound
   | Question
+
+pub fn format(token: TokenTree) -> str
+  match token
+  | Eof -> "EOF"
+  | Doc(level, comment) -> comment
+  | Snake(snake) -> snake
+  | Pascal(pascal) -> pascal
+  | Path(path) -> string:join(path, ":")
+  | String(string) -> string
+  | Format(start, tokens) -> "{format}"
+  | Integer(_, _) -> "{integer}"
+  | Punct(punct) -> format_punct(punct)
+  | Keyword(keyword) -> format_keyword(keyword)
+  | Group(delimiter, _) ->
+    match delimiter
+    | Parentheses -> "(...)"
+    | Brackets    -> "[...]"
+    | Braces      -> "{...}"
+    | Indent      -> "indent"
+
+pub fn format_keyword(keyword: Keyword) -> str
+  match keyword
+  | As -> "as"
+  | Assert -> "assert"
+  | Bool -> "bool"
+  | F32 -> "f32"
+  | F64 -> "f64"
+  | False -> "false"
+  | Fn -> "fn"
+  | I16 -> "i16"
+  | I32 -> "i32"
+  | I64 -> "i64"
+  | I8 -> "i8"
+  | If -> "if"
+  | Import -> "import"
+  | Int -> "int"
+  | Let -> "let"
+  | Match -> "match"
+  | Mut -> "mut"
+  | Panic -> "panic"
+  | Pub -> "pub"
+  | Pure -> "pure"
+  | Return -> "return"
+  | Str -> "str"
+  | Todo -> "todo"
+  | True -> "true"
+  | Type -> "type"
+  | U16 -> "u16"
+  | U32 -> "u32"
+  | U64 -> "u64"
+  | U8 -> "u8"
+  | Unreachable -> "unreachable"
+  | Void -> "void"
+
+pub fn format_punct(punct: Punct) -> str
+  match punct
+  | Newline -> "newline"
+  | DotDot -> ".."
+  | EqEq -> "=="
+  | NotEq -> "!="
+  | LtEq -> "<="
+  | GtEq -> ">="
+  | AndAnd -> "&&"
+  | OrOr -> "||"
+  | OrGt -> "|>"
+  | Arrow -> "->"
+  | Colon -> ":"
+  | Semi -> ";"
+  | Dot -> "."
+  | Comma -> ","
+  | Eq -> "="
+  | Not -> "!"
+  | And -> "&"
+  | Or -> "|"
+  | Lt -> "<"
+  | Gt -> ">"
+  | Plus -> "+"
+  | Minus -> "-"
+  | Star -> "*"
+  | Slash -> "/"
+  | Percent -> "%"
+  | Quote -> "'"
+  | Under -> "_"
+  | Pound -> "#"
+  | Question -> "?"
+
+pub fn is_eof(stream: TokenStream) -> bool
+  list:is_empty(stream.tokens)
+
+pub fn peek(stream: TokenStream) -> TokenTree * Span
+  peek_nth(stream, 0)
+
+pub fn peek_nth(stream: TokenStream, n: int) -> TokenTree * Span
+  match list:nth(stream.tokens, n)
+  | Ok(token) -> token
+  | Err(_) ->
+    let span = Span(
+      lo:     stream.span.hi
+      hi:     stream.span.hi
+      source: stream.span.source
+    )
+
+    Eof, span
+
+pub fn next(stream: TokenStream) -> TokenTree * Span * TokenStream
+  let token, span = peek(stream)
+  token, span, advance(stream, 1)
+
+pub fn advance(stream: TokenStream, n: int) -> TokenStream
+  let tokens = list:drop(stream.tokens, n)
+  TokenStream(tokens: tokens, ..stream)
+
+pub fn is(stream: TokenStream, expected: TokenTree) -> bool
+  nth_is(stream, 0, expected) 
+
+pub fn nth_is(stream: TokenStream, n: int, expected: TokenTree) -> bool
+  let token, _ = peek_nth(stream, n)
+  token == expected 
+
+pub fn take(
+  stream: TokenStream
+  expected: TokenTree
+) -> Result<TokenTree * Span, void> * TokenStream
+  let token, span = peek(stream)
+  match token == expected
+  | true  -> Ok((token, span)), advance(stream, 1)
+  | false -> Err(void), stream
+
+pub fn expect(
+  stream: TokenStream
+  expected: TokenTree
+) -> Result<TokenTree * Span * TokenStream, Diagnostic>
+  let token, span = peek(stream)
+  match token == expected
+  | true  -> Ok((token, span, advance(stream, 1)))
+  | false ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0003"
+      message:  f"expected {format(expected)}, found {format(token)}"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
 
 pub fn digits()
   []

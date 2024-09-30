@@ -128,8 +128,7 @@ fn lex_tokens(
           )
 
           let stream = TokenStream(tokens, span)
-          let group = token:Group:Group(token:Indent, stream)
-          let token = token:TokenTree:Group(group)
+          let token = Group(token:Indent, stream)
 
           let tokens, lexer = lex_tokens(new_lexer, indents)?
           Ok(([(token, span), ..tokens], lexer))
@@ -176,8 +175,7 @@ fn lex_tokens(
             )
 
             let stream = TokenStream(tokens, span)
-            let group = token:Group:Group(delimiter, stream)
-            let token = token:TokenTree:Group(group)
+            let token = Group(delimiter, stream)
 
             let tokens, lexer = lex_tokens(new_lexer, indents)?
             Ok(([(token, span), ..tokens], lexer))

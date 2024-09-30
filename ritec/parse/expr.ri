@@ -1,0 +1,21 @@
+import std:result:Result
+
+import ritec:diagnostic
+import ritec:diagnostic:Diagnostic
+import ritec:diagnostic:Severity
+import ritec:ast
+
+import token:TokenStream
+
+pub fn parse(stream: TokenStream) -> Result<ast:Expr, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | token -> 
+    diagnostic:new(
+      severity: Error
+      code:     "E0004"
+      message:  f"expected expression, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err

@@ -6,11 +6,21 @@ import std:result:Result
 
 fn main(args: [str])
   let sources = span:new_sources()
-  let source = span:load_source("test/test.ri")?
+  let assert Ok(source) = span:load_source("ritec/parse/lexer.ri")
   let sources, id = span:add_source(sources, source)
 
-  match parse:lexer:lex(id, source.text)
-  | Ok(stream) -> std:debug:print(stream)
+  match run(source.text, id)
+  | Ok(_) -> void
   | Err(report) -> diagnostic:report:print(report, sources)
 
-  Ok(void)
+fn run(text, id) 
+  let stream = parse:lexer:lex(id, text)?
+
+  match parse:expr:parse(stream)
+  | Ok(expr) -> 
+    std:debug:print(expr)
+    Ok(void)
+  | Err(diagnostic) ->
+    diagnostic:report:new()
+    |> diagnostic:report:add(diagnostic)
+    |> Err

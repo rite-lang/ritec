@@ -1,0 +1,189 @@
+import std:result:Result
+
+import span:Span
+import number:IntKind
+
+pub type Decorator(
+  name: str
+  args: [str]
+)
+
+pub type Module(
+  decorators: [Decorator]
+  items:      [Item]
+)
+
+pub type Item =
+  | Import(imp: Import)
+  | Func(func: Func)
+  | Type(ty: Type)
+
+pub type Import(
+  vis:  Vis
+  path: Path
+  span: Span
+)
+
+pub type Func(
+  decorators: [Decorator]
+  vis:        Vis
+  name:       str
+  input:      [Argument]
+  output:     Result<Ty, void>
+  body:       Result<Expr, void>
+  span:       Span
+)
+
+pub type Type =
+  | Adt(adt: Adt)
+  | Single(single: Single)
+
+pub type Adt(
+  decorators: [Decorator]
+  vis:        Vis
+  name:       str
+  generics:   Result<[str], void>
+  variants:   [Variant]
+  span:       Span
+)
+
+pub type Single(
+  decorators: [Decorator]
+  vis:        Vis
+  name:       str
+  generics:   Result<[str], void>
+  fields:     [Field]
+  span:       Span
+)
+
+pub type Variant(
+  name:   str
+  fields: [Field]
+  span:   Span
+)
+
+pub type Field(
+  name: str
+  ty:   Result<Ty, void>
+  span: Span
+)
+
+pub type Vis =
+  | Public
+  | Private
+
+pub type Argument(
+  name: str
+  ty:   Result<Ty, void>
+  span: Span
+)
+
+pub type Ty = 
+  | Infer(span: Span)
+  | Void(span: Span)
+  | Bool(span: Span)
+  | Str(span: Span)
+  | Int(span: Span, kind: IntKind)
+  | Ref(span: Span, ty: Ty)
+  | Tuple(span: Span, tys: [Ty])
+  | List(span: Span, ty: Ty)
+  | Generic(span: Span, name: str)
+  | Func(
+    span:   Span
+    input:  [Argument]
+    output: Result<Ty, void>
+  )
+  | Path(
+    span:     Span
+    path:     Path
+    generics: Result<[Ty], void>
+  )
+
+pub type Expr =
+  | Void(span: Span)
+  | Bool(span: Span, value: bool)
+  | Int(span: Span, value: int)
+  | String(span: Span, value: str)
+  | Paren(span: Span, expr: Expr)
+  | Tuple(span: Span, exprs: [Expr])
+  | Path(span: Span, path: Path)
+  | List(
+    span: Span
+    head: [Expr]
+    tail: Result<Expr, void>
+  )
+  | Block(span: Span, exprs: [Expr])
+  | As(span: Span, expr: Expr, ty: Ty)
+  | Field(span: Span, expr: Expr, field: str)
+  | Call(
+    span:   Span
+    func:   Expr
+    args:   [CallArgument]
+    spread: Result<Expr, void>
+  )
+  | Pipe(span: Span, expr: Expr, func: Expr)
+  | Binary(span: Span, lhs: Expr, op: BinOp, rhs: Expr)
+  | Unary(span: Span, op: UnOp, expr: Expr)
+  | Let(
+    span:       Span
+    is_assert:  bool
+    pat:        Pat
+    ty:         Result<Ty, void>
+    expr:       Expr
+  )
+  | Mut(
+    span: Span
+    name: str
+    ty:   Result<Ty, void>
+    expr: Expr
+  )
+  | Assign(span: Span, lhs: Expr, rhs: Expr)
+  | Match(span: Span, expr: Expr, arms: [Arm])
+  | Closure(span: Span, input: [Argument], body: Expr)
+  | Panic(span: Span, message: Result<str, void>)
+  | Assert(span: Span, expr: Expr, message: Result<str, void>)
+  | Try(span: Span, expr: Expr)
+
+pub type CallArgument =
+  | Positional(expr: Result<Expr, void>)
+  | Named(expr: Result<Expr, void>, name: str)
+
+pub type BinOp =
+  | Add
+  | Sub
+  | Mul
+  | Div
+  | Mod
+  | And
+  | Or
+  | Eq
+  | Ne
+  | Lt
+  | Le
+  | Gt
+  | Ge
+
+pub type UnOp =
+  | Ref
+  | Deref
+  | Neg
+  | Not
+
+pub type Arm(
+  pat:  Pat
+  body: Expr
+  span: Span
+)
+
+pub type Pat =
+  | Wild(span: Span)
+  | Bind(span: Span, name: str)
+  | Bool(span: Span, value: bool)
+  | Tuple(span: Span, pats: [Pat])
+  | Variant(span: Span, path: Path, pats: [Pat])
+  | List(span: Span, head: [Pat], tail: Result<Pat, void>)
+
+pub type Path(
+  segments: [str]
+  span:     Span
+)
