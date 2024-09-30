@@ -269,7 +269,7 @@ impl<'a> Interpreter<'a> {
             // If no actions are pending we continue interpreting the current function.
             let func = &self.rir.funcs[frame.func];
 
-            if let Some(builtin) = self.builtins.map.get(&frame.func) {
+            if let Some(builtin) = self.builtins.map[frame.func] {
                 // Take ownership of the frame and call builtin without closing args.
                 let frame = self.stack.pop().unwrap();
                 let value = builtin(func, frame.arguments);

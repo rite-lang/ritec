@@ -3,7 +3,7 @@ use smallvec::smallvec;
 use crate::interpret::value::{Array, RiteFile, Value};
 use crate::number::IntKind;
 use crate::rir::{Func, Specific, Unit};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap};
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::{fs, io};
@@ -12,12 +12,13 @@ pub type Intrinsic = fn(&Func<Specific>, Vec<Value>) -> Value;
 
 #[repr(transparent)]
 pub struct IntrinsicMap {
-    pub(crate) map: HashMap<usize, Intrinsic>,
+    pub(crate) map: Vec<Option<Intrinsic>>,
 }
 
 impl IntrinsicMap {
     pub fn new(rir: &Unit<Specific>) -> IntrinsicMap {
-        let mut builtins = HashMap::new();
+        let mut builtins = vec![None; rir.funcs.len()];
+
         for (index, value) in rir.funcs.iter().enumerate() {
             // find extern intrinsic decorator.
             let decorator = value.decorators.iter().find(|d| d.name == "language");
@@ -64,7 +65,7 @@ impl IntrinsicMap {
                     _ => continue,
                 };
 
-                builtins.insert(index, func);
+                builtins[index] = Some(func);
             }
         }
 
