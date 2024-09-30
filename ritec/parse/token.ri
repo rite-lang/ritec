@@ -5,24 +5,43 @@ import std:string
 
 import ritec:span:Span
 
+/// A token stream.
+///
+/// The primary data structure used by the parser.
 pub type TokenStream(
   tokens: [TokenTree * Span]
   span: Span
 )
 
+/// A base for integer literals.
 pub type Base =
+  /// A binary integer literal.
   | Bin
+
+  /// An octal integer literal.
   | Oct
+
+  /// A decimal integer literal.
   | Dec
+
+  /// A hexadecimal integer literal.
   | Hex
 
 pub type TokenTree =
+  | Doc(level: Doc, comment: str)
   | Snake(snake: str)
   | Pascal(pascal: str)
+  | Path(path: [str])
+  | String(string: str)
+  | Format(start: str, tokens: [TokenStream * str])
   | Integer(base: Base, integer: int)
   | Punct(punct: Punct)
   | Keyword(keyword: Keyword)
   | Group(group: Group)
+
+pub type Doc =
+  | Module
+  | Item
 
 pub type Group(
   delimiter: Delimiter

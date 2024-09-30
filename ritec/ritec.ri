@@ -6,7 +6,7 @@ import std:result:Result
 
 fn main(args: [str])
   let sources = span:new_sources()
-  let source = span:load_source("std/list.ri")?
+  let source = span:load_source("test/test.ri")?
   let sources, id = span:add_source(sources, source)
 
   match parse:lexer:lex(id, source.text)

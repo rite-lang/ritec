@@ -1,3 +1,5 @@
+use smallvec::smallvec;
+
 use crate::interpret::value::{Array, RiteFile, Value};
 use crate::number::IntKind;
 use crate::rir::{Func, Specific, Unit};
@@ -311,7 +313,7 @@ fn dict_pairs(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
 
     let pairs = dict
         .iter()
-        .map(|(key, value)| Value::Adt((0, vec![key.clone(), value.clone()])))
+        .map(|(key, value)| Value::Adt((0, Rc::new(smallvec![key.clone(), value.clone()]))))
         .collect();
 
     Value::list_from_vec(pairs)
@@ -497,11 +499,11 @@ fn rite_io_error(kind: io::ErrorKind) -> Value {
         _ => 2,
     };
 
-    Value::err(Value::Adt((err, Vec::new())))
+    Value::err(Value::Adt((err, Default::default())))
 }
 
 fn rite_io_error_other() -> Value {
-    Value::err(Value::Adt((2, Vec::new())))
+    Value::err(Value::Adt((2, Default::default())))
 }
 
 fn fs_open(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
@@ -603,7 +605,7 @@ fn fs_list_dir(_: &Func<Specific>, mut args: Vec<Value>) -> Value {
                         0
                     };
 
-                    Value::Adt((variant, vec![Value::String(path)]))
+                    Value::Adt((variant, Rc::new(smallvec![Value::String(path)])))
                 })
                 .collect();
 

@@ -2,11 +2,11 @@ import std:array
 import std:dict
 import std:dict:Dict
 import std:list
-import std:string
-import std:result
-import std:result:Result
 import std:math
 import std:order
+import std:result
+import std:result:Result
+import std:string
 
 import ritec:diagnostic
 import ritec:diagnostic:Diagnostic
@@ -14,12 +14,15 @@ import ritec:diagnostic:report
 import ritec:diagnostic:report:Report
 import ritec:span:Span
 
+import token:Base
+import token:Delimiter
+import token:Doc
 import token:Keyword
 import token:Punct
 import token:TokenStream
 import token:TokenTree
-import token:Base
 
+/// Lex a source file.
 pub fn lex(source: int, text: str) -> Result<TokenStream, Report>
   let lexer = new(source, 0, text)
   match lex_tokens(lexer, [])
@@ -136,10 +139,106 @@ fn lex_tokens(
         let lexer = skip_whitespace(lexer)
         lex_tokens(lexer, indents)
       | false ->
-        match string:is_alphabetic(g) || g == "_"
+        match peek(lexer) == Ok("/") && peek_nth(lexer, 1) == Ok("/")
         | true ->
-          let ident, new_lexer = lex_ident(lexer)
+          let lexer = advance(lexer, 2)
 
+          let level, lexer = match peek(lexer) == Ok("/")
+            | true -> Ok(Item), advance(lexer, 1)
+            | false ->
+              match peek(lexer) == Ok("!")
+              | true -> Ok(Module), advance(lexer, 1)
+              | false -> Err(void), lexer
+
+          let comment, new_lexer = lex_comment(lexer)
+
+          match level
+          | Ok(level) ->
+            let span = Span(
+              lo:     lexer.offset
+              hi:     new_lexer.offset
+              source: lexer.source
+            )
+            
+            let token = token:TokenTree:Doc(level, comment)
+            let tokens, lexer = lex_tokens(new_lexer, indents)?
+            Ok(([(token, span), ..tokens], lexer))
+          | Err(_) -> lex_tokens(new_lexer, indents)
+        | false ->
+          match lex_open_delim(lexer) 
+          | Ok((delimiter, lexer)) ->
+            let tokens, new_lexer = lex_tokens(lexer, indents)?
+
+            let span = Span(
+              lo:     lexer.offset
+              hi:     new_lexer.offset
+              source: lexer.source
+            )
+
+            let stream = TokenStream(tokens, span)
+            let group = token:Group:Group(delimiter, stream)
+            let token = token:TokenTree:Group(group)
+
+            let tokens, lexer = lex_tokens(new_lexer, indents)?
+            Ok(([(token, span), ..tokens], lexer))
+          | Err(_) ->
+            match lex_close_delim(lexer)
+            | Ok((delimiter, lexer)) -> Ok(([], lexer))
+            | Err(_) ->
+              let token, span, lexer = lex_token(lexer, indents, g)?
+              let tokens, lexer = lex_tokens(lexer, indents)?
+              Ok(([(token, span), ..tokens], lexer)) 
+
+fn lex_token(
+  lexer: Lexer
+  indents: [Indent]
+  g: str
+) -> Result<TokenTree * Span * Lexer, Diagnostic>
+  let quote = string:from_bytes(array:from_list([34]))
+  
+  match g == quote
+  | true ->
+    let lexer = advance(lexer, 1)
+    let string, new_lexer = lex_string(lexer)
+
+    let span = Span(
+      lo:     lexer.offset
+      hi:     new_lexer.offset
+      source: lexer.source
+    )
+
+    let token = String(string)
+    Ok((token, span, new_lexer))
+  | false ->
+    match g == "f" && peek_nth(lexer, 1) == Ok(quote)
+    | true ->
+      let lexer = advance(lexer, 2)
+      let string, tokens, new_lexer = lex_format(lexer, indents)?
+
+      let span = Span(
+        lo:     lexer.offset
+        hi:     new_lexer.offset
+        source: lexer.source
+      )
+
+      let token = Format(string, tokens)
+      Ok((token, span, new_lexer))
+    | false ->
+      match is_ident_start(g)
+      | true ->
+        let ident, new_lexer = lex_ident(lexer)
+
+        match lex_path(new_lexer)
+        | Ok((segments, new_lexer)) ->
+          let span = Span(
+            lo:     lexer.offset
+            hi:     new_lexer.offset
+            source: lexer.source
+          )
+
+          let token = Path([ident, ..segments])
+          Ok((token, span, new_lexer)) 
+        | Err(_) ->  
           let span = Span(
             lo:     lexer.offset
             hi:     new_lexer.offset
@@ -153,24 +252,24 @@ fn lex_tokens(
               | true -> Pascal(ident)
               | false -> Snake(ident)
 
-          let tokens, lexer = lex_tokens(new_lexer, indents)?
+          Ok((token, span, new_lexer))
+      | false ->
+        match string:is_numeric(g)
+        | true ->
+          let base, integer, new_lexer = lex_integer(lexer)
 
-          Ok(([(token, span), ..tokens], lexer))
+          let span = Span(
+            lo:     lexer.offset
+            hi:     new_lexer.offset
+            source: lexer.source
+          )
+
+          let token = Integer(base, integer)
+          Ok((token, span, new_lexer))
         | false ->
-          match string:is_numeric(g)
-          | true ->
-            let base, integer, new_lexer = lex_integer(lexer)
-
-            let span = Span(
-              lo:     lexer.offset
-              hi:     new_lexer.offset
-              source: lexer.source
-            )
-
-            let token = Integer(base, integer)
-            let tokens, lexer = lex_tokens(new_lexer, indents)?
-            Ok(([(token, span), ..tokens], lexer))
-          | false ->
+          match lex_punct(lexer) 
+          | Ok(token) -> Ok(token)
+          | Err(_) ->
             let span = Span(
               lo:     lexer.offset
               hi:     lexer.offset + 1
@@ -185,6 +284,80 @@ fn lex_tokens(
             |> diagnostic:add_label("here", span)
             |> Err
 
+fn lex_comment(lexer: Lexer)
+  match peek(lexer) 
+  | Err(_) -> "", lexer
+  | Ok(g) ->
+    match is_newline(g)
+    | true -> "", lexer
+    | false ->
+      let lexer = advance(lexer, 1)
+      let comment, lexer = lex_comment(lexer)
+      string:concat(g, comment), lexer
+
+fn lex_open_delim(lexer: Lexer)
+  match peek(lexer) == Ok("(")
+  | true -> Ok((Parentheses, advance(lexer, 1)))
+  | false ->
+    match peek(lexer) == Ok("[")
+    | true -> Ok((Brackets, advance(lexer, 1)))
+    | false ->
+      match peek(lexer) == Ok("{")
+      | true -> Ok((Braces, advance(lexer, 1)))
+      | false -> Err(void)
+
+fn lex_close_delim(lexer: Lexer)
+  match peek(lexer) == Ok(")")
+  | true -> Ok((Parentheses, advance(lexer, 1)))
+  | false ->
+    match peek(lexer) == Ok("]")
+    | true -> Ok((Brackets, advance(lexer, 1)))
+    | false ->
+      match peek(lexer) == Ok("}")
+      | true -> Ok((Braces, advance(lexer, 1)))
+      | false -> Err(void)
+
+fn lex_punct(lexer) -> Result<TokenTree * Span * Lexer, void>
+  match lex_punct2(lexer), lex_punct1(lexer)
+  | Ok((punct, new_lexer)), _ ->
+    let span = Span(
+      lo:     lexer.offset
+      hi:     new_lexer.offset
+      source: lexer.source
+    )
+
+    let token = Punct(punct)
+    Ok((token, span, new_lexer))
+  | _, Ok((punct, new_lexer)) ->
+    let span = Span(
+      lo:     lexer.offset
+      hi:     new_lexer.offset
+      source: lexer.source
+    )
+
+    let token = Punct(punct)
+    Ok((token, span, new_lexer))
+  | _, _ -> Err(void)
+
+fn lex_punct2(lexer: Lexer)
+  match peek(lexer), peek_nth(lexer, 1)
+  | Ok(g1), Ok(g2) ->
+    match dict:get(lexer.puncts, string:concat(g1, g2))
+    | Ok(punct) -> Ok((punct, advance(lexer, 2)))
+    | Err(_) -> Err(void)
+  | _ -> Err(void)
+
+fn lex_punct1(lexer: Lexer)
+  match peek(lexer)
+  | Err(_) -> Err(void)
+  | Ok(g) ->
+    match dict:get(lexer.puncts, g)
+    | Ok(punct) -> Ok((punct, advance(lexer, 1)))
+    | Err(_) -> Err(void)
+
+fn is_ident_start(g)
+  string:is_alphabetic(g) || g == "_"
+
 fn lex_ident(lexer: Lexer)
   match peek(lexer)
   | Err(_) -> "", lexer
@@ -195,6 +368,72 @@ fn lex_ident(lexer: Lexer)
       let lexer = advance(lexer, 1)
       let ident, lexer = lex_ident(lexer)
       string:concat(g, ident), lexer
+
+fn lex_path(lexer: Lexer) -> Result<[str] * Lexer, void>
+  match peek(lexer) == Ok(":"), result:map(peek_nth(lexer, 1), is_ident_start)
+  | true, Ok(true) ->
+    let lexer = advance(lexer, 1)
+    let ident, lexer = lex_ident(lexer)
+
+    match lex_path(lexer)
+    | Ok((segments, lexer)) -> Ok(([ident, ..segments], lexer))
+    | Err(_) -> Ok(([ident], lexer))
+  | _ -> Err(void)
+
+fn lex_string(lexer: Lexer)
+  let quote = string:from_bytes(array:from_list([34]))
+
+  match peek(lexer)
+  | Err(_) -> "", lexer
+  | Ok(g) ->
+    match g == quote
+    | true -> "", advance(lexer, 1)
+    | false ->
+      let lexer = advance(lexer, 1)
+      let string, lexer = lex_string(lexer)
+      string:concat(g, string), lexer
+
+fn lex_format(lexer, indents) -> Result<str * [TokenStream * str] * Lexer, Diagnostic>
+  let quote = string:from_bytes(array:from_list([34]))
+
+  match peek(lexer) 
+  | Err(_) ->
+    let span = Span(
+      lo:     lexer.offset
+      hi:     lexer.offset
+      source: lexer.source
+    )
+
+    diagnostic:new(
+      severity:  diagnostic:Error
+      code:      "E0003"
+      message:   "unexpected end of file"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+  | Ok(g) ->
+    match g == quote
+    | true -> Ok(("", [], advance(lexer, 1)))
+    | false ->
+      match g == "{"
+      | true ->
+        let lexer = advance(lexer, 1)
+        let tokens, new_lexer = lex_tokens(lexer, indents)?
+
+        let span = Span(
+          lo:     lexer.offset
+          hi:     new_lexer.offset
+          source: lexer.source
+        )
+
+        let token = TokenStream(tokens, span)
+
+        let string, tokens, lexer = lex_format(new_lexer, indents)?
+        Ok(("", [(token, string), ..tokens], lexer))
+      | false ->
+        let lexer = advance(lexer, 1)
+        let string, tokens, lexer = lex_format(lexer, indents)?
+        Ok((string:concat(g, string), tokens, lexer))
 
 fn lex_integer(lexer: Lexer) -> Base * int * Lexer
   let base, lexer = 
@@ -326,11 +565,12 @@ fn expect_indent(lexer: Lexer, g, n)
     diagnostic:new(
       severity:  diagnostic:Error
       code:      "E0002"
-      message:   "expected an indent"
+      message:   "expected a indentation"
     )
     |> diagnostic:add_label("here", span)
     |> Err
 
+/// Skip an empty line.
 fn skip_empty_line(lexer: Lexer)
   let newline = string:from_bytes(array:from_list([10]))
 
@@ -345,10 +585,11 @@ fn skip_empty_line(lexer: Lexer)
   )
   |> result:flatten_err
 
+/// Skip whitespace characters.
 fn skip_whitespace(lexer: Lexer)
   lexer.graphemes, lexer
   |> list:try_fold(|g, lexer|
-    match string:is_whitespace(g)
+    match string:is_whitespace(g) && !is_newline(g)
     | true -> Ok(advance(lexer, 1))
     | false -> Err(lexer)
   )

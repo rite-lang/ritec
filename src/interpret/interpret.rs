@@ -1,3 +1,5 @@
+use smallvec::SmallVec;
+
 use crate::ast::BinOp;
 use crate::hir::UnOp;
 use crate::interpret::builtins::IntrinsicMap;
@@ -19,7 +21,7 @@ use std::rc::Rc;
 struct Frame {
     locals: Vec<Value>,
     arguments: Vec<Value>,
-    captured: Vec<Value>,
+    captured: Rc<SmallVec<[Value; 4]>>,
 
     func: usize,
     actions: VecDeque<Action>,
@@ -64,7 +66,9 @@ impl Frame {
             match projection.next() {
                 Some(proj) => match proj.kind {
                     ProjectionKind::Field { field, .. } => match target {
-                        Value::Adt((_, fields)) => recurse(&mut fields[field], value, projection),
+                        Value::Adt((_, fields)) => {
+                            recurse(&mut Rc::make_mut(fields)[field], value, projection)
+                        }
                         _ => todo!(),
                     },
                     ProjectionKind::Deref => {
@@ -82,7 +86,7 @@ impl Frame {
         let target = match place.location {
             Location::Local(i) => &mut self.locals[i],
             Location::Argument(i) => &mut self.arguments[i],
-            Location::Capture(i) => &mut self.captured[i],
+            Location::Capture(i) => &mut Rc::make_mut(&mut self.captured)[i],
         };
 
         recurse(target, value, place.projection.iter().peekable());
@@ -95,7 +99,7 @@ enum Action {
         place: Place<Specific>,
         func: usize,
         args: Vec<Value>,
-        captures: Vec<Value>,
+        captures: Rc<SmallVec<[Value; 4]>>,
     },
     Exit,
 }
@@ -254,7 +258,7 @@ impl<'a> Interpreter<'a> {
         let frame = Frame {
             locals: vec![Value::void(); self.rir.funcs[main].locals.len()],
             arguments: vec![args],
-            captured: Vec::new(),
+            captured: Rc::new(SmallVec::new()),
             func: main,
             actions: VecDeque::new(),
             return_address: NestedProgramCounter::new(),
@@ -521,7 +525,7 @@ impl<'a> Interpreter<'a> {
                     .map(|op| self.interpret_operand(frame, op))
                     .collect();
 
-                Value::Func((*index, captures))
+                Value::Func((*index, Rc::new(captures)))
             }
             rir::Value::List(items, tail) => {
                 let mut list = match tail {
@@ -661,7 +665,7 @@ impl<'a> Interpreter<'a> {
                     .map(|op| self.interpret_operand(frame, op))
                     .collect();
 
-                Value::Adt((0, items))
+                Value::Adt((0, Rc::new(items)))
             }
             rir::Value::Adt(variant, items) => {
                 let items = items
@@ -669,7 +673,7 @@ impl<'a> Interpreter<'a> {
                     .map(|op| self.interpret_operand(frame, op))
                     .collect();
 
-                Value::Adt((*variant, items))
+                Value::Adt((*variant, Rc::new(items)))
             }
         }
     }

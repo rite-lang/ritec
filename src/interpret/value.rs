@@ -6,6 +6,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc, Mutex};
 use std::{cmp, fs};
 
+use smallvec::{smallvec, SmallVec};
+
 #[derive(Clone, Debug)]
 pub struct RiteFile {
     id: usize,
@@ -57,9 +59,9 @@ macro_rules! type_map {
     (Int) => { isize };
     (Void) => { () };
     (Bool) => { bool };
-    (Func) => { (usize, Vec<Value>) };
+    (Func) => { (usize, Rc<SmallVec<[Value; 4]>>) };
     (List) => { Option<Rc<List>> };
-    (Adt) => { (usize, Vec<Value>) };
+    (Adt) => { (usize, Rc<SmallVec<[Value; 4]>>) };
     (String) => { String };
     (Ref) => { Rc<RefCell<Value>> };
     (Dict) => { Rc<BTreeMap<Value, Value>> };
@@ -258,19 +260,19 @@ impl Value {
     }
 
     pub fn ok(value: Value) -> Value {
-        Value::Adt((0, vec![value]))
+        Value::Adt((0, Rc::new(smallvec![value])))
     }
 
     pub fn err(value: Value) -> Value {
-        Value::Adt((1, vec![value]))
+        Value::Adt((1, Rc::new(smallvec![value])))
     }
 
     pub fn none() -> Value {
-        Value::Adt((1, vec![Value::void()]))
+        Value::Adt((1, Rc::new(smallvec![Value::void()])))
     }
 
-    pub fn tuple(values: Vec<Value>) -> Value {
-        Value::Adt((0, values))
+    pub fn tuple(values: SmallVec<[Value; 4]>) -> Value {
+        Value::Adt((0, Rc::new(values)))
     }
 
     pub fn list_from_vec(values: Vec<Value>) -> Value {
