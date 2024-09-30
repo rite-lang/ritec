@@ -43,6 +43,7 @@ fn main() -> miette::Result<()> {
 
     let name = options.project.file_stem().unwrap();
     let name = name.to_str().unwrap();
+    let name = compiler.interner.intern(name);
 
     let std = compiler.add_dir("std", Path::new("std"))?;
     let module = compiler.add_dir(name, &options.project)?;
@@ -58,8 +59,20 @@ fn main() -> miette::Result<()> {
         },
     };
 
+    let module_import = Import {
+        vis: Vis::Private,
+        kind: ImportKind::Module(module),
+        span: Span {
+            lo: 0,
+            hi: 0,
+            file: "",
+            source: "",
+        },
+    };
+
     for module in &mut compiler.unit.modules {
         module.imports.insert("std", std_import.clone());
+        module.imports.insert(name, module_import.clone());
     }
 
     compiler.lower()?;

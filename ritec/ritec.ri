@@ -1,18 +1,16 @@
+pub import span
+pub import parse
+pub import diagnostic
+
 import std:result:Result
 
 fn main(args: [str])
   let sources = span:new_sources()
-  let sources, id = sources
-    |> span:add_source(span:load_source("test/test.ri")?)
+  let source = span:load_source("std/list.ri")?
+  let sources, id = span:add_source(sources, source)
 
-  let span = span:Span(4, 8, 0)
-
-  let diagnostic = diagnostic:new(
-    diagnostic:Error
-    "E0001"
-    "this is an error"
-  ) |> diagnostic:add_label("this is a label", span)
-
-  diagnostic:print(diagnostic, sources)
+  match parse:lexer:lex(id, source.text)
+  | Ok(stream) -> std:debug:print(stream)
+  | Err(report) -> diagnostic:report:print(report, sources)
 
   Ok(void)

@@ -1,0 +1,355 @@
+import std:array
+import std:dict
+import std:dict:Dict
+import std:list
+import std:string
+import std:result
+import std:result:Result
+import std:math
+import std:order
+
+import ritec:diagnostic
+import ritec:diagnostic:Diagnostic
+import ritec:diagnostic:report
+import ritec:diagnostic:report:Report
+import ritec:span:Span
+
+import token:Keyword
+import token:Punct
+import token:TokenStream
+import token:TokenTree
+import token:Base
+
+pub fn lex(source: int, text: str) -> Result<TokenStream, Report>
+  let lexer = new(source, 0, text)
+  match lex_tokens(lexer, [])
+  | Ok((tokens, lexer)) ->
+    let span = Span(
+      lo:     lexer.start
+      hi:     lexer.offset
+      source: source
+    )
+
+    Ok(TokenStream(tokens, span)) 
+  | Err(e) ->
+    report:new()
+    |> report:add(e)
+    |> Err
+
+type Lexer(
+  source:     int
+  start:      int
+  offset:     int
+  graphemes:  [str]
+  digits:     [str]
+  keywords:   Dict<str, Keyword>
+  puncts:     Dict<str, Punct>
+)
+
+fn new(source, offset, text)
+  Lexer(
+    source:     source
+    start:      offset
+    offset:     offset
+    graphemes:  string:graphemes(text)
+    digits:     token:digits()
+    keywords:   token:keywords()
+    puncts:     token:puncts()
+  )
+
+fn peek(lexer)
+  peek_nth(lexer, 0)
+
+fn peek_nth(lexer: Lexer, n)
+  list:nth(lexer.graphemes, n)
+
+fn next(lexer: Lexer)
+  let grapheme = peek(lexer)?
+  let lexer = advance(lexer, 1)
+  Ok((grapheme, lexer))
+
+fn advance(lexer: Lexer, n: int)
+  let offset = list:take(lexer.graphemes, n), lexer.offset
+    |> list:fold(|g, offset| offset + string:length(g))
+
+  Lexer(
+    offset: offset
+    graphemes: list:drop(lexer.graphemes, n)
+    ..lexer
+  )
+
+type Indent =
+  | Tabs(n: int)
+  | Spaces(n: int)
+
+fn is_newline(g)
+  g == string:from_bytes(array:from_list([10]))
+
+fn lex_tokens(
+  lexer: Lexer
+  indents: [Indent]
+) -> Result<[TokenTree * Span] * Lexer, Diagnostic>  
+  match peek(lexer)
+  | Err(_) -> Ok(([], lexer))
+  | Ok(g) ->
+    match is_newline(g)
+    | true ->
+      let span = Span(
+        lo:     lexer.offset
+        hi:     lexer.offset + 1
+        source: lexer.source
+      )
+
+      let lexer = advance(lexer, 1)
+
+      match skip_empty_line(lexer)
+      | Ok(lexer) -> 
+        let tokens, lexer = lex_tokens(lexer, indents)?
+        Ok(([(Punct(Newline), span), ..tokens], lexer))
+      | Err(_) ->
+        let new_indents, lexer = lex_indents(lexer, indents)?
+
+        match math:cmp(list:length(new_indents), list:length(indents))
+        | order:Lt -> Ok(([], lexer))
+        | order:Eq -> 
+          let tokens, lexer = lex_tokens(lexer, indents)?
+
+          Ok(([(Punct(Newline), span), ..tokens], lexer))
+        | order:Gt ->
+          let tokens, new_lexer = lex_tokens(lexer, new_indents)?
+
+          let span = Span(
+            lo:     lexer.offset
+            hi:     new_lexer.offset
+            source: lexer.source
+          )
+
+          let stream = TokenStream(tokens, span)
+          let group = token:Group:Group(token:Indent, stream)
+          let token = token:TokenTree:Group(group)
+
+          let tokens, lexer = lex_tokens(new_lexer, indents)?
+          Ok(([(token, span), ..tokens], lexer))
+    | false ->
+      match string:is_whitespace(g)
+      | true -> 
+        let lexer = skip_whitespace(lexer)
+        lex_tokens(lexer, indents)
+      | false ->
+        match string:is_alphabetic(g) || g == "_"
+        | true ->
+          let ident, new_lexer = lex_ident(lexer)
+
+          let span = Span(
+            lo:     lexer.offset
+            hi:     new_lexer.offset
+            source: lexer.source
+          )
+
+          let token = match dict:get(lexer.keywords, ident)
+            | Ok(keyword) -> Keyword(keyword)
+            | Err(_) ->
+              match string:is_uppercase(g)
+              | true -> Pascal(ident)
+              | false -> Snake(ident)
+
+          let tokens, lexer = lex_tokens(new_lexer, indents)?
+
+          Ok(([(token, span), ..tokens], lexer))
+        | false ->
+          match string:is_numeric(g)
+          | true ->
+            let base, integer, new_lexer = lex_integer(lexer)
+
+            let span = Span(
+              lo:     lexer.offset
+              hi:     new_lexer.offset
+              source: lexer.source
+            )
+
+            let token = Integer(base, integer)
+            let tokens, lexer = lex_tokens(new_lexer, indents)?
+            Ok(([(token, span), ..tokens], lexer))
+          | false ->
+            let span = Span(
+              lo:     lexer.offset
+              hi:     lexer.offset + 1
+              source: lexer.source
+            )
+
+            diagnostic:new(
+              severity:  diagnostic:Error
+              code:      "E0000"
+              message:   "unexpected character"
+            )
+            |> diagnostic:add_label("here", span)
+            |> Err
+
+fn lex_ident(lexer: Lexer)
+  match peek(lexer)
+  | Err(_) -> "", lexer
+  | Ok(g) ->
+    match string:is_alphanumeric(g) || g == "_"
+    | false -> "", lexer
+    | true ->
+      let lexer = advance(lexer, 1)
+      let ident, lexer = lex_ident(lexer)
+      string:concat(g, ident), lexer
+
+fn lex_integer(lexer: Lexer) -> Base * int * Lexer
+  let base, lexer = 
+    match peek(lexer) == Ok("0") && peek_nth(lexer, 1) == Ok("b")
+    | true -> Bin, advance(lexer, 2)
+    | false ->
+      match peek(lexer) == Ok("0") && peek_nth(lexer, 1) == Ok("o")
+      | true -> Oct, advance(lexer, 2)
+      | false ->
+        match peek(lexer) == Ok("0") && peek_nth(lexer, 1) == Ok("x")
+        | true -> Hex, advance(lexer, 2)
+        | false -> Dec, lexer
+
+  let radix = match base
+    | Bin -> 2
+    | Oct -> 8
+    | Dec -> 10
+    | Hex -> 16
+
+  let integer, lexer = lex_integer_rec(lexer, radix, 0)
+  base, integer, lexer
+
+fn lex_integer_rec(lexer: Lexer, radix, integer)
+  match peek(lexer)
+  | Err(_) -> integer, lexer
+  | Ok(g) ->
+    match list:position(lexer.digits, |d| d == g)
+    | Err(_) -> integer, lexer
+    | Ok(n) ->
+      let lexer = advance(lexer, 1)
+      let integer = integer * radix + n
+      lex_integer_rec(lexer, radix, integer)
+
+fn lex_indents(lexer: Lexer, current: [Indent])
+  mut lexer = lexer
+
+  // we generate a tab character because they cannot currently
+  // be expressed in a string literal
+  let tab = string:from_bytes(array:from_list([9]))
+
+  let result = list:reverse(current), []
+    |> list:try_fold(|indent, indents|
+      match peek(lexer) == Ok(tab) || peek(lexer) == Ok(" ")
+      | false -> Err(Ok(indents))
+      | true ->
+        match indent
+        | Tabs(n) ->
+          lexer = result:map_err(expect_indent(lexer, tab, n), Err)?
+          Ok([Tabs(n), ..indents])
+        | Spaces(n) ->
+          lexer = result:map_err(expect_indent(lexer, " ", n), Err)?
+          Ok([Spaces(n), ..indents])
+    )
+
+  match result
+  | Err(Err(e)) -> Err(e)
+  | Err(Ok(indents)) -> Ok((indents, lexer))
+  | Ok(indents) ->
+    match lex_indent(lexer)?
+    | Err(_) -> Ok((indents, lexer))
+    | Ok((indent, lexer)) -> 
+      let indents = [indent, ..indents]
+      Ok((indents, lexer))
+
+
+fn lex_indent(lexer: Lexer)
+  // if there are no more graphemes, there can be no indent
+  match peek(lexer) 
+  | Err(_) -> Ok(Err(void))
+  | Ok(first) ->
+    // we generate a tab character because they cannot currently
+    // be expressed in a string literal
+    let tab = string:from_bytes(array:from_list([9]))
+
+    // if the first grapheme is a tab or space, then we have an indent
+    match first == tab || first == " "
+    | false -> Ok(Err(void))
+    | true ->
+      // we need to compute the number of graphemes in the indent
+      let result = lexer.graphemes, 0
+        |> list:try_fold(|g, acc|
+          // if the indent contains a mix of tabs and spaces, we
+          // report an error
+          match (g == tab || g == " ") && g != first
+          | true ->
+            let span = Span(
+              lo:     lexer.offset
+              hi:     lexer.offset + acc
+              source: lexer.source
+            )
+
+            diagnostic:new(
+              severity:  diagnostic:Error
+              code:      "E0001"
+              message:   "indentation must be consistent, and cannot mix tabs and spaces"
+            )
+            |> diagnostic:add_label("here", span)
+            |> Err
+            |> Err
+          | false ->
+            // otherwise check if the grapheme is a tab or space
+            // and increment the count
+            match g == tab || g == " "
+            | true -> Ok(acc + 1)
+            | false -> Err(Ok(acc))
+        )
+
+      // return the error if there was one
+      let n = match result
+        | Err(Err(e)) -> Err(e)
+        | Err(Ok(n)) -> Ok(n)
+        | Ok(n) -> Ok(n)
+      let n = n?
+
+      match first == tab
+      | true -> Ok(Ok((Tabs(n), advance(lexer, n))))
+      | false -> Ok(Ok((Spaces(n), advance(lexer, n))))
+
+fn expect_indent(lexer: Lexer, g, n)
+  match list:first(lexer.graphemes) == Ok(g)
+  | true -> Ok(advance(lexer, n))
+  | false ->
+    let span = Span(
+      lo:     lexer.offset
+      hi:     lexer.offset + n
+      source: lexer.source
+    )
+
+    diagnostic:new(
+      severity:  diagnostic:Error
+      code:      "E0002"
+      message:   "expected an indent"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn skip_empty_line(lexer: Lexer)
+  let newline = string:from_bytes(array:from_list([10]))
+
+  lexer.graphemes, lexer
+  |> list:try_fold(|g, lexer|
+    match string:is_whitespace(g)
+    | false -> Err(Err(void))
+    | true ->
+      match g == newline
+      | false -> Ok(advance(lexer, 1))
+      | true -> Err(Ok(lexer))
+  )
+  |> result:flatten_err
+
+fn skip_whitespace(lexer: Lexer)
+  lexer.graphemes, lexer
+  |> list:try_fold(|g, lexer|
+    match string:is_whitespace(g)
+    | true -> Ok(advance(lexer, 1))
+    | false -> Err(lexer)
+  )
+  |> result:unwrap

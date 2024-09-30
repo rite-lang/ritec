@@ -1,0 +1,36 @@
+import std:list
+
+import ritec:span:Sources
+
+import diagnostic:Diagnostic
+
+/// A report of diagnostics.
+pub type Report(
+  /// The diagnostics in the report.
+  diagnostics: [Diagnostic]
+)
+
+/// Create a new report.
+pub fn new() -> Report
+  Report(
+    diagnostics: []
+  )
+
+/// Add a diagnostic to a report.
+pub fn add(report: Report, diagnostic: Diagnostic) -> Report
+  Report(
+    diagnostics: list:append(report.diagnostics, diagnostic)
+  )
+
+/// Merge two reports.
+pub fn merge(a: Report, b: Report) -> Report
+  Report(
+    diagnostics: list:concat(a.diagnostics, b.diagnostics)
+  )
+
+/// Print a report to the console.
+pub fn print(report: Report, sources: Sources)
+  report.diagnostics
+  |> list:each(|diagnostic|
+    diagnostic:print(diagnostic, sources)
+  )

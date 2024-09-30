@@ -27,6 +27,35 @@ pub fn graphemes(s: str) -> [str]
 pub fn split(s: str, sep: str) -> [str]
   panic "string:split builtin not implemented"
 
+/// Check if all characters in a string are whitespace.
+#[language("string:is_whitespace")]
+pub fn is_whitespace(s: str) -> bool
+  panic "string:is_whitespace builtin not implemented"
+
+/// Check if all characters in a string are alphabetic.
+#[language("string:is_alphabetic")]
+pub fn is_alphabetic(s: str) -> bool
+  panic "string:is_alphabetic builtin not implemented"
+
+/// Check if all characters in a string are numeric.
+#[language("string:is_numeric")]
+pub fn is_numeric(s: str) -> bool
+  panic "string:is_numeric builtin not implemented"
+
+/// Check if all characters in a string are alphanumeric.
+pub fn is_alphanumeric(s: str) -> bool
+  is_alphabetic(s) || is_numeric(s)
+
+/// Check if all characters in a string are lowercase.
+#[language("string:is_lowercase")]
+pub fn is_lowercase(s: str) -> bool
+  panic "string:is_lowercase builtin not implemented"
+
+/// Check if all characters in a string are uppercase.
+#[language("string:is_uppercase")]
+pub fn is_uppercase(s: str) -> bool
+  panic "string:is_uppercase builtin not implemented"
+
 /// Split a string into lines.
 pub fn lines(s: str) -> [str]
   let newline = array:from_list([10]) |> from_bytes

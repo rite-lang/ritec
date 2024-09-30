@@ -9,6 +9,9 @@ import std:string
 import span:Sources
 import span:Span
 
+pub import report
+pub import ansi
+
 /// A diagnostic message.
 pub type Diagnostic(
   /// The severity of the diagnostic message.
@@ -143,7 +146,7 @@ pub fn print_label(label: Label, severity: Severity, sources: Sources) -> void
   //  --> path/to/file.rite:1:3
   //
   let space = string:repeat(" ", space_count - 1)
-  let column = span.lo - first.lo + 1
+  let column = (span.lo - first.lo) + 1
   let source_span = f"{source.path}:{first.number + 1}:{column}"
   io:println(f"{space}{ansi:blue("-->")} {source_span}")
 

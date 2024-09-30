@@ -1530,6 +1530,18 @@ fn lower_let(
     let span = pat.span;
     let pat = lower_pat(cx, pat, &value.ty)?;
 
+    let local = cx.locals.len();
+    cx.locals.push(hir::Local {
+        mutable: false,
+        name: "",
+        ty: value.ty.clone(),
+    });
+
+    let input = hir::Expr {
+        kind: hir::ExprKind::Local(local),
+        ty: value.ty.clone(),
+    };
+
     if !is_pat_irrefutable(cx, &pat) {
         return Err(miette::miette!(
             severity = Severity::Error,
@@ -1542,9 +1554,12 @@ fn lower_let(
 
     let mut locals = Vec::new();
 
-    build_pat_destructure(cx, value.clone(), &pat, &mut locals)?;
+    build_pat_destructure(cx, input, &pat, &mut locals)?;
 
-    let mut exprs = Vec::new();
+    let mut exprs = vec![hir::Expr {
+        kind: hir::ExprKind::Let(local, Box::new(value)),
+        ty: hir::Ty::void(span),
+    }];
 
     for (name, expr) in locals {
         let id = cx.locals.len();

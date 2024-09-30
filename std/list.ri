@@ -58,6 +58,12 @@ pub fn repeat(x: 'a, n: int) -> ['a]
   | true -> [x, ..repeat(x, n - 1)]
   | false -> []
 
+/// Create a list from a range.
+pub fn range(start: int, end: int) -> [int]
+  match start < end
+  | true -> [start, ..range(start + 1, end)]
+  | false -> []
+
 /// Reverse a list.
 pub fn reverse(xs: ['a]) -> ['a]
   match xs
@@ -100,10 +106,42 @@ pub fn find(xs: ['a], f: fn('a) -> bool) -> Result<'a, void>
     | false -> find(xs, f)
   | [] -> Err(void)
 
-pub fn fold(xs: ['a], acc: 'b, f: fn('a, 'b) -> 'b) -> 'b
+/// Find the index of the first element of a list that satisfies a predicate.
+pub fn position(xs: ['a], f: fn('a) -> bool) -> Result<int, void>
+  position_from(xs, 0, f)
+
+fn position_from(
+  xs: ['a]
+  n: int
+  f: fn('a) -> bool
+) -> Result<int, void>
+  match xs
+  | [] -> Err(void)
+  | [x, ..xs] ->
+    match f(x)
+    | true -> Ok(n)
+    | false -> position_from(xs, n + 1, f)
+
+pub fn fold(
+  xs: ['a]
+  acc: 'b
+  f: fn('a, 'b) -> 'b
+) -> 'b
   match xs
   | [x, ..xs] -> fold(xs, f(x, acc), f)
   | [] -> acc
+
+pub fn try_fold(
+  xs: ['a]
+  acc: 'b
+  f: fn('a, 'b) -> Result<'b, 'e>
+) -> Result<'b, 'e>
+  match xs
+  | [x, ..xs] ->
+    match f(x, acc)
+    | Err(e) -> Err(e)
+    | Ok(y) -> try_fold(xs, y, f)
+  | [] -> Ok(acc)
 
 /// Take the first n elements of a list.
 pub fn take(xs: ['a], n: int) -> ['a]
@@ -116,12 +154,12 @@ pub fn take(xs: ['a], n: int) -> ['a]
 
 /// Drop the first n elements of a list.
 pub fn drop(xs: ['a], n: int) -> ['a]
-  match xs
-  | [_, ..xs] ->
-    match n > 0
-    | true -> drop(xs, n - 1)
-    | false -> xs
-  | [] -> []
+  match n > 0
+  | false -> xs
+  | true -> 
+    match xs
+    | [_, ..xs] ->  drop(xs, n - 1)
+    | [] -> []
 
 /// Split a list into chunks of size n.
 pub fn chunk(xs: ['a], n: int) -> [['a]]
@@ -154,22 +192,6 @@ pub fn map(xs: ['a], f: fn('a) -> 'b) -> ['b]
   | [x, ..xs] -> [f(x), ..map(xs, f)]
   | [] -> []
 
-/// Map a function over a list with the index of each element.
-pub fn map_enumerate(xs: ['a], f: fn(int, 'a) -> 'b) -> ['b]
-  enumerate(xs)
-  |> map(|pair| 
-    let i, x = pair 
-    f(i, x)
-  )
-
-/// Run a function over each element of a list.
-pub fn each(xs: ['a], f: fn('a) -> void) -> void
-  match xs
-  | [x, ..xs] ->
-    f(x)
-    each(xs, f)
-  | [] -> void
-
 /// Try to map a function over a list.
 /// If the function returns an error, the whole operation fails.
 pub fn try_map(
@@ -182,6 +204,35 @@ pub fn try_map(
     | Err(e) -> Err(e)
     | Ok(y) -> try_map(xs, f) |> result:map(|ys| [y, ..ys])
   | [] -> Ok([])
+
+/// Map a function over a list with the index of each element.
+pub fn map_enumerate(xs: ['a], f: fn(int, 'a) -> 'b) -> ['b]
+  enumerate(xs)
+  |> map(|pair| 
+    let i, x = pair 
+    f(i, x)
+  )
+
+/// Run a function over each element of a list.
+pub fn each(xs: ['a], f: fn('a) -> void) -> void
+  match xs
+  | [] -> void
+  | [x, ..xs] ->
+    f(x)
+    each(xs, f)
+
+/// Try to run a function over each element of a list.
+/// If the function returns an error, the whole operation fails.
+pub fn try_each(
+  xs: ['a]
+  f: fn('a) -> Result<void, 'b>
+) -> Result<void, 'b>
+  match xs
+  | [] -> Ok(void)
+  | [x, ..xs] ->
+    match f(x)
+    | Err(e) -> Err(e)
+    | Ok(_) -> try_each(xs, f)
 
 /// Filter a list.
 pub fn filter(xs: ['a], f: fn('a) -> bool) -> ['a]

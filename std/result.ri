@@ -29,6 +29,24 @@ pub fn is_err(result: Result<'a, 'e>) -> bool
   | Ok(_) -> false
   | Err(_) -> true
 
+/// Take the inner value of a result where ok and error are the same type.
+pub fn unwrap(result: Result<'a, 'a>) -> 'a
+  match result
+  | Ok(ok) -> ok
+  | Err(err) -> err
+
+/// Flatten a result of a result with the same error type.
+pub fn flatten(result: Result<Result<'a, 'e>, 'e>) -> Result<'a, 'e>
+  match result
+  | Ok(inner) -> inner
+  | Err(err) -> Err(err)
+
+/// Flatten a result of a result with the same ok type.
+pub fn flatten_err(result: Result<'a, Result<'a, 'e>>) -> Result<'a, 'e>
+  match result
+  | Ok(ok) -> Ok(ok)
+  | Err(err) -> err
+
 /// Map a function over a result.
 pub fn map(
   result: Result<'a, 'e>
@@ -46,3 +64,12 @@ pub fn try(
   match result
   | Ok(ok) -> f(ok)
   | Err(err) -> Err(err)
+
+/// Map a function over the error of a result.
+pub fn map_err(
+  result: Result<'a, 'e>
+  f: fn('e) -> 'f
+) -> Result<'a, 'f>
+  match result
+  | Ok(ok) -> Ok(ok)
+  | Err(err) -> Err(f(err))

@@ -782,7 +782,7 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
             let span = start.join(end);
             Ok(Pat { kind, span })
         }
-        Token::Snake | Token::Pascal => {
+        Token::Snake | Token::Pascal | Token::Path => {
             let path = parse_path(tokens)?;
 
             if path.segments.len() == 1 && token == Token::Snake {

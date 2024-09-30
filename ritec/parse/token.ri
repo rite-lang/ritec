@@ -1,15 +1,188 @@
+import std:array
+import std:dict
+import std:list
+import std:string
+
+import ritec:span:Span
+
+pub type TokenStream(
+  tokens: [TokenTree * Span]
+  span: Span
+)
+
+pub type Base =
+  | Bin
+  | Oct
+  | Dec
+  | Hex
+
 pub type TokenTree =
-  | Token(token: Token)
+  | Snake(snake: str)
+  | Pascal(pascal: str)
+  | Integer(base: Base, integer: int)
+  | Punct(punct: Punct)
+  | Keyword(keyword: Keyword)
   | Group(group: Group)
 
-pub type Token
-
 pub type Group(
-  delimiter: Delimiter,
-  tokens: [TokenTree]
+  delimiter: Delimiter
+  tokens: TokenStream
 )
 
 pub type Delimiter =
   | Parentheses
   | Brackets
   | Braces
+  | Indent
+
+pub type Keyword =
+  | As
+  | Assert
+  | Bool
+  | F32
+  | F64
+  | False
+  | Fn
+  | I16
+  | I32
+  | I64
+  | I8
+  | If
+  | Import
+  | Int
+  | Let
+  | Match
+  | Mut
+  | Panic
+  | Pub
+  | Pure
+  | Return
+  | Str
+  | Todo
+  | True
+  | Type
+  | U16
+  | U32
+  | U64
+  | U8
+  | Unreachable
+  | Void
+
+pub type Punct =
+  | Newline
+
+  // Double-character punctuations
+  | DotDot
+  | EqEq
+  | NotEq
+  | LtEq
+  | GtEq
+  | AndAnd
+  | OrOr
+  | OrGt
+  | Arrow
+
+  // Single-character punctuations
+  | Colon
+  | Semi
+  | Dot
+  | Comma
+  | Eq
+  | Not
+  | And
+  | Or
+  | Lt
+  | Gt
+  | Plus
+  | Minus
+  | Star
+  | Slash
+  | Percent
+  | Quote
+  | Under
+  | Pound
+  | Question
+
+pub fn digits()
+  []
+  |> list:append("0")
+  |> list:append("1")
+  |> list:append("2")
+  |> list:append("3")
+  |> list:append("4")
+  |> list:append("5")
+  |> list:append("6")
+  |> list:append("7")
+  |> list:append("8")
+  |> list:append("9")
+  |> list:append("a")
+  |> list:append("b")
+  |> list:append("c")
+  |> list:append("d")
+  |> list:append("e")
+  |> list:append("f")
+
+pub fn keywords()
+  dict:new()
+  |> dict:insert("as", Keyword:As)
+  |> dict:insert("assert", Keyword:Assert)
+  |> dict:insert("bool", Keyword:Bool)
+  |> dict:insert("f32", Keyword:F32)
+  |> dict:insert("f64", Keyword:F64)
+  |> dict:insert("false", Keyword:False)
+  |> dict:insert("fn", Keyword:Fn)
+  |> dict:insert("i16", Keyword:I16)
+  |> dict:insert("i32", Keyword:I32)
+  |> dict:insert("i64", Keyword:I64)
+  |> dict:insert("i8", Keyword:I8)
+  |> dict:insert("if", Keyword:If)
+  |> dict:insert("import", Keyword:Import)
+  |> dict:insert("int", Keyword:Int)
+  |> dict:insert("let", Keyword:Let)
+  |> dict:insert("match", Keyword:Match)
+  |> dict:insert("mut", Keyword:Mut)
+  |> dict:insert("panic", Keyword:Panic)
+  |> dict:insert("pub", Keyword:Pub)
+  |> dict:insert("pure", Keyword:Pure)
+  |> dict:insert("return", Keyword:Return)
+  |> dict:insert("str", Keyword:Str)
+  |> dict:insert("todo", Keyword:Todo)
+  |> dict:insert("true", Keyword:True)
+  |> dict:insert("type", Keyword:Type)
+  |> dict:insert("u16", Keyword:U16)
+  |> dict:insert("u32", Keyword:U32)
+  |> dict:insert("u64", Keyword:U64)
+  |> dict:insert("u8", Keyword:U8)
+  |> dict:insert("unreachable", Keyword:Unreachable)
+  |> dict:insert("void", Keyword:Void)
+
+pub fn puncts()
+  dict:new()
+  |> dict:insert("..", Punct:DotDot)
+  |> dict:insert("==", Punct:EqEq)
+  |> dict:insert("!=", Punct:NotEq)
+  |> dict:insert("<=", Punct:LtEq)
+  |> dict:insert(">=", Punct:GtEq)
+  |> dict:insert("&&", Punct:AndAnd)
+  |> dict:insert("||", Punct:OrOr)
+  |> dict:insert("|>", Punct:OrGt)
+  |> dict:insert("->", Punct:Arrow)
+  |> dict:insert(":", Punct:Colon)
+  |> dict:insert(";", Punct:Semi)
+  |> dict:insert(".", Punct:Dot)
+  |> dict:insert(",", Punct:Comma)
+  |> dict:insert("=", Punct:Eq)
+  |> dict:insert("!", Punct:Not)
+  |> dict:insert("&", Punct:And)
+  |> dict:insert("|", Punct:Or)
+  |> dict:insert("<", Punct:Lt)
+  |> dict:insert(">", Punct:Gt)
+  |> dict:insert("+", Punct:Plus)
+  |> dict:insert("-", Punct:Minus)
+  |> dict:insert("*", Punct:Star)
+  |> dict:insert("/", Punct:Slash)
+  |> dict:insert("%", Punct:Percent)
+  |> dict:insert("'", Punct:Quote)
+  |> dict:insert("_", Punct:Under)
+  |> dict:insert("#", Punct:Pound)
+  |> dict:insert("?", Punct:Question)
