@@ -119,6 +119,7 @@ fn lex_tokens(
 
           Ok(([(Punct(Newline), span), ..tokens], lexer))
         | order:Gt ->
+          let newline = Punct(Newline), span
           let tokens, new_lexer = lex_tokens(lexer, new_indents)?
 
           let span = Span(
@@ -131,7 +132,7 @@ fn lex_tokens(
           let token = Group(token:Indent, stream)
 
           let tokens, lexer = lex_tokens(new_lexer, indents)?
-          Ok(([(token, span), ..tokens], lexer))
+          Ok(([newline, (token, span), ..tokens], lexer))
     | false ->
       match string:is_whitespace(g)
       | true -> 
@@ -165,20 +166,43 @@ fn lex_tokens(
           | Err(_) -> lex_tokens(new_lexer, indents)
         | false ->
           match lex_open_delim(lexer) 
-          | Ok((delimiter, lexer)) ->
-            let tokens, new_lexer = lex_tokens(lexer, indents)?
+          | Ok((delimiter, new_lexer)) ->
+            let tokens, new_lexer = lex_tokens(new_lexer, indents)?
 
             let span = Span(
               lo:     lexer.offset
-              hi:     new_lexer.offset
+              hi:     new_lexer.offset + 1
               source: lexer.source
             )
 
             let stream = TokenStream(tokens, span)
             let token = Group(delimiter, stream)
 
-            let tokens, lexer = lex_tokens(new_lexer, indents)?
-            Ok(([(token, span), ..tokens], lexer))
+            let close_delimiter = match delimiter
+              | Parentheses -> ")"
+              | Brackets    -> "]"
+              | Braces      -> "}"
+              | _ -> panic "unreachable"
+
+            match peek(new_lexer) == Ok(close_delimiter)
+            | true ->
+              let lexer = advance(new_lexer, 1)
+              let tokens, lexer = lex_tokens(lexer, indents)?
+              Ok(([(token, span), ..tokens], lexer))
+            | false ->
+              let span = Span(
+                lo:     new_lexer.offset
+                hi:     new_lexer.offset + 1
+                source: lexer.source
+              )
+
+              diagnostic:new(
+                severity:  diagnostic:Error
+                code:      "E0004"
+                message:   f"expected `{close_delimiter}`"
+              )
+              |> diagnostic:add_label("here", span)
+              |> Err
           | Err(_) ->
             match lex_close_delim(lexer)
             | Ok((delimiter, lexer)) -> Ok(([], lexer))
@@ -306,18 +330,18 @@ fn lex_open_delim(lexer: Lexer)
 
 fn lex_close_delim(lexer: Lexer)
   match peek(lexer) == Ok(")")
-  | true -> Ok((Parentheses, advance(lexer, 1)))
+  | true -> Ok((Parentheses, lexer))
   | false ->
     match peek(lexer) == Ok("]")
-    | true -> Ok((Brackets, advance(lexer, 1)))
+    | true -> Ok((Brackets, lexer))
     | false ->
       match peek(lexer) == Ok("}")
-      | true -> Ok((Braces, advance(lexer, 1)))
+      | true -> Ok((Braces, lexer))
       | false -> Err(void)
 
 fn lex_punct(lexer) -> Result<TokenTree * Span * Lexer, void>
-  match lex_punct2(lexer), lex_punct1(lexer)
-  | Ok((punct, new_lexer)), _ ->
+  match lex_punct2(lexer)
+  | Ok((punct, new_lexer)) ->
     let span = Span(
       lo:     lexer.offset
       hi:     new_lexer.offset
@@ -326,16 +350,18 @@ fn lex_punct(lexer) -> Result<TokenTree * Span * Lexer, void>
 
     let token = Punct(punct)
     Ok((token, span, new_lexer))
-  | _, Ok((punct, new_lexer)) ->
-    let span = Span(
-      lo:     lexer.offset
-      hi:     new_lexer.offset
-      source: lexer.source
-    )
+  | Err(_) ->
+    match lex_punct1(lexer)
+    | Ok((punct, new_lexer)) ->
+      let span = Span(
+        lo:     lexer.offset
+        hi:     new_lexer.offset
+        source: lexer.source
+      )
 
-    let token = Punct(punct)
-    Ok((token, span, new_lexer))
-  | _, _ -> Err(void)
+      let token = Punct(punct)
+      Ok((token, span, new_lexer))
+    | Err(_) -> Err(void)
 
 fn lex_punct2(lexer: Lexer)
   match peek(lexer), peek_nth(lexer, 1)

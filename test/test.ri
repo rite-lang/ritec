@@ -1,8 +1,3 @@
-fn main(args: [str])
-  let v: std:vec:Vec<int> = std:vec:new()
-  let v = std:vec:push(v, 1)
-  let v = std:vec:push(v, 2)
-  let v = std:vec:push(v, 3)
-  v |> std:vec:pop() |> std:debug:print
-
-  f"asdf{"hello"}asdf" |> std:debug:print
+|test, test2|
+  [void]
+  [void]

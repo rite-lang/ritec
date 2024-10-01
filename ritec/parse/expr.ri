@@ -4,18 +4,266 @@ import ritec:diagnostic
 import ritec:diagnostic:Diagnostic
 import ritec:diagnostic:Severity
 import ritec:ast
+import ritec:span
+import ritec:span:Span
 
 import token:TokenStream
+import token:TokenTree
+import token:Keyword
+import token:Punct
+import token:Delimiter
 
-pub fn parse(stream: TokenStream) -> Result<ast:Expr, Diagnostic>
+pub fn parse_block(
+  stream: TokenStream
+) -> Result<ast:Expr * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
 
   match token
-  | token -> 
+  | Punct(Newline) -> parse_block(token:advance(stream, 1))
+  | Group(Indent, tokens) ->
+    let stream = token:advance(stream, 1)
+    let exprs, _ = parse_block_rec(tokens)?
+    Ok((ast:Expr:Block(span, exprs), stream))
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0009"
+      message:  f"expected block, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_block_rec(
+  stream: TokenStream
+) -> Result<[ast:Expr] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Eof -> Ok(([], stream))
+  | Punct(Newline) -> 
+    let stream = token:advance(stream, 1)
+    parse_block_rec(stream)
+  | _ ->
+    let expr, stream = parse(stream, true)?
+    let exprs, stream = parse_block_rec(stream)?
+    Ok(([expr, ..exprs], stream))
+
+pub fn parse(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | token -> parse_closure(stream, multiline)
+
+fn parse_closure(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Punct(Or) -> 
+    let stream = token:advance(stream, 1)
+    let args, stream = parse_closure_args(stream)?
+    parse_closure_body(stream, args)
+  | Punct(OrOr) ->
+    let stream = token:advance(stream, 1)
+    parse_closure_body(stream, [])
+  | _ -> parse_binary(stream, multiline)
+
+fn parse_closure_args(
+  stream: TokenStream
+) -> Result<[ast:Argument] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Punct(Or) -> Ok(([], stream))
+  | _ ->
+    let arg, stream = parse_closure_arg(stream)?
+
+    match token:next(stream)
+    | Punct(Comma), _, stream -> 
+      let args, stream = parse_closure_args(stream)?
+      Ok(([arg, ..args], stream))
+    | Punct(Or), _, stream -> Ok(([arg], stream))
+    | token, _, _ ->
+      diagnostic:new(
+        severity: Error
+        code:     "E0003"
+        message:  f"expected `,`, found `{token:format(token)}`"
+      )
+      |> diagnostic:add_label("here", span)
+      |> Err
+
+fn parse_closure_arg(
+  stream: TokenStream
+) -> Result<ast:Argument * TokenStream, Diagnostic>
+  let name, name_span, stream = ritec:parse:parse_snake(stream)?
+
+  let token, span = token:peek(stream)
+  match token
+  | Punct(Colon) -> panic ""
+  | _ -> 
+    let arg = ast:Argument(name, Err(void), name_span)
+    Ok((arg, stream))
+
+fn parse_closure_body(
+  stream: TokenStream
+  args: [ast:Argument]
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Punct(Newline) ->
+    let body, stream = parse_block(stream)?
+    Ok((ast:Expr:Closure(span, args, body), stream))
+  | _ -> 
+    let body, stream = parse_binary(stream, false)?
+    Ok((ast:Expr:Closure(span, args, body), stream))
+
+fn parse_binary(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  parse_term(stream, multiline)
+
+fn parse_term(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Keyword(Void)         -> parse_void(stream)
+  | Keyword(Panic)        -> parse_panic(stream)
+  | Group(Parentheses, _) -> parse_paren(stream, multiline)
+  | Group(Brackets, _)    -> parse_list(stream, multiline)
+  | Snake(_)              -> parse_path(stream)
+  | Pascal(_)             -> parse_path(stream)
+  | Path(_)               -> parse_path(stream) 
+  | token ->
     diagnostic:new(
       severity: Error
       code:     "E0004"
       message:  f"expected expression, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_void(stream: TokenStream) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Keyword(Void))?
+  Ok((ast:Expr:Void(span), stream))
+
+fn parse_panic(stream: TokenStream) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let start, stream = token:expect(stream, Keyword(Panic))?
+
+  let message, span, stream = match parse_string(stream)
+    | Ok((message, end, stream)) ->
+      Ok(message), span:join(start, end), stream
+    | Err(_) ->
+      Err(void), start, stream
+
+  Ok((ast:Expr:Panic(span, message), stream))
+
+fn parse_path(
+  stream: TokenStream
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let path, stream = ritec:parse:parse_path(stream)?
+  Ok((ast:Expr:Path(path.span, path), stream))
+
+fn parse_paren(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+  
+  match token
+  | Group(Parentheses, tokens) ->
+    let expr, tokens = parse(tokens, multiline)?
+
+    match token:peek(tokens)
+    | Eof, _  -> Ok((ast:Expr:Paren(span, expr), stream))
+    | token, _ ->
+      let token, span = token:peek(tokens)
+      diagnostic:new(
+        severity: Error
+        code:     "E0007"
+        message:  f"expected `)`, found `{token:format(token)}`"
+      )
+      |> diagnostic:add_label("here", span)
+      |> Err
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0006"
+      message:  f"expected `(`, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_list(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Group(Brackets, tokens) ->
+    let head, tail, list_stream = parse_list_args(tokens, multiline)?
+    match token:peek(list_stream)
+    | Eof, _ -> Ok((ast:Expr:List(span, head, tail), stream))
+    | token, _ ->
+      let token, span = token:peek(stream)
+      diagnostic:new(
+        severity: Error
+        code:     "E0008"
+        message:  f"expected `]`, found `{token:format(token)}`"
+      )
+      |> diagnostic:add_label("here", span)
+      |> Err
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0008"
+      message:  f"expected `[`, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_list_args(
+  stream: TokenStream
+  multiline: bool
+) -> Result<[ast:Expr] * Result<ast:Expr, void> * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Eof -> Ok(([], Err(void), stream)) 
+  | Punct(DotDot) ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse(stream, false)?
+    Ok(([], Ok(expr), stream))
+  | _ ->
+    let expr, stream = parse_binary(stream, false)?
+    let token, span = token:peek(stream)
+    match token
+    | Punct(Comma) -> 
+      let stream = token:advance(stream, 1)
+      let head, tail, stream = parse_list_args(stream, multiline)?
+      Ok(([expr, ..head], tail, stream))
+    | _ -> Ok(([expr], Err(void), stream))
+
+fn parse_string(stream: TokenStream) -> Result<str * Span * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | String(string) -> Ok((string, span, token:advance(stream, 1)))
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0005"
+      message:  f"expected string, found `{token:format(token)}`"
     )
     |> diagnostic:add_label("here", span)
     |> Err

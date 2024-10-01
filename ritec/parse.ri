@@ -1,2 +1,49 @@
 pub import token
 pub import lexer
+pub import item
+pub import expr
+
+import std:result:Result
+
+import ritec:ast
+import ritec:diagnostic
+import ritec:diagnostic:Diagnostic
+import ritec:diagnostic:Severity
+import ritec:span:Span
+
+import token:TokenTree
+import token:TokenStream
+
+pub fn parse_path(
+  stream: TokenStream
+) -> Result<ast:Path * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Snake(name) -> Ok((ast:Path:Path([name], span), stream))
+  | Pascal(name) -> Ok((ast:Path:Path([name], span), stream))
+  | Path(segments) -> Ok((ast:Path:Path(segments, span), stream))
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0009"
+      message:  f"expected path, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+pub fn parse_snake(
+  stream: TokenStream
+) -> Result<str * Span * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Snake(name) -> Ok((name, span, stream))
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "E0009"
+      message:  f"expected snake, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err

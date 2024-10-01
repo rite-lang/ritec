@@ -252,10 +252,10 @@ pub fn take(
 pub fn expect(
   stream: TokenStream
   expected: TokenTree
-) -> Result<TokenTree * Span * TokenStream, Diagnostic>
+) -> Result<Span * TokenStream, Diagnostic>
   let token, span = peek(stream)
   match token == expected
-  | true  -> Ok((token, span, advance(stream, 1)))
+  | true  -> Ok((span, advance(stream, 1)))
   | false ->
     diagnostic:new(
       severity: Error
