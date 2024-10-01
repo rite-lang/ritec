@@ -27,7 +27,7 @@ pub fn parse_block(
   | token ->
     diagnostic:new(
       severity: Error
-      code:     "E0009"
+      code:     "expected:block"
       message:  f"expected block, found `{token:format(token)}`"
     )
     |> diagnostic:add_label("here", span)
@@ -146,7 +146,7 @@ fn parse_term(
   | token ->
     diagnostic:new(
       severity: Error
-      code:     "E0004"
+      code:     "expected:expression"
       message:  f"expected expression, found `{token:format(token)}`"
     )
     |> diagnostic:add_label("here", span)
@@ -262,7 +262,7 @@ fn parse_string(stream: TokenStream) -> Result<str * Span * TokenStream, Diagnos
   | token ->
     diagnostic:new(
       severity: Error
-      code:     "E0005"
+      code:     "expected:string"
       message:  f"expected string, found `{token:format(token)}`"
     )
     |> diagnostic:add_label("here", span)

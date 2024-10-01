@@ -212,7 +212,7 @@ fn get_lines(text, lo, hi)
       let line_lo = offset
       let line_hi = offset + string:length(line)
 
-      let line = match line_lo <= lo && hi <= line_hi
+      let line = match line_lo <= hi && lo <= line_hi
         | true  -> Ok(Line(number, line_lo, line_hi, line))
         | false -> Err(void)
 
