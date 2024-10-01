@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    hash::Hash,
+    hash::{Hash, Hasher},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -139,7 +139,7 @@ pub struct Generic {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub enum Ty {
     Inferred(Tid, Inferred, Option<usize>, Span),
     Partial(Part, Vec<Ty>, Span),
@@ -147,6 +147,57 @@ pub enum Ty {
     Tuple(Box<Ty>, usize, Span),
     Call(Box<Ty>, Vec<Option<Ty>>, Span),
     Pipe(Box<Ty>, Box<Ty>, Vec<Option<Ty>>, Span),
+}
+
+impl PartialEq for Ty {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Ty::Inferred(a, b, c, _), Ty::Inferred(d, e, f, _)) => a == d && b == e && c == f,
+            (Ty::Partial(a, b, _), Ty::Partial(c, d, _)) => a == c && b == d,
+            (Ty::Field(a, b, _), Ty::Field(c, d, _)) => a == c && b == d,
+            (Ty::Tuple(a, b, _), Ty::Tuple(c, d, _)) => a == c && b == d,
+            (Ty::Call(a, b, _), Ty::Call(c, d, _)) => a == c && b == d,
+            (Ty::Pipe(a, b, c, _), Ty::Pipe(d, e, f, _)) => a == d && b == e && c == f,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Ty {}
+
+impl Hash for Ty {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+
+        match self {
+            Ty::Inferred(tid, inferred, func, _) => {
+                tid.hash(state);
+                inferred.hash(state);
+                func.hash(state);
+            }
+            Ty::Partial(part, args, _) => {
+                part.hash(state);
+                args.hash(state);
+            }
+            Ty::Field(base, field, _) => {
+                base.hash(state);
+                field.hash(state);
+            }
+            Ty::Tuple(base, index, _) => {
+                base.hash(state);
+                index.hash(state);
+            }
+            Ty::Call(callee, arguments, _) => {
+                callee.hash(state);
+                arguments.hash(state);
+            }
+            Ty::Pipe(lhs, rhs, arguments, _) => {
+                lhs.hash(state);
+                rhs.hash(state);
+                arguments.hash(state);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
