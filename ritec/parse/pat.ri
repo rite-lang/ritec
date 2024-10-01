@@ -18,19 +18,19 @@ import token:Keyword
 import token:Punct
 
 /// Parse optional list of nested patterns
-pub fn parse_pat(
+pub fn parse(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
-  let pat, stream = parse_pat_term(stream)?
+  let pat, stream = parse_term(stream)?
 
   match token:peek(stream)
   | (Punct(Comma), _) ->
-    let pats, span, stream = parse_pat_rec(stream, pat.span, [pat])?
+    let pats, span, stream = parse_rec(stream, pat.span, [pat])?
     Ok((Tuple(span, pats), stream))
   | _ -> Ok((pat, stream))
 
 /// Parse a list of patterns
-pub fn parse_pat_rec(
+pub fn parse_rec(
   stream: TokenStream
   span:   Span
   acc:    [Pat]
@@ -38,28 +38,28 @@ pub fn parse_pat_rec(
   match token:peek(stream)
   | (Punct(Comma), _) ->
     let stream = token:advance(stream, 1)
-    let pat, stream = parse_pat_term(stream)?
-    parse_pat_rec(stream, span:join(span, pat.span), list:append(acc, pat))
+    let pat, stream = parse_term(stream)?
+    parse_rec(stream, span:join(span, pat.span), list:append(acc, pat))
   | _ -> Ok((acc, span, stream))
 
 /// Parse a single pattern that is optionally nested
-fn parse_pat_term(
+fn parse_term(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
 
   match token
   | Group(Parentheses, group_stream) ->
-    let pat, _ = parse_pat_term_tuple(group_stream)?
+    let pat, _ = parse_term_tuple(group_stream)?
     Ok((pat, token:advance(stream, 1)))
   | Group(Brackets,    group_stream) ->
-    let pat, _ = parse_pat_term_list(group_stream, span)?
+    let pat, _ = parse_term_list(group_stream, span)?
     Ok((pat, token:advance(stream, 1)))
-  | Keyword(True)                    -> parse_pat_term_bool(stream)
-  | Keyword(False)                   -> parse_pat_term_bool(stream)
-  | Snake(_)                         -> parse_pat_term_bind_simple(stream)
-  | Pascal(_)                        -> parse_pat_term_bind_path(stream)
-  | Path(_)                          -> parse_pat_term_bind_path(stream)
+  | Keyword(True)                    -> parse_term_bool(stream)
+  | Keyword(False)                   -> parse_term_bool(stream)
+  | Snake(_)                         -> parse_term_bind_simple(stream)
+  | Pascal(_)                        -> parse_term_bind_path(stream)
+  | Path(_)                          -> parse_term_bind_path(stream)
   | Punct(Under)                     -> Ok((Wild(span), token:advance(stream, 1)))
   | _                                ->
     diagnostic:new(
@@ -71,14 +71,14 @@ fn parse_pat_term(
     |> Err
 
 /// Parse inner tuple pattern (seperated by commas)
-fn parse_pat_term_tuple(
+fn parse_term_tuple(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
-  let pat, _ = parse_pat(stream)?
+  let pat, _ = parse(stream)?
   Ok((pat, token:advance(stream, 1)))
 
 /// Parse list destructuring pattern
-fn parse_pat_term_list(
+fn parse_term_list(
   stream: TokenStream
   span:  Span
 ) -> Result<Pat * TokenStream, Diagnostic>
@@ -87,7 +87,7 @@ fn parse_pat_term_list(
   let pats, stream =
     match token:peek(stream)
     | Eof, _ -> [], stream
-    | _ -> parse_pat_term_list_rec(stream, [])?
+    | _ -> parse_term_list_rec(stream, [])?
 
   // if we ended at a .. we can either output a wildcard when
   // no binding is specified, otherwise can parse the remaining pattern.
@@ -98,7 +98,7 @@ fn parse_pat_term_list(
       Ok(Wild(inner_span)), token:advance(stream, 1)
     | (Punct(DotDot), _), _ ->
       let _, span, stream = token:next(stream)
-      let pat, stream = parse_pat_term(stream)?
+      let pat, stream = parse_term(stream)?
       Ok(pat), stream
     | _ -> Err(void), stream
 
@@ -118,7 +118,7 @@ fn parse_pat_term_list(
 
 /// Keep parsing comma seperated patterns until we hit the rest
 /// when we see .. (DotDot) or the end of the grouped stream
-fn parse_pat_term_list_rec(
+fn parse_term_list_rec(
   stream: TokenStream
   acc:    [Pat]
 ) -> Result<[Pat] * TokenStream, Diagnostic>
@@ -128,13 +128,13 @@ fn parse_pat_term_list_rec(
   | Punct(DotDot) -> Ok((acc, stream))
   | Eof           -> Ok((acc, stream))
   | _ ->
-    let pat, stream = parse_pat_term(stream)?
+    let pat, stream = parse_term(stream)?
     let acc = list:append(acc, pat)
     let token, span = token:peek(stream)
-    parse_pat_term_list_rec(token:advance(stream, 1), acc)
+    parse_term_list_rec(token:advance(stream, 1), acc)
 
 /// Path to variant
-fn parse_pat_term_bind_path(
+fn parse_term_bind_path(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
   let path = ritec:parse:parse_path(stream)?
@@ -144,7 +144,7 @@ fn parse_pat_term_bind_path(
   panic "TODO"
 
 /// Simple binds with variable name
-fn parse_pat_term_bind_simple(
+fn parse_term_bind_simple(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
   let token, span, stream = token:next(stream)
@@ -154,7 +154,7 @@ fn parse_pat_term_bind_simple(
   | _           -> panic "expected snake case identifier"
 
 /// Parse boolean literal pattern
-fn parse_pat_term_bool(
+fn parse_term_bool(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
   let token, span, stream = token:next(stream)
