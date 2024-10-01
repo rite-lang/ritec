@@ -249,6 +249,16 @@ pub fn take(
   | true  -> Ok((token, span)), advance(stream, 1)
   | false -> Err(void), stream
 
+/// Keep taking tokens (and drop them) until we no longer see it
+/// for instance newlines.
+pub fn take_all(
+  stream: TokenStream
+  expected: TokenTree
+) -> TokenStream
+  match take(stream, expected)
+  | Ok(_), stream -> take_all(stream, expected)
+  | Err(_), stream -> stream
+
 pub fn expect(
   stream: TokenStream
   expected: TokenTree

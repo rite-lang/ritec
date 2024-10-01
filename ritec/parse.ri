@@ -20,9 +20,9 @@ pub fn parse_path(
   let token, span, stream = token:next(stream)
 
   match token
-  | Snake(name) -> Ok((ast:Path:Path([name], span), stream))
-  | Pascal(name) -> Ok((ast:Path:Path([name], span), stream))
-  | Path(segments) -> Ok((ast:Path:Path(segments, span), stream))
+  | Snake(name) -> Ok((ast:Path:Path(span, [name]), stream))
+  | Pascal(name) -> Ok((ast:Path:Path(span, [name]), stream))
+  | Path(segments) -> Ok((ast:Path:Path(span, segments), stream))
   | token ->
     diagnostic:new(
       severity: Error

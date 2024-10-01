@@ -170,9 +170,9 @@ pub type UnOp =
   | Not
 
 pub type Arm(
+  span: Span
   pat:  Pat
   body: Expr
-  span: Span
 )
 
 pub type Pat =
@@ -184,6 +184,6 @@ pub type Pat =
   | List(span: Span, head: [Pat], tail: Result<Pat, void>)
 
 pub type Path(
-  segments: [str]
   span:     Span
+  segments: [str]
 )

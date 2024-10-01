@@ -56,6 +56,7 @@ pub fn parse(
 
   match token
   | Keyword(Assert) -> parse_assert(stream)
+  | Keyword(Match)  -> parse_match(stream, multiline)
   | token -> parse_assign(stream, multiline)
 
 fn parse_assert(
@@ -429,6 +430,85 @@ fn parse_call_args_multiline(
     )
     |> diagnostic:add_label("here", span)
     |> Err
+
+fn is_arm(stream: TokenStream) -> bool
+  match (token:peek(stream), token:peek_nth(stream, 1))
+  | ((Punct(Or), _), _) -> true
+  | ((Punct(Newline), _), (Punct(Or), _)) -> true
+  | _ -> false
+
+/// Parse a match expression.
+pub fn parse_match(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Keyword(Match))?
+  let input, stream = parse(stream, multiline)?
+
+  let arms, stream =
+    match multiline
+    | true  -> parse_match_arms(stream)?
+    | false -> parse_match_block(stream)?
+
+  Ok((ast:Match(span, input, arms), stream))
+
+/// If the match cannot exist on multiple lines
+/// we must expect a block before parsing the arms.
+fn parse_match_block(
+  stream: TokenStream
+) -> Result<[ast:Arm] * TokenStream, Diagnostic>
+    let span, stream = token:expect(stream, Punct(Newline))?
+
+    match token:next(stream)
+    | Group(Indent, _), _, stream ->
+      let arms, stream = parse_match_arms(stream)?
+      let stream = token:take_all(stream, Punct(Newline))
+      Ok((arms, stream))
+
+    | _ ->
+      diagnostic:new(
+        severity: Error
+        code:     "expected:indent"
+        message:  "expected indented block"
+      )
+      |> diagnostic:add_label("here", span)
+      |> Err
+
+/// Parse match arms
+fn parse_match_arms(
+  stream: TokenStream
+) -> Result<[ast:Arm] * TokenStream, Diagnostic>
+  parse_match_arms_rec(stream, [])
+
+/// Collect arms as long as arms are present.
+fn parse_match_arms_rec(
+  stream: TokenStream
+  acc: [ast:Arm]
+) -> Result<[ast:Arm] * TokenStream, Diagnostic>
+  match is_arm(stream)
+  | true ->
+    let arm, stream = parse_match_arm(stream)?
+    parse_match_arms_rec(stream, [arm, ..acc])
+  | false -> Ok((acc, stream))
+
+fn parse_match_arm(
+  stream: TokenStream
+) -> Result<ast:Arm * TokenStream, Diagnostic>
+  let stream = match token:peek(stream)
+    | Punct(Newline), _ -> token:advance(stream, 1)
+    | _ -> stream
+
+  let start, stream = token:expect(stream, Punct(Or))?
+  let pat, stream = pat:parse_pat(stream)?
+  let end, stream = token:expect(stream, Punct(Arrow))?
+  let s = span:join(start, end)
+
+  let block, stream =
+    match token:peek(stream)
+    | Punct(Newline), _ -> parse_block(stream)?
+    | _ -> parse(stream, false)?
+
+  Ok((ast:Arm(s, pat, block), stream))
 
 fn parse_call_args_multiline_rec(
   stream: TokenStream

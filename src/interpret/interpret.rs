@@ -287,7 +287,7 @@ impl<'a> Interpreter<'a> {
                 continue;
             }
 
-            assert!(
+            debug_assert!(
                 !self.pc.is_at_end(&func.body),
                 "End of function without return"
             );

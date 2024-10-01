@@ -9,7 +9,6 @@ clap = { version = "4.5", features = ["derive"] }
 miette = { version = "7.2", features = ["fancy"] }
 
 [profile.release]
-lto = true
 codegen-units = 1
 opt-level = 3
-debug = true
+debug = false

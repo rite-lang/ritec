@@ -1,0 +1,165 @@
+//! Parse a match pattern for destructuring and match arms.
+import std:list
+import std:result
+import std:result:Result
+
+import ritec:ast:Pat
+import ritec:parse
+import ritec:span
+import ritec:span:Span
+import ritec:diagnostic
+import ritec:diagnostic:Severity
+import ritec:diagnostic:Diagnostic
+
+import token:TokenStream
+import token:TokenTree
+import token:Delimiter
+import token:Keyword
+import token:Punct
+
+/// Parse optional list of nested patterns
+pub fn parse_pat(
+  stream: TokenStream
+) -> Result<Pat * TokenStream, Diagnostic>
+  let pat, stream = parse_pat_term(stream)?
+
+  match token:peek(stream)
+  | (Punct(Comma), _) ->
+    let pats, span, stream = parse_pat_rec(stream, pat.span, [pat])?
+    Ok((Tuple(span, pats), stream))
+  | _ -> Ok((pat, stream))
+
+/// Parse a list of patterns
+pub fn parse_pat_rec(
+  stream: TokenStream
+  span:   Span
+  acc:    [Pat]
+) -> Result<[Pat] * Span * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | (Punct(Comma), _) ->
+    let stream = token:advance(stream, 1)
+    let pat, stream = parse_pat_term(stream)?
+    parse_pat_rec(stream, span:join(span, pat.span), list:append(acc, pat))
+  | _ -> Ok((acc, span, stream))
+
+/// Parse a single pattern that is optionally nested
+fn parse_pat_term(
+  stream: TokenStream
+) -> Result<Pat * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Group(Parentheses, group_stream) ->
+    let pat, _ = parse_pat_term_tuple(group_stream)?
+    Ok((pat, token:advance(stream, 1)))
+  | Group(Brackets,    group_stream) ->
+    let pat, _ = parse_pat_term_list(group_stream, span)?
+    Ok((pat, token:advance(stream, 1)))
+  | Keyword(True)                    -> parse_pat_term_bool(stream)
+  | Keyword(False)                   -> parse_pat_term_bool(stream)
+  | Snake(_)                         -> parse_pat_term_bind_simple(stream)
+  | Pascal(_)                        -> parse_pat_term_bind_path(stream)
+  | Path(_)                          -> parse_pat_term_bind_path(stream)
+  | Punct(Under)                     -> Ok((Wild(span), token:advance(stream, 1)))
+  | _                                ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:pat"
+      message:  f"expected pattern, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Parse inner tuple pattern (seperated by commas)
+fn parse_pat_term_tuple(
+  stream: TokenStream
+) -> Result<Pat * TokenStream, Diagnostic>
+  let pat, _ = parse_pat(stream)?
+  Ok((pat, token:advance(stream, 1)))
+
+/// Parse list destructuring pattern
+fn parse_pat_term_list(
+  stream: TokenStream
+  span:  Span
+) -> Result<Pat * TokenStream, Diagnostic>
+  // parse list of patterns, if the group stream
+  // is empty we return an empty list
+  let pats, stream =
+    match token:peek(stream)
+    | Eof, _ -> [], stream
+    | _ -> parse_pat_term_list_rec(stream, [])?
+
+  // if we ended at a .. we can either output a wildcard when
+  // no binding is specified, otherwise can parse the remaining pattern.
+  // rest is optional and is expressed as a Result<Pat, void> (optional)
+  let rest, stream =
+    match token:peek(stream), token:peek_nth(stream, 1)
+    | (Punct(DotDot), inner_span), (Eof, _) ->
+      Ok(Wild(inner_span)), token:advance(stream, 1)
+    | (Punct(DotDot), _), _ ->
+      let _, span, stream = token:next(stream)
+      let pat, stream = parse_pat_term(stream)?
+      Ok(pat), stream
+    | _ -> Err(void), stream
+
+  // we need to have consumed the entire group at this point
+  let token, last_span = token:peek(stream)
+  match token
+  | Eof ->
+    Ok((List(span, pats, rest), stream))
+  | _ ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:pat"
+      message:  f"expected rest or end of list, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", last_span)
+    |> Err
+
+/// Keep parsing comma seperated patterns until we hit the rest
+/// when we see .. (DotDot) or the end of the grouped stream
+fn parse_pat_term_list_rec(
+  stream: TokenStream
+  acc:    [Pat]
+) -> Result<[Pat] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Punct(DotDot) -> Ok((acc, stream))
+  | Eof           -> Ok((acc, stream))
+  | _ ->
+    let pat, stream = parse_pat_term(stream)?
+    let acc = list:append(acc, pat)
+    let token, span = token:peek(stream)
+    parse_pat_term_list_rec(token:advance(stream, 1), acc)
+
+/// Path to variant
+fn parse_pat_term_bind_path(
+  stream: TokenStream
+) -> Result<Pat * TokenStream, Diagnostic>
+  let path = ritec:parse:parse_path(stream)?
+
+  path |> std:debug:print
+
+  panic "TODO"
+
+/// Simple binds with variable name
+fn parse_pat_term_bind_simple(
+  stream: TokenStream
+) -> Result<Pat * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Snake(name) -> Ok((Bind(span, name), stream))
+  | _           -> panic "expected snake case identifier"
+
+/// Parse boolean literal pattern
+fn parse_pat_term_bool(
+  stream: TokenStream
+) -> Result<Pat * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Keyword(True)  -> Ok((Pat:Bool(span, true), stream))
+  | Keyword(False) -> Ok((Pat:Bool(span, false), stream))
+  | _              -> panic "expected boolean keyword"
