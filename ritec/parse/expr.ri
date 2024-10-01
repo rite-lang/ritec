@@ -55,7 +55,117 @@ pub fn parse(
   let token, span = token:peek(stream)
 
   match token
-  | token -> parse_closure(stream, multiline)
+  | Keyword(Assert) -> parse_assert(stream)
+  | token -> parse_assign(stream, multiline)
+
+fn parse_assert(
+  tokens: TokenStream
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let span, stream = token:expect(tokens, Keyword(Assert))?
+  let expr, stream = parse(stream, false)?
+
+  match token:peek(stream)
+  | String(message), span ->
+    let stream = token:advance(stream, 1)
+    Ok((ast:Expr:Assert(span, expr, Ok(message)), stream))
+  | _ -> Ok((ast:Expr:Assert(span, expr, Err(void)), stream))
+
+fn parse_assign(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let lhs, stream = parse_pipe(stream, multiline)?
+  let token, span = token:peek(stream)
+
+  match token
+  | Punct(Eq) ->
+    let stream = token:advance(stream, 1)
+    let rhs, stream = parse(stream, multiline)?
+    Ok((ast:Expr:Assign(span, lhs, rhs), stream))
+  | _ -> Ok((lhs, stream))
+
+fn parse_pipe(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let lhs, stream = parse_tuple(stream, multiline)?
+
+  match token:is(stream, Punct(OrGt))
+  | true  ->
+    let funcs, stream = parse_pipe_funcs(stream)?
+    Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+  | false ->
+    match multiline
+    | true  ->
+      match is_pipe_multiline(stream)
+      | true  ->
+        let funcs, stream = parse_pipe_funcs_multiline(stream)?
+        Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+      | false -> Ok((lhs, stream))
+    | false ->
+      match token:peek(stream), token:peek_nth(stream, 1)
+      | (Punct(Newline), _), (Group(Indent, tokens), _) ->
+        let stream = token:advance(stream, 2)
+        let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
+        let _, tokens = token:expect(tokens, Punct(Newline))?
+        let _, tokens = token:expect(tokens, Eof)?
+        Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+      | _ -> Ok((lhs, stream))
+
+fn parse_pipe_funcs(
+  stream: TokenStream
+) -> Result<[ast:Expr] * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Punct(OrGt), _ ->
+    let stream = token:advance(stream, 1)
+    let func, stream = parse_unary(stream, false)?
+    let funcs, stream = parse_pipe_funcs(stream)?
+    Ok(([func, ..funcs], stream))
+  | _ -> Ok(([], stream))
+
+fn parse_pipe_funcs_multiline(
+  stream: TokenStream
+) -> Result<[ast:Expr] * TokenStream, Diagnostic>
+  match is_pipe_multiline(stream)
+  | true  ->
+    let stream = token:advance(stream, 2)
+    let func, stream = parse_unary(stream, true)?
+    let funcs, stream = parse_pipe_funcs_multiline(stream)?
+    Ok(([func, ..funcs], stream))
+  | false ->
+    match token:is(stream, Punct(OrGt))
+    | true  ->
+      let stream = token:advance(stream, 1)
+      let func, stream = parse_unary(stream, false)?
+      let funcs, stream = parse_pipe_funcs_multiline(stream)?
+      Ok(([func, ..funcs], stream))
+    | false -> Ok(([], stream))
+
+fn is_pipe_multiline(stream: TokenStream) -> bool
+  token:is(stream, Punct(Newline)) && token:nth_is(stream, 1, Punct(OrGt))
+
+fn parse_tuple(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let first, stream = parse_closure(stream, multiline)?
+
+  match parse_tuple_rec(stream)?
+  | [], stream -> Ok((first, stream))
+  | [..exprs], stream -> 
+    let exprs = [first, ..exprs]
+    Ok((ast:Expr:Tuple(first.span, exprs), stream))
+
+fn parse_tuple_rec(
+  stream: TokenStream
+) -> Result<[ast:Expr] * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Punct(Comma), _ ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse_closure(stream, false)?
+    let exprs, stream = parse_tuple_rec(stream)?
+    Ok(([expr, ..exprs], stream))
+  | _ -> Ok(([], stream))
 
 fn parse_closure(
   stream: TokenStream
@@ -127,7 +237,290 @@ fn parse_binary(
   stream: TokenStream
   multiline: bool
 ) -> Result<ast:Expr * TokenStream, Diagnostic>
-  parse_term(stream, multiline)
+  let lhs, stream = parse_as(stream, multiline)?
+
+  match parse_binop(stream)
+  | Err(_) -> Ok((lhs, stream))
+  | Ok((lop, stream)) ->
+    let rhs, stream = parse_binary(stream, multiline)?
+
+    match rhs
+    | ast:Expr:Binary(span, mid, rop, rhs) ->
+      match binop_precedence(lop) < binop_precedence(rop)
+      | true ->
+        let rhs = ast:Expr:Binary(
+          span:join(mid.span, rhs.span)
+          mid
+          rop
+          rhs
+        )
+
+        let expr = ast:Expr:Binary(
+          span:join(lhs.span, rhs.span)
+          lhs
+          lop
+          rhs
+        )
+
+        Ok((expr, stream))
+      | false ->
+        let expr = ast:Expr:Binary(
+          span:join(lhs.span, rhs.span)
+          lhs
+          lop
+          rhs
+        )
+
+        Ok((expr, stream))
+    | rhs ->
+      let expr = ast:Expr:Binary(
+        span:join(lhs.span, rhs.span)
+        lhs
+        lop
+        rhs
+      )
+
+      Ok((expr, stream))
+
+fn parse_binop(
+  stream: TokenStream
+) -> Result<ast:BinOp * TokenStream, void>
+  let token, _, stream = token:next(stream)
+
+  match token
+  | Punct(Plus)     -> Ok((ast:BinOp:Add, stream))
+  | Punct(Minus)    -> Ok((ast:BinOp:Sub, stream))
+  | Punct(Star)     -> Ok((ast:BinOp:Mul, stream))
+  | Punct(Slash)    -> Ok((ast:BinOp:Div, stream))
+  | Punct(Percent)  -> Ok((ast:BinOp:Mod, stream))
+  | Punct(AndAnd)   -> Ok((ast:BinOp:And, stream))
+  | Punct(OrOr)     -> Ok((ast:BinOp:Or,  stream))
+  | Punct(EqEq)     -> Ok((ast:BinOp:Eq,  stream))
+  | Punct(NotEq)    -> Ok((ast:BinOp:Ne,  stream))
+  | Punct(Lt)       -> Ok((ast:BinOp:Lt,  stream))
+  | Punct(LtEq)     -> Ok((ast:BinOp:Le,  stream))
+  | Punct(Gt)       -> Ok((ast:BinOp:Gt,  stream))
+  | Punct(GtEq)     -> Ok((ast:BinOp:Ge,  stream))
+  | _ -> Err(void)
+
+fn binop_precedence(op: ast:BinOp) -> int
+  match op
+  | ast:Add -> 1
+  | ast:Sub -> 1
+  | ast:Mul -> 2
+  | ast:Div -> 2
+  | ast:Mod -> 2
+  | ast:And -> 3
+  | ast:Or  -> 3
+  | ast:Eq  -> 4
+  | ast:Ne  -> 4
+  | ast:Lt  -> 5
+  | ast:Le  -> 5
+  | ast:Gt  -> 5
+  | ast:Ge  -> 5
+
+fn parse_as(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  parse_unary(stream, multiline)
+  
+fn parse_unary(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Punct(And), span ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse_unary(stream, multiline)?
+    Ok((ast:Expr:Unary(span, ast:UnOp:Ref, expr), stream))
+  | Punct(Star), span ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse_unary(stream, multiline)?
+    Ok((ast:Expr:Unary(span, ast:UnOp:Deref, expr), stream))
+  | Punct(Minus), span ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse_unary(stream, multiline)?
+    Ok((ast:Expr:Unary(span, ast:UnOp:Neg, expr), stream))
+  | Punct(Not), span ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse_unary(stream, multiline)?
+    Ok((ast:Expr:Unary(span, ast:UnOp:Not, expr), stream))
+  | _ -> parse_try(stream, multiline)
+
+fn parse_try(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let expr, stream = parse_call(stream, multiline)?
+  parse_try_rec(stream, expr)
+
+fn parse_try_rec(
+  stream: TokenStream
+  expr: ast:Expr
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Punct(Question), span ->
+    let stream = token:advance(stream, 1)
+    let span = span:join(expr.span, span)
+    let expr = ast:Expr:Try(span, expr)
+    parse_try_rec(stream, expr)
+  | _ -> Ok((expr, stream))
+
+fn parse_call(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let func, stream = parse_field(stream, multiline)?
+
+  match token:peek(stream)
+  | Group(Parentheses, tokens), span -> 
+    let args, spread, _ = match token:peek(tokens)
+      | Punct(Newline), _ -> parse_call_args_multiline(tokens)?
+      | _                 -> parse_call_args(tokens)?
+
+    let stream = token:advance(stream, 1)
+    let span = span:join(func.span, tokens.span)
+    Ok((ast:Expr:Call(span, func, args, spread), stream))
+  | _ -> Ok((func, stream))
+
+fn parse_call_args(
+  stream: TokenStream
+) -> Result<[ast:CallArgument] * Result<ast:Expr, void> * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Eof,           _ -> Ok(([], Err(void), stream))
+  | Punct(DotDot), _ ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse(stream, false)?
+    Ok(([], Ok(expr), stream))
+  | _ ->
+    let arg, stream = match is_named_arg(stream)
+      | true  -> parse_named_arg(stream, false)?
+      | false -> parse_positional_arg(stream, false)?
+
+    match token:peek(stream)
+    | Eof,          _ -> Ok(([arg], Err(void), stream))
+    | Punct(Comma), _ ->
+      let stream = token:advance(stream, 1)
+      let args, spread, stream = parse_call_args(stream)?
+      Ok(([arg, ..args], spread, stream))
+    | _, span ->
+      diagnostic:new(
+        severity: Error
+        code:     "expected:comma"
+        message:  "expected comma"
+      )
+      |> diagnostic:add_label("here", span)
+      |> Err
+
+fn parse_call_args_multiline(
+  stream: TokenStream
+) -> Result<[ast:CallArgument] * Result<ast:Expr, void> * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Group(Indent, tokens), _ -> parse_call_args_multiline_rec(tokens)
+  | Punct(Newline),        _ ->
+    let stream = token:advance(stream, 1)
+    parse_call_args_multiline(stream)
+  | _, span ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:indent"
+      message:  "expected indent"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_call_args_multiline_rec(
+  stream: TokenStream
+) -> Result<[ast:CallArgument] * Result<ast:Expr, void> * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Eof,            _ -> Ok(([], Err(void), stream))
+  | Punct(Newline), _ ->
+    let stream = token:advance(stream, 1)
+    parse_call_args_multiline_rec(stream)
+  | Punct(DotDot),  _ ->
+    let stream = token:advance(stream, 1)
+    let expr, stream = parse(stream, false)?
+    Ok(([], Ok(expr), stream))
+  | _ ->
+    let arg, stream = match is_named_arg(stream)
+      | true  -> parse_named_arg(stream, true)?
+      | false -> parse_positional_arg(stream, true)?
+
+    match token:peek(stream)
+    | Eof,            _ -> Ok(([arg], Err(void), stream))
+    | Punct(Newline), _ ->
+      let stream = token:advance(stream, 1)
+      let args, spread, stream = parse_call_args_multiline_rec(stream)?
+      Ok(([arg, ..args], spread, stream))
+    | _, span ->
+      diagnostic:new(
+        severity: Error
+        code:     "expected:newline"
+        message:  "expected newline"
+      )
+      |> diagnostic:add_label("here", span)
+      |> Err
+
+fn is_named_arg(stream: TokenStream) -> bool
+  match token:peek(stream)
+  | Snake(_), _ -> token:nth_is(stream, 1, Punct(Colon))
+  | _ -> false
+
+fn parse_named_arg(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:CallArgument * TokenStream, Diagnostic>
+  let name, name_span, stream = ritec:parse:parse_snake(stream)?
+  let stream = token:advance(stream, 1)
+
+  match token:peek(stream)
+  | Punct(Under), span ->
+    let stream = token:advance(stream, 1)
+    Ok((ast:CallArgument:Named(Err(void), name), stream))
+  | _ ->
+    let expr, stream = match multiline
+      | true  -> parse(stream, true)?
+      | false -> parse_closure(stream, false)?
+
+    Ok((ast:CallArgument:Named(Ok(expr), name), stream))
+
+fn parse_positional_arg(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:CallArgument * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Punct(Under), span ->
+    let stream = token:advance(stream, 1)
+    Ok((ast:CallArgument:Positional(Err(void)), stream))
+  | _ ->
+    let expr, stream = match multiline
+      | true  -> parse(stream, true)?
+      | false -> parse_closure(stream, false)?
+
+    Ok((ast:CallArgument:Positional(Ok(expr)), stream))
+ 
+fn parse_field(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let input, stream = parse_term(stream, multiline)?
+  parse_field_rec(stream, input)
+
+fn parse_field_rec(
+  stream: TokenStream
+  input: ast:Expr
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token
+  | Punct(Dot) ->
+    let stream = token:advance(stream, 1)
+    let field, field_span, stream = ritec:parse:parse_snake(stream)?
+    let span = span:join(input.span, field_span)
+    let expr = ast:Expr:Field(span, input, field)
+    parse_field_rec(stream, expr)
+  | _ -> Ok((input, stream))
 
 fn parse_term(
   stream: TokenStream
@@ -143,6 +536,18 @@ fn parse_term(
   | Snake(_)              -> parse_path(stream)
   | Pascal(_)             -> parse_path(stream)
   | Path(_)               -> parse_path(stream) 
+  | Keyword(True) ->
+    let stream = token:advance(stream, 1)
+    Ok((ast:Expr:Bool(span, true), stream))
+  | Keyword(False) ->
+    let stream = token:advance(stream, 1)
+    Ok((ast:Expr:Bool(span, false), stream))
+  | String(string) ->
+    let stream = token:advance(stream, 1) 
+    Ok((ast:Expr:String(span, string), stream))
+  | Integer(base, value) ->
+    let stream = token:advance(stream, 1)
+    Ok((ast:Expr:Int(span, value), stream))
   | token ->
     diagnostic:new(
       severity: Error

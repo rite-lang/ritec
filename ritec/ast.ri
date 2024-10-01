@@ -121,7 +121,7 @@ pub type Expr =
     args:   [CallArgument]
     spread: Result<Expr, void>
   )
-  | Pipe(span: Span, expr: Expr, func: Expr)
+  | Pipe(span: Span, expr: Expr, funcs: [Expr])
   | Binary(span: Span, lhs: Expr, op: BinOp, rhs: Expr)
   | Unary(span: Span, op: UnOp, expr: Expr)
   | Let(
