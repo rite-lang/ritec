@@ -4,7 +4,6 @@ import std:result
 import std:result:Result
 
 import ritec:ast:Pat
-import ritec:parse
 import ritec:span
 import ritec:span:Span
 import ritec:diagnostic
@@ -21,16 +20,27 @@ import token:Punct
 pub fn parse(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
+  // parse first pattern and see whether to continue
+  // parsing based on the next tokens
   let pat, stream = parse_term(stream)?
 
   match token:peek(stream)
   | (Punct(Comma), _) ->
-    let pats, span, stream = parse_rec(stream, pat.span, [pat])?
+    let pats, span, stream = parse_rec_rest(stream, pat.span, [pat])?
     Ok((Tuple(span, pats), stream))
   | _ -> Ok((pat, stream))
 
-/// Parse a list of patterns
-pub fn parse_rec(
+/// Parse a list of patterns (Used by other functions)
+fn parse_rec(
+  stream: TokenStream
+  span:   Span
+  acc:    [Pat]
+) -> Result<[Pat] * Span * TokenStream, Diagnostic>
+  let pat, stream = parse_term(stream)?
+  parse_rec_rest(stream, span:join(span, pat.span), list:append(acc, pat))
+
+/// Parse a list of patterns after the first one has been parsed
+fn parse_rec_rest(
   stream: TokenStream
   span:   Span
   acc:    [Pat]
@@ -137,11 +147,16 @@ fn parse_term_list_rec(
 fn parse_term_bind_path(
   stream: TokenStream
 ) -> Result<Pat * TokenStream, Diagnostic>
-  let path = ritec:parse:parse_path(stream)?
+  let path, stream = ritec:parse:parse_path(stream)?
 
-  path |> std:debug:print
-
-  panic "TODO"
+  match token:peek(stream)
+  | Group(Parentheses, group_stream), group_span ->
+    let pats, _, group_stream = parse_rec(group_stream, path.span, [])?
+    token:expect(group_stream, Eof)
+    let span = span:join(path.span, group_span)
+    Ok((Variant(span, path, pats), token:advance(stream, 1)))
+  | _ ->
+    Ok((Variant(path.span, path, []), stream))
 
 /// Simple binds with variable name
 fn parse_term_bind_simple(
