@@ -3,7 +3,7 @@ use smallvec::smallvec;
 use crate::interpret::value::{Array, RiteFile, Value};
 use crate::number::IntKind;
 use crate::rir::{Func, Specific, Unit};
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::{fs, io};
