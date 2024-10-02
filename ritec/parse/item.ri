@@ -307,13 +307,16 @@ fn parse_type_fields_multiline(
   let decorators, stream = parse_decorators(stream)?
   let field, stream = parse_type_field(stream, decorators)?
   let acc = list:append(acc, field)
-  let stream = token:take_all(stream, Punct(Newline))
   let _, stream = token:take(stream, Punct(Comma))
   let token, span = token:peek(stream)
 
   match token
   | Eof -> Ok((acc, stream))
-  | _ -> parse_type_fields_multiline(stream, acc)
+  | Punct(Newline) -> parse_type_fields_multiline(stream, acc)
+  | _ ->
+    diagnostic:new(Error, "expected:newline", f"expected newline, found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
 
 /// Parse a single variant field
 fn parse_type_field(
@@ -322,7 +325,8 @@ fn parse_type_field(
 ) -> Result<ast:Field * TokenStream, Diagnostic>
   let name, name_span, stream = ritec:parse:parse_snake(stream)?
 
-  let ty, stream = match token:take(stream, Punct(Colon))
+  let ty, stream =
+    match token:take(stream, Punct(Colon))
     | Ok(_), stream ->
       let ty, stream = ritec:parse:ty:parse(stream)?
       Ok(ty), stream
