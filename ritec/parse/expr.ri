@@ -62,10 +62,10 @@ pub fn parse(
   | token -> parse_assign(stream, multiline)
 
 fn parse_let(
-  tokens: TokenStream
+  stream: TokenStream
   multiline: bool
 ) -> Result<ast:Expr * TokenStream, Diagnostic>
-  let span, stream = token:expect(tokens, Keyword(Let))?
+  let span, stream = token:expect(stream, Keyword(Let))?
   
   let is_assert, stream = match token:next(stream)
     | Keyword(Assert), _, stream -> true, stream
@@ -83,7 +83,7 @@ fn parse_let(
   let span, stream = token:expect(stream, Punct(Eq))?
 
   let value, stream = match is_block(stream) && multiline
-    | true  -> parse_block(tokens)?
+    | true  -> parse_block(stream)?
     | false -> parse(stream, false)?
 
   Ok((ast:Expr:Let(span, is_assert, pat, ty, value), stream))
@@ -235,11 +235,10 @@ fn parse_pipe(
         Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
       | false -> Ok((lhs, stream))
     | false ->
-      match token:peek(stream), token:peek_nth(stream, 1), token:peek_nth(stream, 2)
-      | (Punct(Newline), _), (Group(Indent, tokens), _), (Punct(OrGt), _) ->
+      match token:peek(stream), token:peek_nth(stream, 1)
+      | (Punct(Newline), _), (Group(Indent, tokens), _) ->
         let stream = token:advance(stream, 2)
         let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
-        let _, tokens = token:expect(tokens, Punct(Newline))?
         let _, tokens = token:expect(tokens, Eof)?
         Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
       | _ -> Ok((lhs, stream))
