@@ -1,0 +1,142 @@
+import std:result:Result
+
+import ritec:ast
+import ritec:span
+import ritec:number:IntKind
+import ritec:number:FloatKind
+import ritec:diagnostic
+import ritec:diagnostic:Severity
+import ritec:diagnostic:Diagnostic
+
+import token:TokenStream
+import token:TokenTree
+import token:Delimiter
+import token:Keyword
+import token:Punct
+
+
+pub fn parse(
+  stream: TokenStream
+) -> Result<ast:Ty * TokenStream, Diagnostic>
+  panic
+
+
+fn parse_term(
+  stream: TokenStream
+) -> Result<ast:Ty * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  let ty, stream =
+    match token
+    | Pascal(_)             -> parse_item(stream)?
+    | Path(_)               -> parse_item(stream)?
+    | Keyword(Keyword:Fn)   -> parse_fn(stream)?
+    | Keyword(Keyword:U8)   -> ast:Ty:Int(span, IntKind:U8),  token:advance(stream, 1)
+    | Keyword(Keyword:U16)  -> ast:Ty:Int(span, IntKind:U16), token:advance(stream, 1)
+    | Keyword(Keyword:U32)  -> ast:Ty:Int(span, IntKind:U32), token:advance(stream, 1)
+    | Keyword(Keyword:U64)  -> ast:Ty:Int(span, IntKind:U64), token:advance(stream, 1)
+    | Keyword(Keyword:I8)   -> ast:Ty:Int(span, IntKind:I8),  token:advance(stream, 1)
+    | Keyword(Keyword:I16)  -> ast:Ty:Int(span, IntKind:I16), token:advance(stream, 1)
+    | Keyword(Keyword:I32)  -> ast:Ty:Int(span, IntKind:I32), token:advance(stream, 1)
+    | Keyword(Keyword:I64)  -> ast:Ty:Int(span, IntKind:I64), token:advance(stream, 1)
+    | Keyword(Keyword:Int)  -> ast:Ty:Int(span, IntKind:Int), token:advance(stream, 1)
+    | Keyword(Keyword:Void) -> ast:Ty:Void(span),             token:advance(stream, 1)
+    | Keyword(Keyword:Bool) -> ast:Ty:Bool(span),             token:advance(stream, 1)
+    | Keyword(Keyword:Str)  -> ast:Ty:Str(span),              token:advance(stream, 1)
+    | Punct(Punct:Under)    -> ast:Ty:Infer(span),            token:advance(stream, 1)
+    | Punct(Punct:Quote)    ->
+      let stream = token:advance(stream, 1)
+      let name, name_span, stream = ritec:parse:parse_snake(stream)?
+      let span = span:join(span, name_span)
+      ast:Ty:Generic(span, name), stream
+    | Punct(Punct:And) ->
+      let stream = token:advance(stream, 1)
+      let ty, stream = parse_term(stream)?
+      ast:Ty:Ref(span, ty), stream
+    | Group(Delimiter:Parentheses, group_stream) ->
+      let ty, group_stream = parse(group_stream)?
+      token:expect(group_stream, Eof)?
+      ty, token:advance(stream, 1)
+    | Group(Delimiter:Brackets, group_stream) ->
+      let ty, group_stream = parse(group_stream)?
+      token:expect(group_stream, Eof)?
+      ast:Ty:List(span, ty), token:advance(stream, 1)
+    | _ -> panic "todo"
+
+  Ok((ty, stream))
+
+fn parse_item(
+  stream: TokenStream
+) -> Result<ast:Ty * TokenStream, Diagnostic>
+  let path, stream = ritec:parse:parse_path(stream)?
+
+  let generics, end, stream =
+    match token:peek(stream)
+    | Punct(Lt), _ ->
+      let generics, stream = parse_ty_rec_until(Punct(Gt), stream, [])?
+      let span, stream = token:expect(stream, Punct(Gt))?
+      Ok(generics), span, stream
+
+    | _ -> Err(void), path.span, stream
+
+  Ok((ast:Ty:Path(span:join(path.span, end), path, generics), stream))
+
+fn parse_fn(
+  stream: TokenStream
+) -> Result<ast:Ty * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Keyword(Fn))?
+  let token, _, stream = token:next(stream)
+
+  match token
+  | Group(Parentheses, group_stream) ->
+    let args, group_stream = parse_ty_rec_until(Eof, group_stream, [])?
+    token:expect(group_stream, Eof)?
+
+    let ty, stream =
+      match token:peek(stream)
+      | Punct(Arrow), _ ->
+        let ty, stream = parse(stream)?
+        let span = span:join(span, ty.span)
+        ast:Ty:Func(span, args, Ok(ty)), stream
+      | _ ->
+        let span = span:join(span, group_stream.span)
+        ast:Ty:Func(span, args, Err(void)), stream
+
+    Ok((ty, stream))
+
+  | _ ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:parentheses"
+      message:  "expected `(`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Consume types seperated by comma until we reach the until token
+fn parse_ty_rec_until(
+  until: TokenTree
+  stream: TokenStream
+  acc:    [ast:Ty]
+) -> Result<[ast:Ty] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+
+  match token == until
+  | true -> Ok((acc, stream))
+  | false ->
+    let ty, stream = parse_term(stream)?
+    let token, _ = token:peek(stream)
+    match token
+    | Punct(Comma) -> parse_ty_rec_until(until, token:advance(stream, 1), [ty, ..acc])
+    | _ ->
+      match token == until
+      | true -> Ok(([ty, ..acc], stream))
+      | false ->
+        diagnostic:new(
+          severity: Error
+          code:     "expected:comma"
+          message:  "expected `,`"
+        )
+        |> diagnostic:add_label("here", span)
+        |> Err
+

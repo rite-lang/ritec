@@ -90,7 +90,7 @@ pub type Ty =
   | Generic(span: Span, name: str)
   | Func(
     span:   Span
-    input:  [Argument]
+    input:  [Ty]
     output: Result<Ty, void>
   )
   | Path(
