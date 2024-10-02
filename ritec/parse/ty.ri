@@ -25,6 +25,34 @@ pub fn parse(
   | Punct(Star), _ -> parse_tuple(stream, [ty])
   | _ -> Ok((ty, stream))
 
+/// Parse a list of generic names as strings,
+/// useful for type and function declarations.
+/// < ... >
+/// 'a, ..., 'b
+pub fn parse_generics(
+  stream: TokenStream
+) -> Result<[str] * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Punct(Lt))?
+  let generics, stream = parse_ty_rec_until(Punct(Gt), stream, [])?
+  let span, stream = token:expect(stream, Punct(Gt))?
+
+  // Match ty an ensure it's a generic
+  let generics = list:try_map(generics, |ty|
+    match ty
+    | ast:Ty:Generic(_, name) -> Ok(name)
+    | _ ->
+      diagnostic:new(
+        severity: Error
+        code:     "expected:generic"
+        message:  "expected generic type"
+      )
+      |> diagnostic:add_label("here", ty.span)
+      |> Err
+  )?
+
+  Ok((generics, stream))
+
+
 fn parse_tuple(
   stream: TokenStream
   acc:    [ast:Ty]

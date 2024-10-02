@@ -34,7 +34,6 @@ pub fn parse(
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let stream = token:take_all(stream, Punct(Newline))
   let decorators, stream = parse_decorators(stream)?
-
   // allow a pub specifier before the item
   // disallow decorators for imports by requiring it to be empty.
   match (token:peek(stream), token:peek_nth(stream, 1), decorators)
@@ -148,6 +147,7 @@ pub fn parse_mod_doc_comments(
 ) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
   parse_mod_doc_comments_rec(stream, [])
 
+/// Parse module doc comments as decorators
 fn parse_mod_doc_comments_rec(
   stream: TokenStream
   acc:    [ast:Decorator]
@@ -161,6 +161,7 @@ fn parse_mod_doc_comments_rec(
   | Punct(Newline) -> parse_mod_doc_comments_rec(token:advance(stream, 1), acc)
   | _ -> Ok((acc, stream))
 
+/// Parse an import statement
 fn parse_import(
   stream: TokenStream
 ) -> Result<ast:Item * TokenStream, Diagnostic>
@@ -169,15 +170,167 @@ fn parse_import(
   let path, stream = ritec:parse:parse_path(stream)?
   Ok((ast:Item:Import(ast:Import:Import(span, vis, path)), stream))
 
-
+/// Parse a type declaration
 fn parse_type(
   stream: TokenStream
   decorators: [ast:Decorator]
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let vis, stream = parse_vis(stream)?
-  decorators |> std:debug:print
-  panic
+  let _, stream = token:expect(stream, Keyword(Type))?
+  let name, name_span, stream = ritec:parse:parse_pascal(stream)?
+  let generics, stream = match token:peek(stream)
+    | Punct(Lt), _ ->
+      let generics, stream = ty:parse_generics(stream)?
+      Ok(generics), stream
+    | _ -> Err(void), stream
 
+  // determine if we are parsing a no variant, multi variant
+  // or single variant type based on ( ... ), = or newline/eof
+  let token, span = token:peek(stream)
+
+  match token
+  | Eof ->
+    // same as newline
+    let ty = ast:Adt:Adt(name_span, decorators, vis, name, generics, [])
+    Ok((ast:Item:Type(ast:Type:Adt(ty)), token:advance(stream, 1)))
+  | Punct(Newline) ->
+    // simple type no fields no variants
+    let ty = ast:Adt:Adt(name_span, decorators, vis, name, generics, [])
+    Ok((ast:Item:Type(ast:Type:Adt(ty)), token:advance(stream, 1)))
+  | Group(Parentheses, group_stream) ->
+    // single variant type where fields are listed in parentheses
+    let fields, group_stream = parse_type_fields(group_stream)?
+    let ty = ast:Single:Single(name_span, decorators, vis, name, generics, fields)
+    Ok((ast:Item:Type(ast:Type:Single(ty)), token:advance(stream, 1)))
+  | Punct(Eq) ->
+    // multiple variants
+    let variants, stream = parse_type_variants(stream)?
+    let ty = ast:Adt:Adt(name_span, decorators, vis, name, generics, variants)
+    Ok((ast:Item:Type(ast:Type:Adt(ty)), stream))
+  | _ ->
+    diagnostic:new(Error, "expected:type_body", f"expected type body found `{token:format(token)}`")
+    |> diagnostic:add_label("here", name_span)
+    |> Err
+
+/// Parse a list of type variants from the beginning
+/// = \n*
+/// indent ... variants
+fn parse_type_variants(
+  stream: TokenStream
+) -> Result<[ast:Variant] * TokenStream, Diagnostic>
+  let _, stream = token:expect(stream, Punct(Eq))?
+  let stream = token:take_all(stream, Punct(Newline))
+  let token, span = token:peek(stream)
+  match token
+  | Group(Indent, group_stream) ->
+    let variants, group_stream = parse_type_variants_rec(group_stream, [])?
+    token:expect(group_stream, Eof)?
+    Ok((variants, token:advance(stream, 1)))
+  | _ ->
+    diagnostic:new(Error, "expected:indent", f"expected indent found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_type_variants_rec(
+  stream: TokenStream
+  acc:    [ast:Variant]
+) -> Result<[ast:Variant] * TokenStream, Diagnostic>
+  let variant, stream = parse_type_variant(stream)?
+  let acc = list:append(acc, variant)
+  let token, span = token:peek(stream)
+  match token
+  | Eof -> Ok((acc, stream))
+  | Punct(Newline) -> parse_type_variants_rec(token:advance(stream, 1), acc)
+  | _ ->
+    diagnostic:new(Error, "expected:newline", f"expected newline found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_type_variant(
+  stream: TokenStream
+) -> Result<ast:Variant * TokenStream, Diagnostic>
+  let _, stream = token:expect(stream, Punct(Or))?
+  let name, name_span, stream = ritec:parse:parse_pascal(stream)?
+  let token, span = token:peek(stream)
+  match token
+  | Group(Parentheses, group_stream) ->
+    let fields, group_stream = parse_type_fields(group_stream)?
+    let stream = token:advance(stream, 1)
+    Ok((ast:Variant:Variant(name_span, name, fields), stream))
+  | Punct(Newline) ->
+    Ok((ast:Variant:Variant(name_span, name, []), stream))
+  | Eof ->
+    Ok((ast:Variant:Variant(name_span, name, []), stream))
+  | _ ->
+    diagnostic:new(Error, "expected:variant_body", f"expected variant body found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+
+/// Decide between single line and multiline type fields
+/// if we see a newline followed by a new block (indent)
+/// we parse multiline fields otherwise we expect a single
+/// line.
+fn parse_type_fields(
+  stream: TokenStream
+) -> Result<[ast:Field] * TokenStream, Diagnostic>
+  match token:peek(stream), token:peek_nth(stream, 1)
+  | (Punct(Newline), _), (Group(Indent, group_stream), _) ->
+    let fields, group_stream = parse_type_fields_multiline(group_stream, [])?
+    token:expect(group_stream, Eof)?
+    Ok((fields, token:advance(stream, 2)))
+  | _ ->
+    parse_type_fields_line(stream, [])
+
+/// Parse a list of fields separated by commas
+fn parse_type_fields_line(
+  stream: TokenStream
+  acc:    [ast:Field]
+) -> Result<[ast:Field] * TokenStream, Diagnostic>
+  let field, stream = parse_type_field(stream, [])?
+  let acc = list:append(acc, field)
+  let token, span = token:peek(stream)
+  match token
+  | Punct(Comma) -> parse_type_fields_line(token:advance(stream, 1), acc)
+  | Eof -> Ok((acc, stream))
+  | _ ->
+    diagnostic:new(Error, "expected:comma", f"expected comma, found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Parse a list of fields inside an indent seperated
+/// newlines and optionally commas.
+fn parse_type_fields_multiline(
+  stream: TokenStream
+  acc:    [ast:Field]
+) -> Result<[ast:Field] * TokenStream, Diagnostic>
+  let decorators, stream = parse_decorators(stream)?
+  let field, stream = parse_type_field(stream, decorators)?
+  let acc = list:append(acc, field)
+  let stream = token:take_all(stream, Punct(Newline))
+  let _, stream = token:take(stream, Punct(Comma))
+  let token, span = token:peek(stream)
+
+  match token
+  | Eof -> Ok((acc, stream))
+  | _ -> parse_type_fields_multiline(stream, acc)
+
+/// Parse a single variant field
+fn parse_type_field(
+  stream: TokenStream
+  decorators: [ast:Decorator]
+) -> Result<ast:Field * TokenStream, Diagnostic>
+  let name, name_span, stream = ritec:parse:parse_snake(stream)?
+
+  let ty, stream = match token:take(stream, Punct(Colon))
+    | Ok(_), stream ->
+      let ty, stream = ritec:parse:ty:parse(stream)?
+      Ok(ty), stream
+    | Err(_), stream -> Err(void), stream
+
+  Ok((ast:Field:Field(name_span, decorators, name, ty), stream))
+
+/// Parse a function
 fn parse_fn(
   stream: TokenStream
   decorators: [ast:Decorator]
@@ -188,8 +341,8 @@ fn parse_fn(
   let args, stream = parse_fn_args(stream)?
   let output, stream = parse_fn_output(stream)?
   let body, stream = parse_fn_body(stream)?
-
-  Ok((ast:Item:Func(ast:Func:Func(span, decorators, vis, name, args, output, body)), stream))
+  let func = ast:Func:Func(span, decorators, vis, name, args, output, body)
+  Ok((ast:Item:Func(func), stream))
 
 /// Parse functions arguments, decide between
 /// single line and multiline arguments.
@@ -276,12 +429,11 @@ fn parse_fn_arg(
 ) -> Result<ast:Argument * TokenStream, Diagnostic>
   let name, name_span, stream = ritec:parse:parse_snake(stream)?
 
-  let ty, stream = match token:peek(stream)
-    | Punct(Colon), _ ->
-      let _, stream = token:expect(stream, Punct(Colon))?
+  let ty, stream = match token:take(stream, Punct(Colon))
+    | Ok(_), stream ->
       let ty, stream = ritec:parse:ty:parse(stream)?
       Ok(ty), stream
-    | _ -> Err(void), stream
+    | Err(_), stream -> Err(void), stream
 
   Ok((ast:Argument(name_span, decorators, name, ty), stream))
 

@@ -39,7 +39,7 @@ pub fn parse_path(
   | token ->
     diagnostic:new(
       severity: Error
-      code:     "E0009"
+      code:     "expected:path"
       message:  f"expected path, found `{token:format(token)}`"
     )
     |> diagnostic:add_label("here", span)
@@ -56,8 +56,25 @@ pub fn parse_snake(
   | token ->
     diagnostic:new(
       severity: Error
-      code:     "E0009"
+      code:     "expected:snake"
       message:  f"expected snake, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Parse a pascal case identifier
+pub fn parse_pascal(
+  stream: TokenStream
+) -> Result<str * Span * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Pascal(name) -> Ok((name, span, stream))
+  | token ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:pascal"
+      message:  f"expected pascal, found `{token:format(token)}`"
     )
     |> diagnostic:add_label("here", span)
     |> Err

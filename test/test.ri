@@ -1,3 +1,13 @@
-|test, test2|
-  void
-  [void]
+type T =
+  | A(x: int)
+  | B(x: int)
+  | C(x: int)
+  | D
+  | F(
+    x: int
+    y: int
+  )
+  | G(
+    x: int
+    y: int
+  )
