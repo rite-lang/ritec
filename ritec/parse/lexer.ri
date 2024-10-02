@@ -124,7 +124,7 @@ fn lex_tokens(
         | order:Gt ->
           let newline = Punct(Newline), span
           let new_lexer = Lexer(indents: new_indents, ..lexer)
-          let tokens, new_lexer = lex_tokens(lexer)?
+          let tokens, new_lexer = lex_tokens(new_lexer)?
 
           let span = Span(
             lo:     lexer.offset
@@ -135,8 +135,11 @@ fn lex_tokens(
           let stream = TokenStream(tokens, span)
           let token = Group(token:Indent, stream)
 
-          let tokens, lexer = lex_tokens(new_lexer)?
-          Ok(([newline, (token, span), ..tokens], lexer))
+          match list:length(new_lexer.indents) < list:length(lexer.indents)
+          | true  -> Ok(([newline, (token, span)], new_lexer))
+          | false ->
+            let tokens, lexer = lex_tokens(new_lexer)?
+            Ok(([newline, (token, span), ..tokens], lexer))
     | false ->
       match string:is_whitespace(g)
       | true -> 
