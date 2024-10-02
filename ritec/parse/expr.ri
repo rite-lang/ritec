@@ -150,14 +150,13 @@ pub fn parse_match(
 fn parse_match_block(
   stream: TokenStream
 ) -> Result<[ast:Arm] * TokenStream, Diagnostic>
-    let span, stream = token:expect(stream, Punct(Newline))?
-
-    match token:next(stream)
-    | Group(Indent, _), _, stream ->
+    let _, stream = token:expect(stream, Punct(Newline))?
+    let token, span, stream = token:next(stream)
+    match token
+    | Group(Indent, _) ->
       let arms, stream = parse_match_arms(stream)?
       let stream = token:take_all(stream, Punct(Newline))
       Ok((arms, stream))
-
     | _ ->
       diagnostic:new(
         severity: Error
@@ -236,8 +235,8 @@ fn parse_pipe(
         Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
       | false -> Ok((lhs, stream))
     | false ->
-      match token:peek(stream), token:peek_nth(stream, 1)
-      | (Punct(Newline), _), (Group(Indent, tokens), _) ->
+      match token:peek(stream), token:peek_nth(stream, 1), token:peek_nth(stream, 2)
+      | (Punct(Newline), _), (Group(Indent, tokens), _), (Punct(OrGt), _) ->
         let stream = token:advance(stream, 2)
         let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
         let _, tokens = token:expect(tokens, Punct(Newline))?
