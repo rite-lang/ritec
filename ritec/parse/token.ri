@@ -358,3 +358,10 @@ pub fn puncts()
   |> dict:insert("_", Punct:Under)
   |> dict:insert("#", Punct:Pound)
   |> dict:insert("?", Punct:Question)
+
+pub fn debug(stream: parse:token:TokenStream, acc: int)
+  match peek_nth(stream, acc)
+  | token, _ ->
+    f"token {acc}: {parse:token:format(token)}" |> std:io:println
+    debug(stream, acc + 1)
+  | Eof, _ -> void

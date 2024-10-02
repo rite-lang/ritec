@@ -299,6 +299,11 @@ impl<'a> Interpreter<'a> {
                 // End of block, continue to the next block.
                 Err(ControlFlow::Yield) => {}
                 Err(ControlFlow::StackTrace(message)) => {
+                    for frame in self.stack.iter() {
+                        let f = &self.rir.funcs[frame.func];
+                        println!("func: {} pc: {}", f.name, frame.return_address.current());
+                    }
+
                     panic!("{}", message);
                 }
                 _ => {
@@ -391,7 +396,7 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 Statement::Panic { message } => {
-                    panic!("{}", message);
+                    return Err(ControlFlow::StackTrace(message.to_string()));
                 }
                 Statement::Assign { place, value } => {
                     let value = self.interpret_value(value);

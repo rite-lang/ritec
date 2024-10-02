@@ -37,13 +37,13 @@ pub fn parse(
 
   // allow a pub specifier before the item
   // disallow decorators for imports by requiring it to be empty.
-  match (decorators, token:peek(stream), token:peek_nth(stream, 1))
-  | [], (Keyword(Import), _), _                    -> parse_import(stream)
-  | [], (Keyword(Pub), _),    (Keyword(Import), _) -> parse_import(stream)
-  | _,  (Keyword(Type), _),   _                    -> parse_type(stream, decorators)
-  | _,  (Keyword(Pub), _),    (Keyword(Type), _)   -> parse_type(stream, decorators)
-  | _,  (Keyword(Fn), _),     _                    -> parse_fn(stream, decorators)
-  | _,  (Keyword(Pub), _),    (Keyword(Fn), _)     -> parse_fn(stream, decorators)
+  match (token:peek(stream), token:peek_nth(stream, 1), decorators)
+  | (Keyword(Import), _), _                   , [] -> parse_import(stream)
+  | (Keyword(Pub), _),    (Keyword(Import), _), [] -> parse_import(stream)
+  | (Keyword(Type), _),   _                   , _  -> parse_type(stream, decorators)
+  | (Keyword(Pub), _),    (Keyword(Type), _)  , _  -> parse_type(stream, decorators)
+  | (Keyword(Fn), _),     _                   , _  -> parse_fn(stream, decorators)
+  | (Keyword(Pub), _),    (Keyword(Fn), _)    , _  -> parse_fn(stream, decorators)
   | _ ->
     let token, span = token:peek(stream)
     diagnostic:new(
@@ -200,11 +200,32 @@ fn parse_fn_args(
 
   match token
   | Group(Parentheses, group_stream) ->
+    // parse ( ... )
     let token, span = token:peek(group_stream)
 
     match token
-    | Punct(Newline) -> parse_fn_args_multiline(group_stream, [])
-    | _ -> parse_fn_args_line(group_stream, [])
+    | Punct(Newline) ->
+      // parse:
+      // (
+      //   arg: ty(,)?
+      //   ...
+      //   arg: ty(,)?
+      // )
+      let group_stream = token:advance(group_stream, 1)
+      match token:next(group_stream)
+      | Group(Indent, indent_stream), _, group_stream ->
+        let args, indent_stream = parse_fn_args_multiline(indent_stream, [])?
+        token:expect(group_stream, Eof)?
+        Ok((args, stream))
+      | _ ->
+        diagnostic:new(Error, "expected:indent", f"expected indent, found `{token:format(token)}`")
+        |> diagnostic:add_label("here", span)
+        |> Err
+    // parse: arg: ty, ..., arg: ty
+    | _ ->
+      let args, group_stream = parse_fn_args_line(group_stream, [])?
+      token:expect(group_stream, Eof)?
+      Ok((args, stream))
 
   | _ ->
     diagnostic:new(Error, "expected:parentheses", f"expected parentheses, found `{token:format(token)}`")
@@ -220,17 +241,34 @@ fn parse_fn_args_line(
   match token
   | Punct(Comma) -> parse_fn_args_line(token:advance(stream, 1), acc)
   | Eof -> Ok((acc, stream))
-  | _ ->
+  | Snake(_) ->
     let arg, stream = parse_fn_arg(stream, [])?
     let acc = list:append(acc, arg)
     parse_fn_args_line(stream, acc)
+  | _ ->
+    diagnostic:new(Error, "expected:snake", f"expected snake, found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
 
-
+/// Parse a multiline function arguments seperated by newlines
+/// commas are optional.
 fn parse_fn_args_multiline(
   stream: TokenStream
   acc:    [ast:Argument]
 ) -> Result<[ast:Argument] * TokenStream, Diagnostic>
-  panic
+  // takes all comments, decorators and newlines
+  let decorators, stream = parse_decorators(stream)?
+  let arg, stream = parse_fn_arg(stream, decorators)?
+  let acc = list:append(acc, arg)
+  let _, stream = token:take(stream, Punct(Comma))
+  let token, span = token:peek(stream)
+  match token
+  | Punct(Newline) -> parse_fn_args_multiline(token:advance(stream, 1), acc)
+  | Eof -> Ok((acc, stream))
+  | _ ->
+    diagnostic:new(Error, "expected:newline", f"expected newline, found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
 
 fn parse_fn_arg(
   stream: TokenStream
@@ -266,7 +304,7 @@ fn parse_fn_body(
 
   match token:peek(stream)
   | Group(Indent, group_stream), _ ->
-    let expr, stream = ritec:parse:expr:parse_block(group_stream)?
+    let expr, stream = ritec:parse:expr:parse_block(stream)?
     Ok((Ok(expr), stream))
   | _ -> Ok((Err(void), stream))
 
