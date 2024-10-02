@@ -239,6 +239,7 @@ fn parse_pipe(
       | (Punct(Newline), _), (Group(Indent, tokens), _) ->
         let stream = token:advance(stream, 2)
         let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
+        let _, tokens = token:take(tokens, Punct(Newline))
         let _, tokens = token:expect(tokens, Eof)?
         Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
       | _ -> Ok((lhs, stream))
