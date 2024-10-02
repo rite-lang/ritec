@@ -426,8 +426,8 @@ fn lex_string(lexer: Lexer)
 fn lex_format(lexer) -> Result<str * [TokenStream * str] * Lexer, Diagnostic>
   let quote = string:from_bytes(array:from_list([34]))
 
-  match peek(lexer) 
-  | Err(_) ->
+  match peek(lexer), peek_nth(lexer, 1)
+  | Err(_), _ ->
     let span = Span(
       lo:     lexer.offset
       hi:     lexer.offset
@@ -441,12 +441,13 @@ fn lex_format(lexer) -> Result<str * [TokenStream * str] * Lexer, Diagnostic>
     )
     |> diagnostic:add_label("here", span)
     |> Err
-  | Ok(g) ->
+  // we need to look ahead to see if we are escaping the control character
+  | Ok(g), Ok(h) ->
     match g == quote
     | true -> Ok(("", [], advance(lexer, 1)))
     | false ->
-      match g == "{"
-      | true ->
+      match g == "{", h == "{"
+      | true, false ->
         let lexer = advance(lexer, 1)
         let tokens, new_lexer = lex_tokens(lexer)?
 
@@ -460,10 +461,44 @@ fn lex_format(lexer) -> Result<str * [TokenStream * str] * Lexer, Diagnostic>
 
         let string, tokens, lexer = lex_format(new_lexer)?
         Ok(("", [(token, string), ..tokens], lexer))
-      | false ->
-        let lexer = advance(lexer, 1)
+      | true, true ->
+        // escape {{ to one {
+        let lexer = advance(lexer, 2)
         let string, tokens, lexer = lex_format(lexer)?
-        Ok((string:concat(g, string), tokens, lexer))
+        Ok((string:concat(h, string), tokens, lexer))
+      | _ ->
+        match g == "}", h == "}"
+        | true, true ->
+           // escape }} to one }
+           let lexer = advance(lexer, 2)
+           let string, tokens, lexer = lex_format(lexer)?
+           Ok((string:concat(h, string), tokens, lexer))
+        | true, false ->
+          // skip only one }
+          let lexer = advance(lexer, 1)
+          lex_format(lexer)
+        | _ ->
+          // not a control character just add it normally
+          let lexer = advance(lexer, 1)
+          let string, tokens, lexer = lex_format(lexer)?
+          Ok((string:concat(g, string), tokens, lexer))
+    // last character in file HAS to terminate the f-string
+  | Ok(quote), _ ->
+    Ok(("", [], advance(lexer, 1)))
+  | _ ->
+    let span = Span(
+      lo:     lexer.offset
+      hi:     lexer.offset
+      source: lexer.source
+    )
+
+    diagnostic:new(
+      severity:  diagnostic:Error
+      code:      "E0003"
+      message:   "unexpected end of file"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
 
 fn lex_integer(lexer: Lexer) -> Base * int * Lexer
   let base, lexer = 
