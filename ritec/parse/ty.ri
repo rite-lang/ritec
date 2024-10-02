@@ -1,3 +1,4 @@
+import std:list
 import std:result:Result
 
 import ritec:ast
@@ -18,8 +19,23 @@ import token:Punct
 pub fn parse(
   stream: TokenStream
 ) -> Result<ast:Ty * TokenStream, Diagnostic>
-  panic
+  let ty, stream = parse_term(stream)?
 
+  match token:peek(stream)
+  | Punct(Star), _ -> parse_tuple(stream, [ty])
+  | _ -> Ok((ty, stream))
+
+fn parse_tuple(
+  stream: TokenStream
+  acc:    [ast:Ty]
+) -> Result<ast:Ty * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Punct(Star))?
+  let ty, stream = parse_term(stream)?
+  let acc = list:append(acc, ty)
+
+  match token:peek(stream)
+  | Punct(Star), _ -> parse_tuple(stream, acc)
+  | _ -> Ok((ast:Ty:Tuple(span:join(span, ty.span), acc), stream))
 
 fn parse_term(
   stream: TokenStream
@@ -61,7 +77,17 @@ fn parse_term(
       let ty, group_stream = parse(group_stream)?
       token:expect(group_stream, Eof)?
       ast:Ty:List(span, ty), token:advance(stream, 1)
-    | _ -> panic "todo"
+    | _ ->
+      let err: Result<void, _> =
+        diagnostic:new(
+          severity: Error
+          code:     "expected:type"
+          message:  f"expected type, found `{token:format(token)}`"
+        )
+        |> diagnostic:add_label("here", span)
+        |> Err
+
+      err? panic
 
   Ok((ty, stream))
 
@@ -95,6 +121,7 @@ fn parse_fn(
     let ty, stream =
       match token:peek(stream)
       | Punct(Arrow), _ ->
+        let stream = token:advance(stream, 1)
         let ty, stream = parse(stream)?
         let span = span:join(span, ty.span)
         ast:Ty:Func(span, args, Ok(ty)), stream
@@ -126,11 +153,12 @@ fn parse_ty_rec_until(
   | false ->
     let ty, stream = parse_term(stream)?
     let token, _ = token:peek(stream)
+    let acc = list:append(acc, ty)
     match token
-    | Punct(Comma) -> parse_ty_rec_until(until, token:advance(stream, 1), [ty, ..acc])
+    | Punct(Comma) -> parse_ty_rec_until(until, token:advance(stream, 1), acc)
     | _ ->
       match token == until
-      | true -> Ok(([ty, ..acc], stream))
+      | true -> Ok((acc, stream))
       | false ->
         diagnostic:new(
           severity: Error
