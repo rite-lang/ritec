@@ -1,8 +1,2 @@
 fn main()
-  let offset = list:take(lexer.graphemes, n), lexer.offset
-      |> list:fold(|g, offset| offset + string:length(g))
-
-  let y =
-    match x == 1
-    | true -> 1
-    | false -> 2
+  f"Such a cool string {x} {1 + 1 * 20} {|x| x} a{Wow()} {{ }} {{}}"

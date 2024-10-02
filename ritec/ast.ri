@@ -108,6 +108,7 @@ pub type Expr =
   | Bool(span: Span, value: bool)
   | Int(span: Span, value: int)
   | String(span: Span, value: str)
+  | Format(span: Span, exprs: [Expr * Format])
   | Paren(span: Span, expr: Expr)
   | Tuple(span: Span, exprs: [Expr])
   | Path(span: Span, path: Path)
@@ -191,3 +192,6 @@ pub type Path(
   span:     Span
   segments: [str]
 )
+
+pub type Format =
+  | String

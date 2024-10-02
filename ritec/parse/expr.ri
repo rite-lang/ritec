@@ -670,6 +670,7 @@ fn parse_term(
   | Keyword(Panic)        -> parse_panic(stream)
   | Group(Parentheses, _) -> parse_paren(stream, multiline)
   | Group(Brackets, _)    -> parse_list(stream, multiline)
+  | Format(_, _)          -> parse_format(stream)
   | Snake(_)              -> parse_path(stream)
   | Pascal(_)             -> parse_path(stream)
   | Path(_)               -> parse_path(stream) 
@@ -795,6 +796,38 @@ fn parse_list_args(
       let head, tail, stream = parse_list_args(stream, multiline)?
       Ok(([expr, ..head], tail, stream))
     | _ -> Ok(([expr], Err(void), stream))
+
+/// Parse a format string by specifying a list of
+/// expressions and formats
+fn parse_format(stream: TokenStream) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Format(fmt, tokens) ->
+    let exprs = parse_format_rec(tokens, [ (ast:Expr:String(span, fmt), ast:Format:String) ])?
+    Ok((ast:Expr:Format(span, exprs), stream))
+  | _ ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:format"
+      message:  f"expected format, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+fn parse_format_rec(
+  tokens: [TokenStream * str]
+  acc:    [ast:Expr * ast:Format]
+) -> Result<[ast:Expr * ast:Format], Diagnostic>
+  match tokens
+  | [(stream, fmt), ..tail] ->
+    let expr, stream = parse(stream, false)?
+    let acc = acc
+      |> std:list:append((expr, ast:Format:String))
+      |> std:list:append((ast:Expr:String(expr.span, fmt), ast:Format:String))
+
+    parse_format_rec(tail, acc)
+  | [] -> Ok(acc)
 
 fn parse_string(stream: TokenStream) -> Result<str * Span * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
