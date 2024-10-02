@@ -49,7 +49,7 @@ fn parse_rec_rest(
   | (Punct(Comma), _) ->
     let stream = token:advance(stream, 1)
     let pat, stream = parse_term(stream)?
-    parse_rec(stream, span:join(span, pat.span), list:append(acc, pat))
+    parse_rec_rest(stream, span:join(span, pat.span), list:append(acc, pat))
   | _ -> Ok((acc, span, stream))
 
 /// Parse a single pattern that is optionally nested
