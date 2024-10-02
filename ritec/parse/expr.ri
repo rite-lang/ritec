@@ -73,11 +73,12 @@ fn parse_let(
 
   let pat, stream = pat:parse(stream)?
 
-  let ty = match token:peek(stream)
+  let ty, stream = match token:peek(stream)
     | Punct(Colon), _ ->
       let stream = token:advance(stream, 1)
-      panic
-    | _ -> Err(void)
+      let ty, stream = ty:parse(stream)?
+      Ok(ty), stream
+    | _ -> Err(void), stream
 
   let span, stream = token:expect(stream, Punct(Eq))?
 
@@ -94,11 +95,12 @@ fn parse_mut(
   let span, stream = token:expect(stream, Keyword(Mut))?
   let name, name_span, stream = ritec:parse:parse_snake(stream)?
 
-  let ty = match token:peek(stream)
+  let ty, stream = match token:peek(stream)
     | Punct(Colon), _ ->
       let stream = token:advance(stream, 1)
-      panic
-    | _ -> Err(void)
+      let ty, stream = ty:parse(stream)?
+      Ok(ty), stream
+    | _ -> Err(void), stream
 
   let span, stream = token:expect(stream, Punct(Eq))?
   let expr, stream = parse(stream, multiline)?
