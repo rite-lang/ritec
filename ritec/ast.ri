@@ -4,11 +4,13 @@ import span:Span
 import number:IntKind
 
 pub type Decorator(
+  span: Span
   name: str
   args: [str]
 )
 
 pub type Module(
+  span:       Span
   decorators: [Decorator]
   items:      [Item]
 )
@@ -19,19 +21,19 @@ pub type Item =
   | Type(ty: Type)
 
 pub type Import(
+  span: Span
   vis:  Vis
   path: Path
-  span: Span
 )
 
 pub type Func(
+  span:       Span
   decorators: [Decorator]
   vis:        Vis
   name:       str
   input:      [Argument]
   output:     Result<Ty, void>
   body:       Result<Expr, void>
-  span:       Span
 )
 
 pub type Type =
@@ -39,33 +41,33 @@ pub type Type =
   | Single(single: Single)
 
 pub type Adt(
+  span:       Span
   decorators: [Decorator]
   vis:        Vis
   name:       str
   generics:   Result<[str], void>
   variants:   [Variant]
-  span:       Span
 )
 
 pub type Single(
+  span:       Span
   decorators: [Decorator]
   vis:        Vis
   name:       str
   generics:   Result<[str], void>
   fields:     [Field]
-  span:       Span
 )
 
 pub type Variant(
+  span:   Span
   name:   str
   fields: [Field]
-  span:   Span
 )
 
 pub type Field(
+  span: Span
   name: str
   ty:   Result<Ty, void>
-  span: Span
 )
 
 pub type Vis =
@@ -73,9 +75,9 @@ pub type Vis =
   | Private
 
 pub type Argument(
+  span: Span
   name: str
   ty:   Result<Ty, void>
-  span: Span
 )
 
 pub type Ty = 

@@ -13,10 +13,10 @@ fn main(args: [str])
   | Ok(_) -> void
   | Err(report) -> diagnostic:report:print(report, sources)
 
-fn run(text, id) 
+fn run(text, id)
   let stream = parse:lexer:lex(id, text)?
 
-  match parse:expr:parse(stream, true)
+  match parse:parse(stream)
   | Ok((expr, _)) -> 
     std:debug:print(expr)
     Ok(void)

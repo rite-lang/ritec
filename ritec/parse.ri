@@ -10,11 +10,23 @@ import ritec:ast
 import ritec:diagnostic
 import ritec:diagnostic:Diagnostic
 import ritec:diagnostic:Severity
+import ritec:span
 import ritec:span:Span
 
 import token:TokenTree
 import token:TokenStream
 
+/// Parse an entire token stream into a module
+pub fn parse(
+  stream: TokenStream
+) -> Result<ast:Module * TokenStream, Diagnostic>
+  let span = stream.span
+  let mod_comments, stream = item:parse_mod_doc_comments(stream)?
+  let items, stream = item:parse_items(stream, [])?
+  Ok((ast:Module(span:join(span, stream.span), mod_comments, items), stream))
+
+/// Shared function for parsing a path expression
+/// `path` is a sequence of identifiers separated by `:`
 pub fn parse_path(
   stream: TokenStream
 ) -> Result<ast:Path * TokenStream, Diagnostic>
@@ -33,6 +45,7 @@ pub fn parse_path(
     |> diagnostic:add_label("here", span)
     |> Err
 
+/// Shared function for parsing a snake case identifier
 pub fn parse_snake(
   stream: TokenStream
 ) -> Result<str * Span * TokenStream, Diagnostic>

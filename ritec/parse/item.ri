@@ -1,1 +1,168 @@
+import std:list
+import std:result:Result
+
+import ritec:ast
+import ritec:diagnostic
+import ritec:diagnostic:Severity
+import ritec:diagnostic:Diagnostic
+
 import token:TokenStream
+import token:Delimiter
+import token:TokenTree
+import token:Keyword
+import token:Punct
+import token:Doc
+
+/// Parse a list of items
+pub fn parse_items(
+  stream: TokenStream
+  acc:    [ast:Item]
+) -> Result<[ast:Item] * TokenStream, Diagnostic>
+  match token:peek(stream)
+  | Eof, _ -> Ok((acc, stream))
+  | _      ->
+    let item, stream = item:parse(stream)?
+    let acc = list:append(acc, item)
+    parse_items(stream, acc)
+
+/// Fn, Type, Import
+/// decorators
+/// Doc comments to fn, fn args (multiline) variants, variants fields multiline (as decorator)
+pub fn parse(
+  stream: TokenStream
+) -> Result<ast:Item * TokenStream, Diagnostic>
+  let stream = token:take_all(stream, Punct(Newline))
+  let token, span = token:peek(stream)
+
+  let decorators, stream = parse_decorators(stream)?
+
+  match token
+  | Keyword(Import) -> parse_import(stream)
+  | Keyword(Type) -> parse_type(stream, decorators)
+  | Keyword(Fn) -> parse_fn(stream, decorators)
+  | _ ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:item"
+      message:  f"expected item, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Parse all decorators (including doc comments) and newlines.
+fn parse_decorators(
+  stream: TokenStream
+) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+  parse_decorators_rec(stream, [])
+
+fn parse_decorators_rec(
+  stream: TokenStream
+  acc:    [ast:Decorator]
+) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+  match token
+  | Doc(Item, comment) ->
+    let stream = token:advance(stream, 1)
+    let acc = list:append(acc, ast:Decorator(span, "doc", [comment]))
+    parse_decorators_rec(stream, acc)
+  | Punct(Pound) ->
+    let decorator, stream = parse_decorator(stream)?
+    let acc = list:append(acc, decorator)
+    parse_decorators_rec(stream, acc)
+  | Punct(Newline) -> parse_decorators_rec(token:advance(stream, 1), acc)
+  | _ -> Ok((acc, stream))
+
+/// Parse a single decorator
+fn parse_decorator(
+  stream: TokenStream
+) -> Result<ast:Decorator * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Punct(Pound))?
+  let token, span = token:peek(stream)
+  match token
+  | Snake(name) ->
+    match token:peek(stream)
+    | Group(Parentheses, args_stream), _ ->
+      let args, stream = parse_decorator_args(args_stream, [])?
+      Ok((ast:Decorator(span, name, args), stream))
+    | _ ->
+      Ok((ast:Decorator(span, name, []), stream))
+  | _ ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:decorator_name"
+      message:  f"expected decorator name, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Collect string arguments for a decorator
+fn parse_decorator_args(
+  stream: TokenStream
+  acc:    [str]
+) -> Result<[str] * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+  match token
+  | String(s) ->
+    let acc = list:append(acc, s)
+    parse_decorator_args(stream, acc)
+  | Punct(Comma) -> parse_decorator_args(stream, acc)
+  | Eof -> Ok((acc, stream))
+  | _ ->
+    diagnostic:new(
+      severity: Error
+      code:     "expected:decorator_arg"
+      message:  f"expected decorator argument, found `{token:format(token)}`"
+    )
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Parse all module doc comments (and newlines) as decorators.
+pub fn parse_mod_doc_comments(
+  stream: TokenStream
+) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+  parse_mod_doc_comments_rec(stream, [])
+
+fn parse_mod_doc_comments_rec(
+  stream: TokenStream
+  acc:    [ast:Decorator]
+) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+  match token
+  | Doc(Module, comment) ->
+    let stream = token:advance(stream, 1)
+    let acc = list:append(acc, ast:Decorator(span, "moddoc", [comment]))
+    parse_mod_doc_comments_rec(stream, acc)
+  | Punct(Newline) -> parse_mod_doc_comments_rec(token:advance(stream, 1), acc)
+  | _ -> Ok((acc, stream))
+
+fn parse_import(
+  stream: TokenStream
+) -> Result<ast:Item * TokenStream, Diagnostic>
+  let vis, stream = parse_vis(stream)?
+  let span, stream = token:expect(stream, Keyword(Import))?
+  let path, stream = ritec:parse:parse_path(stream)?
+  let imp = ast:Import(span, vis, path)
+
+  Ok((ast:Item:Import(imp), stream))
+
+
+fn parse_type(
+  stream: TokenStream
+  decorators: [ast:Decorator]
+) -> Result<ast:Item * TokenStream, Diagnostic>
+  let vis = parse_vis(stream)
+  panic
+
+fn parse_fn(
+  stream: TokenStream
+  decorators: [ast:Decorator]
+) -> Result<ast:Item * TokenStream, Diagnostic>
+  let vis = parse_vis(stream)
+  panic
+
+fn parse_vis(
+  stream: TokenStream
+) -> Result<ast:Vis * TokenStream, Diagnostic>
+  match token:take(stream, Keyword(Pub))
+  | Ok((_, span)), stream -> Ok((ast:Vis:Public, stream))
+  | Err(_), stream -> Ok((ast:Vis:Private, stream))
