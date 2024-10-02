@@ -2,6 +2,7 @@ import std:list
 import std:result:Result
 
 import ritec:ast
+import ritec:span
 import ritec:diagnostic
 import ritec:diagnostic:Severity
 import ritec:diagnostic:Diagnostic
@@ -32,15 +33,19 @@ pub fn parse(
   stream: TokenStream
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let stream = token:take_all(stream, Punct(Newline))
-  let token, span = token:peek(stream)
-
   let decorators, stream = parse_decorators(stream)?
 
-  match token
-  | Keyword(Import) -> parse_import(stream)
-  | Keyword(Type) -> parse_type(stream, decorators)
-  | Keyword(Fn) -> parse_fn(stream, decorators)
+  // allow a pub specifier before the item
+  // disallow decorators for imports by requiring it to be empty.
+  match (decorators, token:peek(stream), token:peek_nth(stream, 1))
+  | [], (Keyword(Import), _), _                    -> parse_import(stream)
+  | [], (Keyword(Pub), _),    (Keyword(Import), _) -> parse_import(stream)
+  | _,  (Keyword(Type), _),   _                    -> parse_type(stream, decorators)
+  | _,  (Keyword(Pub), _),    (Keyword(Type), _)   -> parse_type(stream, decorators)
+  | _,  (Keyword(Fn), _),     _                    -> parse_fn(stream, decorators)
+  | _,  (Keyword(Pub), _),    (Keyword(Fn), _)     -> parse_fn(stream, decorators)
   | _ ->
+    let token, span = token:peek(stream)
     diagnostic:new(
       severity: Error
       code:     "expected:item"
@@ -60,6 +65,7 @@ fn parse_decorators_rec(
   acc:    [ast:Decorator]
 ) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
+
   match token
   | Doc(Item, comment) ->
     let stream = token:advance(stream, 1)
@@ -70,28 +76,48 @@ fn parse_decorators_rec(
     let acc = list:append(acc, decorator)
     parse_decorators_rec(stream, acc)
   | Punct(Newline) -> parse_decorators_rec(token:advance(stream, 1), acc)
-  | _ -> Ok((acc, stream))
+  | _ ->
+    Ok((acc, stream))
 
 /// Parse a single decorator
+/// We parse the following pattern:
+/// #
+/// [ ... ] EOF
+/// snake EOF?
+/// ( ... ) EOF
+/// str, ..., str EOF
 fn parse_decorator(
   stream: TokenStream
 ) -> Result<ast:Decorator * TokenStream, Diagnostic>
+  // we consume at least the first two tokens of the top
+  // stream # [ ... ]
   let span, stream = token:expect(stream, Punct(Pound))?
-  let token, span = token:peek(stream)
+  let token, group_span, stream = token:next(stream)
+  let span = span:join(span, group_span)
+
+  // a group is required.
   match token
-  | Snake(name) ->
-    match token:peek(stream)
-    | Group(Parentheses, args_stream), _ ->
-      let args, stream = parse_decorator_args(args_stream, [])?
+  | Group(Brackets, group_stream) ->
+    // the name is required as the first token of the group
+    let name, _, group_stream = ritec:parse:parse_snake(group_stream)?
+    // optionally parse args but if we are at the end
+    // of the group, we are done
+    let token, _, group_stream = token:next(group_stream)
+    match token
+    | Group(Parentheses, args_stream) ->
+      let stream = token:advance(stream, 1)
+      let args, args_stream = parse_decorator_args(args_stream, [])?
+
+      token:expect(args_stream, Eof)?
+      token:expect(group_stream, Eof)?
+
       Ok((ast:Decorator(span, name, args), stream))
     | _ ->
+      token:expect(group_stream, Eof)?
       Ok((ast:Decorator(span, name, []), stream))
+
   | _ ->
-    diagnostic:new(
-      severity: Error
-      code:     "expected:decorator_name"
-      message:  f"expected decorator name, found `{token:format(token)}`"
-    )
+    diagnostic:new(Error, "expected:brackets", f"expected brackets, found `{token:format(token)}`")
     |> diagnostic:add_label("here", span)
     |> Err
 
@@ -141,25 +167,110 @@ fn parse_import(
   let vis, stream = parse_vis(stream)?
   let span, stream = token:expect(stream, Keyword(Import))?
   let path, stream = ritec:parse:parse_path(stream)?
-  let imp = ast:Import(span, vis, path)
-
-  Ok((ast:Item:Import(imp), stream))
+  Ok((ast:Item:Import(ast:Import:Import(span, vis, path)), stream))
 
 
 fn parse_type(
   stream: TokenStream
   decorators: [ast:Decorator]
 ) -> Result<ast:Item * TokenStream, Diagnostic>
-  let vis = parse_vis(stream)
+  let vis, stream = parse_vis(stream)?
+  decorators |> std:debug:print
   panic
 
 fn parse_fn(
   stream: TokenStream
   decorators: [ast:Decorator]
 ) -> Result<ast:Item * TokenStream, Diagnostic>
-  let vis = parse_vis(stream)
+  let vis, stream = parse_vis(stream)?
+  let span, stream = token:expect(stream, Keyword(Fn))?
+  let name, name_span, stream = ritec:parse:parse_snake(stream)?
+  let args, stream = parse_fn_args(stream)?
+  let output, stream = parse_fn_output(stream)?
+  let body, stream = parse_fn_body(stream)?
+
+  Ok((ast:Item:Func(ast:Func:Func(span, decorators, vis, name, args, output, body)), stream))
+
+/// Parse functions arguments, decide between
+/// single line and multiline arguments.
+fn parse_fn_args(
+  stream: TokenStream
+) -> Result<[ast:Argument] * TokenStream, Diagnostic>
+  let token, span, stream = token:next(stream)
+
+  match token
+  | Group(Parentheses, group_stream) ->
+    let token, span = token:peek(group_stream)
+
+    match token
+    | Punct(Newline) -> parse_fn_args_multiline(group_stream, [])
+    | _ -> parse_fn_args_line(group_stream, [])
+
+  | _ ->
+    diagnostic:new(Error, "expected:parentheses", f"expected parentheses, found `{token:format(token)}`")
+    |> diagnostic:add_label("here", span)
+    |> Err
+
+/// Parse a single function line seperated by commas
+fn parse_fn_args_line(
+  stream: TokenStream
+  acc:    [ast:Argument]
+) -> Result<[ast:Argument] * TokenStream, Diagnostic>
+  let token, span = token:peek(stream)
+  match token
+  | Punct(Comma) -> parse_fn_args_line(token:advance(stream, 1), acc)
+  | Eof -> Ok((acc, stream))
+  | _ ->
+    let arg, stream = parse_fn_arg(stream, [])?
+    let acc = list:append(acc, arg)
+    parse_fn_args_line(stream, acc)
+
+
+fn parse_fn_args_multiline(
+  stream: TokenStream
+  acc:    [ast:Argument]
+) -> Result<[ast:Argument] * TokenStream, Diagnostic>
   panic
 
+fn parse_fn_arg(
+  stream: TokenStream
+  decorators: [ast:Decorator]
+) -> Result<ast:Argument * TokenStream, Diagnostic>
+  let name, name_span, stream = ritec:parse:parse_snake(stream)?
+
+  let ty, stream = match token:peek(stream)
+    | Punct(Colon), _ ->
+      let _, stream = token:expect(stream, Punct(Colon))?
+      let ty, stream = ritec:parse:ty:parse(stream)?
+      Ok(ty), stream
+    | _ -> Err(void), stream
+
+  Ok((ast:Argument(name_span, decorators, name, ty), stream))
+
+/// Parse an optional function output type
+/// -> Ty
+fn parse_fn_output(
+  stream: TokenStream
+) -> Result<Result<ast:Ty, void> * TokenStream, Diagnostic>
+  match token:take(stream, Punct(Arrow))
+  | Ok(_), stream ->
+    let ty, stream = ritec:parse:ty:parse(stream)?
+    Ok((Ok(ty), stream))
+  | Err(_), stream -> Ok((Err(void), stream))
+
+/// Parse an optional function body (only multiline)
+fn parse_fn_body(
+  stream: TokenStream
+) -> Result<Result<ast:Expr, void> * TokenStream, Diagnostic>
+  let stream = token:take_all(stream, Punct(Newline))
+
+  match token:peek(stream)
+  | Group(Indent, group_stream), _ ->
+    let expr, stream = ritec:parse:expr:parse_block(group_stream)?
+    Ok((Ok(expr), stream))
+  | _ -> Ok((Err(void), stream))
+
+/// Parse a visibility modifier, defaults to private.
 fn parse_vis(
   stream: TokenStream
 ) -> Result<ast:Vis * TokenStream, Diagnostic>

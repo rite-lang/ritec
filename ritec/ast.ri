@@ -65,9 +65,10 @@ pub type Variant(
 )
 
 pub type Field(
-  span: Span
-  name: str
-  ty:   Result<Ty, void>
+  span:       Span
+  decorators: [Decorator]
+  name:       str
+  ty:         Result<Ty, void>
 )
 
 pub type Vis =
@@ -76,6 +77,7 @@ pub type Vis =
 
 pub type Argument(
   span: Span
+  decorators: [Decorator]
   name: str
   ty:   Result<Ty, void>
 )

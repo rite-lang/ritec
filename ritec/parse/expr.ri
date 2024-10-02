@@ -349,7 +349,7 @@ fn parse_closure_arg(
   match token
   | Punct(Colon) -> panic ""
   | _ -> 
-    let arg = ast:Argument(name_span, name, Err(void))
+    let arg = ast:Argument(name_span, [], name, Err(void))
     Ok((arg, stream))
 
 fn parse_closure_body(

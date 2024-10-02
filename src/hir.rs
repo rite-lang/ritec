@@ -446,8 +446,8 @@ impl Ty {
                 Inferred::Float => String::from("{float}"),
             },
             Ty::Partial(part, args, _) => Self::format_partial(unit, part, args),
-            Ty::Field(_, _, _) => todo!(),
-            Ty::Tuple(_, _, _) => todo!(),
+            Ty::Field(base, field, _) => format!("{}.{}", base.format(unit), field),
+            Ty::Tuple(base, index, _) => format!("{}.{}", base.format(unit), index),
             Ty::Call(_, _, _) => String::from("call"),
             Ty::Pipe(_, _, _, _) => String::from("pipe"),
         }
