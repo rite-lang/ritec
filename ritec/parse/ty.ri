@@ -101,9 +101,10 @@ fn parse_term(
     token:expect(group_stream, Eof)?
     Ok((ty, token:advance(stream, 1)))
   | Group(Delimiter:Brackets, group_stream) ->
+    let stream = token:advance(stream, 1)
     let ty, group_stream = parse(group_stream)?
     token:expect(group_stream, Eof)?
-    Ok((ast:Ty:List(span, ty), token:advance(stream, 1)))
+    Ok((ast:Ty:List(span, ty), stream))
   | _ ->
     diagnostic:new(
       severity: Error

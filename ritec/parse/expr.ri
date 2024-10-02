@@ -125,9 +125,9 @@ fn parse_assert(
   | _ -> Ok((ast:Expr:Assert(span, expr, Err(void)), stream))
 
 fn is_arm(stream: TokenStream) -> bool
-  match (token:peek(stream), token:peek_nth(stream, 1))
-  | ((Punct(Or), _), _) -> true
+  match token:peek(stream), token:peek_nth(stream, 1)
   | ((Punct(Newline), _), (Punct(Or), _)) -> true
+  | ((Punct(Or), _), _) -> true
   | _ -> false
 
 /// Parse a match expression.
@@ -138,8 +138,7 @@ pub fn parse_match(
   let span, stream = token:expect(stream, Keyword(Match))?
   let input, stream = parse(stream, multiline)?
 
-  let arms, stream =
-    match multiline
+  let arms, stream = match multiline
     | true  -> parse_match_arms(stream)?
     | false -> parse_match_block(stream)?
 
@@ -152,10 +151,13 @@ fn parse_match_block(
 ) -> Result<[ast:Arm] * TokenStream, Diagnostic>
     let _, stream = token:expect(stream, Punct(Newline))?
     let token, span, stream = token:next(stream)
+
     match token
-    | Group(Indent, _) ->
-      let arms, stream = parse_match_arms(stream)?
-      let stream = token:take_all(stream, Punct(Newline))
+    | Group(Indent, tokens) ->
+      std:debug:print(tokens)
+      let arms, tokens = parse_match_arms(tokens)?
+      let tokens = token:take_all(tokens, Punct(Newline))
+      token:expect(tokens, Eof)?
       Ok((arms, stream))
     | _ ->
       diagnostic:new(
@@ -237,11 +239,14 @@ fn parse_pipe(
     | false ->
       match token:peek(stream), token:peek_nth(stream, 1)
       | (Punct(Newline), _), (Group(Indent, tokens), _) ->
-        let stream = token:advance(stream, 2)
-        let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
-        let _, tokens = token:take(tokens, Punct(Newline))
-        let _, tokens = token:expect(tokens, Eof)?
-        Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+        match token:is(tokens, Punct(OrGt))
+        | true  ->
+          let stream = token:advance(stream, 2)
+          let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
+          let _, tokens = token:take(tokens, Punct(Newline))
+          let _, tokens = token:expect(tokens, Eof)?
+          Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+        | false -> Ok((lhs, stream))
       | _ -> Ok((lhs, stream))
 
 fn parse_pipe_funcs(

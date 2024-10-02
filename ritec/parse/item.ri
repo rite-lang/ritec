@@ -234,17 +234,17 @@ fn parse_type_variants(
 fn parse_type_variants_rec(
   stream: TokenStream
   acc:    [ast:Variant]
-) -> Result<[ast:Variant] * TokenStream, Diagnostic>
-  let variant, stream = parse_type_variant(stream)?
-  let acc = list:append(acc, variant)
+) -> Result<[ast:Variant] * TokenStream, Diagnostic> 
   let token, span = token:peek(stream)
   match token
   | Eof -> Ok((acc, stream))
-  | Punct(Newline) -> parse_type_variants_rec(token:advance(stream, 1), acc)
+  | Punct(Newline) -> 
+    let stream = token:advance(stream, 1)
+    parse_type_variants_rec(stream, acc)
   | _ ->
-    diagnostic:new(Error, "expected:newline", f"expected newline found `{token:format(token)}`")
-    |> diagnostic:add_label("here", span)
-    |> Err
+    let variant, stream = parse_type_variant(stream)?
+    let acc = list:append(acc, variant)
+    Ok(parse_type_variants_rec(stream, acc)?)
 
 fn parse_type_variant(
   stream: TokenStream
@@ -294,7 +294,11 @@ fn parse_type_fields_line(
   | Punct(Comma) -> parse_type_fields_line(token:advance(stream, 1), acc)
   | Eof -> Ok((acc, stream))
   | _ ->
-    diagnostic:new(Error, "expected:comma", f"expected comma, found `{token:format(token)}`")
+    diagnostic:new(
+      severity: Error
+      code:     "expected:comma"
+      message:  f"expected comma, found `{token:format(token)}`"
+    )
     |> diagnostic:add_label("here", span)
     |> Err
 
@@ -314,7 +318,11 @@ fn parse_type_fields_multiline(
   | Eof -> Ok((acc, stream))
   | Punct(Newline) -> parse_type_fields_multiline(stream, acc)
   | _ ->
-    diagnostic:new(Error, "expected:newline", f"expected newline, found `{token:format(token)}`")
+    diagnostic:new(
+      severity: Error 
+      code:     "expected:newline"
+      message:  f"expected newline, found `{token:format(token)}`"
+    )
     |> diagnostic:add_label("here", span)
     |> Err
 
