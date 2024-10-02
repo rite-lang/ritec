@@ -359,9 +359,16 @@ pub fn puncts()
   |> dict:insert("#", Punct:Pound)
   |> dict:insert("?", Punct:Question)
 
-pub fn debug(stream: parse:token:TokenStream, acc: int)
-  match peek_nth(stream, acc)
-  | token, _ ->
-    f"token {acc}: {parse:token:format(token)}" |> std:io:println
-    debug(stream, acc + 1)
-  | Eof, _ -> void
+pub fn debug(stream: parse:token:TokenStream) -> void
+  debug_rec(stream, 0, "token")
+
+fn debug_rec(stream: parse:token:TokenStream, acc: int, prefix: str) -> void
+  let token, span = peek_nth(stream, acc)
+  match token
+  | Group(_, group_stream) ->
+        debug_rec(group_stream, 0, f"{prefix} {format(token)}")
+        debug_rec(stream, acc + 1, prefix)
+  | token ->
+    f"{prefix} {acc}: {format(token)}" |> std:io:println
+    debug_rec(stream, acc + 1, prefix)
+  | Eof -> void
