@@ -17,8 +17,8 @@ fn run(text, id)
   let stream = parse:lexer:lex(id, text)?
 
   match parse:parse(stream)
-  | Ok((expr, _)) -> 
-    std:debug:print(expr)
+  | Ok((module, _)) ->
+    format:format_module(module) |> std:io:println
     Ok(void)
   | Err(diagnostic) ->
     diagnostic:report:new()

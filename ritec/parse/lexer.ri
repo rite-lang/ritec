@@ -1,3 +1,4 @@
+//! Lex rite source code file
 import std:array
 import std:dict
 import std:dict:Dict

@@ -154,7 +154,6 @@ fn parse_match_block(
 
     match token
     | Group(Indent, tokens) ->
-      std:debug:print(tokens)
       let arms, tokens = parse_match_arms(tokens)?
       let tokens = token:take_all(tokens, Punct(Newline))
       token:expect(tokens, Eof)?
