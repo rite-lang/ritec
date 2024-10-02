@@ -176,7 +176,8 @@ fn parse_ty_rec_until(
   match token == until
   | true -> Ok((acc, stream))
   | false ->
-    let ty, stream = parse_term(stream)?
+    token:debug(stream)
+    let ty, stream = parse(stream)?
     let token, _ = token:peek(stream)
     let acc = list:append(acc, ty)
     match token
