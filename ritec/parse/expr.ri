@@ -47,8 +47,13 @@ fn parse_block_rec(
     parse_block_rec(stream, true)
   | _ ->
     let expr, stream = parse(stream, true)?
-    let exprs, stream = parse_block_rec(stream, false)?
-    Ok(([(newline, expr), ..exprs], stream))
+
+    match token:peek(stream)
+    | Punct(Newline), _ ->
+      let stream = token:advance(stream, 1)
+      let exprs, stream = parse_block_rec(stream, false)?
+      Ok(([(newline, expr), ..exprs], stream))
+    | _ -> Ok(([(newline, expr)], stream))
 
 pub fn parse(
   stream: TokenStream
