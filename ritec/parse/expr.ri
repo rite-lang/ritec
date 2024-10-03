@@ -23,7 +23,7 @@ pub fn parse_block(
   | Punct(Newline) -> parse_block(token:advance(stream, 1))
   | Group(Indent, tokens) ->
     let stream = token:advance(stream, 1)
-    let exprs, _ = parse_block_rec(tokens)?
+    let exprs, _ = parse_block_rec(tokens, false)?
     Ok((ast:Expr:Block(span, exprs), stream))
   | token ->
     diagnostic:new(
@@ -36,18 +36,19 @@ pub fn parse_block(
 
 fn parse_block_rec(
   stream: TokenStream
-) -> Result<[ast:Expr] * TokenStream, Diagnostic>
+  newline: bool
+) -> Result<[bool * ast:Expr] * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
 
   match token
   | Eof -> Ok(([], stream))
   | Punct(Newline) -> 
     let stream = token:advance(stream, 1)
-    parse_block_rec(stream)
+    parse_block_rec(stream, true)
   | _ ->
     let expr, stream = parse(stream, true)?
-    let exprs, stream = parse_block_rec(stream)?
-    Ok(([expr, ..exprs], stream))
+    let exprs, stream = parse_block_rec(stream, false)?
+    Ok(([(newline, expr), ..exprs], stream))
 
 pub fn parse(
   stream: TokenStream

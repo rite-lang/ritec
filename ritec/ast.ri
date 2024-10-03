@@ -129,7 +129,7 @@ pub type Expr =
     head: [Expr]
     tail: Result<Expr, void>
   )
-  | Block(span: Span, exprs: [Expr])
+  | Block(span: Span, exprs: [bool * Expr])
   | As(span: Span, expr: Expr, ty: Ty)
   | Field(span: Span, expr: Expr, field: str)
   | Call(

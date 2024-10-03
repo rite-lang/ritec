@@ -307,7 +307,17 @@ fn format_expr(
     f"[{head}{tail}]"
   | ast:Expr:Block(_, exprs) ->
     let fmt = inc(fmt)
-    indent_multiline(fmt, list:map(exprs, format_expr(fmt)))
+    exprs
+    |> list:map(|pair| 
+      match pair
+      | true, expr -> 
+        let expr = format_expr(fmt, expr)
+          |> indent_line(fmt, _)
+
+        f"{newline()}{expr}"
+      | false, expr -> format_expr(fmt, expr)
+    )
+    |> indent_multiline(fmt, _)
     |> string:concat(newline(), _)
   | ast:Expr:As(_, expr, ty) -> f"{format_expr(fmt, expr)} as {format_ty(fmt, ty)}"
   | ast:Expr:Field(_, expr, name) -> f"{format_expr(fmt, expr)}.{name}"
