@@ -335,7 +335,10 @@ fn format_expr(
       f"{format_expr(fmt, expr)}({args})"
     | false ->
       let args = string:join(args, ", ")
-      f"{format_expr(fmt, expr)}({args})"
+
+      match list:any(string:graphemes(args), |c| c == newline())
+      | true -> f"{format_expr(fmt, expr)}({args}{newline()}{indent_spaces(fmt)})"
+      | false -> f"{format_expr(fmt, expr)}({args})"
   | ast:Expr:Pipe(_, expr, funcs, multi) ->
     match multi
     | true ->
