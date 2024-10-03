@@ -10,12 +10,18 @@ import ast:Ty
 pub type Formatter(
   depth: int
   indent: int
+  tuple_lvl: int
 )
 
 fn inc(
   fmt: Formatter
 ) -> Formatter
   Formatter(fmt.depth + 1, ..fmt)
+
+fn inc_tuple_lvl(
+  fmt: Formatter
+) -> Formatter
+  Formatter(fmt.tuple_lvl + 1, ..fmt)
 
 fn indent_spaces(fmt: Formatter) -> str
   string:repeat(string:repeat(" ", fmt.indent), fmt.depth)
@@ -45,6 +51,7 @@ pub fn format(module: ast:Module) -> str
   let fmt = Formatter(
     depth: 0
     indent: 2
+    tuple_lvl: 0
   )
 
   format_module(fmt, module)
@@ -286,7 +293,11 @@ fn format_expr(
   | ast:Expr:String(_, value) -> f"{quote()}{value}{quote()}"
   | ast:Expr:Format(_, exprs) -> f"f{quote()}{format_format_string(fmt, exprs)}{quote()}"
   | ast:Expr:Paren(_, expr) -> f"({format_expr(fmt, expr)})"
-  | ast:Expr:Tuple(_, exprs) -> f"({string:join(list:map(exprs, format_expr(fmt)), ", ")})"
+  | ast:Expr:Tuple(_, exprs) ->
+    let s = f"{string:join(list:map(exprs, format_expr(inc_tuple_lvl(fmt))), ", ")}"
+    match fmt.tuple_lvl == 0
+    | false -> f"({s})"
+    | true -> s
   | ast:Expr:Path(_, path) -> format_path(fmt, path)
   | ast:Expr:List(_, head, tail) ->
     let head = string:join(list:map(head, format_expr(fmt)), ", ")
@@ -394,16 +405,25 @@ fn format_pat(
   | ast:Pat:Bool(_, value) -> match value
     | true -> "true"
     | false -> "false"
-  | ast:Pat:Tuple(_, pats) -> f"({string:join(list:map(pats, format_pat(fmt)), ", ")})"
+  | ast:Pat:Tuple(_, pats) ->
+    let s = f"{string:join(list:map(pats, format_pat(inc_tuple_lvl(fmt))), ", ")}"
+    match fmt.tuple_lvl == 0
+    | false -> f"({s})"
+    | true -> s
   | ast:Pat:Variant(_, path, pats) ->
-    let pats = string:join(list:map(pats, format_pat(fmt)), ", ")
-    f"{format_path(fmt, path)}({pats})"
+    let pats = match pats
+      | [] -> ""
+      | _ ->
+        let s = string:join(list:map(pats, format_pat(fmt)), ", ")
+        f"({s})"
+
+    f"{format_path(fmt, path)}{pats}"
   | ast:Pat:List(_, head, tail) ->
-    let head = string:join(list:map(head, format_pat(fmt)), ", ")
-    let tail = match tail
-      | Ok(pat) -> f", ..{format_pat(fmt, pat)}"
-      | Err(_) -> ""
-    f"[{head}{tail}]"
+    let s = list:map(head, format_pat(fmt))
+    let s = match tail
+      | Ok(pat) -> list:append(s, f"..{format_pat(fmt, pat)}")
+      | Err(_) -> s
+    f"[{string:join(s, ", ")}]"
 
 /// TODO
 fn format_argument(
