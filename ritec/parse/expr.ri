@@ -226,14 +226,14 @@ fn parse_pipe(
   match token:is(stream, Punct(OrGt))
   | true  ->
     let funcs, stream = parse_pipe_funcs(stream)?
-    Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+    Ok((ast:Expr:Pipe(lhs.span, lhs, funcs, false), stream))
   | false ->
     match multiline
     | true  ->
       match is_pipe_multiline(stream)
       | true  ->
         let funcs, stream = parse_pipe_funcs_multiline(stream)?
-        Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+        Ok((ast:Expr:Pipe(lhs.span, lhs, funcs, true), stream))
       | false -> Ok((lhs, stream))
     | false ->
       match token:peek(stream), token:peek_nth(stream, 1)
@@ -244,7 +244,7 @@ fn parse_pipe(
           let funcs, tokens = parse_pipe_funcs_multiline(tokens)?
           let _, tokens = token:take(tokens, Punct(Newline))
           let _, tokens = token:expect(tokens, Eof)?
-          Ok((ast:Expr:Pipe(lhs.span, lhs, funcs), stream))
+          Ok((ast:Expr:Pipe(lhs.span, lhs, funcs, true), stream))
         | false -> Ok((lhs, stream))
       | _ -> Ok((lhs, stream))
 
@@ -511,13 +511,17 @@ fn parse_call(
 
   match token:peek(stream)
   | Group(Parentheses, tokens), span -> 
-    let args, spread, _ = match token:peek(tokens)
-      | Punct(Newline), _ -> parse_call_args_multiline(tokens)?
-      | _                 -> parse_call_args(tokens)?
+    let args, spread, multi = match token:peek(tokens)
+      | Punct(Newline), _ -> 
+        let args, spread, _ = parse_call_args_multiline(tokens)?
+        args, spread, true
+      | _ -> 
+        let args, spread, _ = parse_call_args(tokens)?
+        args, spread, false
 
     let stream = token:advance(stream, 1)
     let span = span:join(func.span, tokens.span)
-    Ok((ast:Expr:Call(span, func, args, spread), stream))
+    Ok((ast:Expr:Call(span, func, args, multi, spread), stream))
   | _ -> Ok((func, stream))
 
 fn parse_call_args(

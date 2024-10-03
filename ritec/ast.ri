@@ -31,9 +31,22 @@ pub type Func(
   decorators: [Decorator]
   vis:        Vis
   name:       str
-  input:      [Argument]
+  input:      Arguments
   output:     Result<Ty, void>
   body:       Result<Expr, void>
+)
+
+pub type Arguments(
+  span:  Span
+  args:  [Argument]
+  multi: bool
+)
+
+pub type Argument(
+  span:       Span
+  decorators: [Decorator]
+  name:       str
+  ty:         Result<Ty, void>
 )
 
 pub type Type =
@@ -55,13 +68,19 @@ pub type Single(
   vis:        Vis
   name:       str
   generics:   Result<[str], void>
-  fields:     [Field]
+  fields:     Fields
 )
 
 pub type Variant(
   span:   Span
   name:   str
+  fields: Fields
+)
+
+pub type Fields(
+  span:   Span
   fields: [Field]
+  multi:  bool
 )
 
 pub type Field(
@@ -74,13 +93,6 @@ pub type Field(
 pub type Vis =
   | Public
   | Private
-
-pub type Argument(
-  span: Span
-  decorators: [Decorator]
-  name: str
-  ty:   Result<Ty, void>
-)
 
 pub type Ty = 
   | Infer(span: Span)
@@ -124,9 +136,15 @@ pub type Expr =
     span:   Span
     func:   Expr
     args:   [CallArgument]
+    multi:  bool
     spread: Result<Expr, void>
   )
-  | Pipe(span: Span, expr: Expr, funcs: [Expr])
+  | Pipe(
+    span:  Span 
+    expr:  Expr 
+    funcs: [Expr]
+    multi: bool
+  )
   | Binary(span: Span, lhs: Expr, op: BinOp, rhs: Expr)
   | Unary(span: Span, op: UnOp, expr: Expr)
   | Let(
