@@ -1,4 +1,5 @@
 import std:result:Result
+import std:list
 
 import ritec:diagnostic
 import ritec:diagnostic:Diagnostic
@@ -181,7 +182,7 @@ fn parse_match_arms_rec(
   match is_arm(stream)
   | true ->
     let arm, stream = parse_match_arm(stream)?
-    parse_match_arms_rec(stream, [arm, ..acc])
+    parse_match_arms_rec(stream, list:append(acc, arm))
   | false -> Ok((acc, stream))
 
 fn parse_match_arm(

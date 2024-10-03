@@ -47,13 +47,13 @@ pub fn format_module(
   fmt:    Formatter
   module: ast:Module
 ) -> str
-  let decorators =
-    list:map(module.decorators, format_decorator(fmt))
+  let decorators = module.decorators
+    |> list:map(format_decorator(fmt))
     |> string:join(newline())
 
-  let items =
-    list:map(module.items, format_item(fmt))
-    |> string:join(newline())
+  let items = module.items
+    |> list:map(format_item(fmt))
+    |> string:join(string:repeat(newline(), 2))
 
   f"{decorators}{items}"
 
@@ -66,7 +66,6 @@ fn format_item(
   | ast:Item:Func(func) -> format_func(fmt, func)
   | ast:Item:Type(ty) -> format_type(fmt, ty)
 
-
 fn format_import(
   fmt: Formatter
   imp: ast:Import
@@ -77,7 +76,9 @@ fn format_type(
   fmt: Formatter
   ty:  ast:Type
 ) -> str
-  ""
+  match ty
+  | ast:Type:Adt(adt) -> format_type_adt(fmt, adt)
+  | ast:Type:Single(single) -> format_type_single(fmt, single)
 
 fn format_type_single(
   fmt: Formatter
@@ -86,12 +87,13 @@ fn format_type_single(
   let decorators = format_decorators(fmt, ty.decorators)
   let vis = format_vis(fmt, ty.vis)
   let name = ty.name
+
   let generics = match ty.generics
     | Ok(generics) -> f"<{string:join(generics, ", ")}>"
     | Err(_) -> ""
-  let fields = list:map(ty.fields.fields, format_type_field(fmt))
-    |> string:join(newline())
-  f"{decorators}{vis}type {name}{generics}({newline()}{fields}{newline()})"
+
+  let fields = format_fields(fmt, ty.fields)
+  f"{decorators}{vis}type {name}{generics}({fields})"
 
 fn format_type_adt(
   fmt: Formatter
@@ -103,7 +105,11 @@ fn format_type_adt(
   let generics = match ty.generics
     | Ok(generics) -> f"<{string:join(generics, ", ")}>"
     | Err(_) -> ""
-  let variants = string:join(list:map(ty.variants, format_type_variant(fmt)), newline())
+
+  let variants = ty.variants
+    |> list:map(format_type_variant(inc(fmt)))
+    |> indent_multiline(inc(fmt), _)
+
   f"{decorators}{vis}type {name}{generics} = {newline()}{variants}"
 
 fn format_type_variant(
@@ -111,11 +117,21 @@ fn format_type_variant(
   variant: ast:Variant
 ) -> str
   let name = variant.name
-  let fields = list:map(variant.fields.fields, format_type_field(fmt))
-    |> string:join(newline())
-  f"| {name}({fields}{newline()})"
+  let fields = format_fields(fmt, variant.fields)
+  f"| {name}({fields})"
 
-fn format_type_field(
+fn format_fields(
+  fmt:    Formatter
+  fields: ast:Fields
+) -> str
+  match fields.multi
+  | true ->
+    let fields = list:map(fields.fields, format_field(fmt))
+    let fields = indent_multiline(inc(fmt), fields)
+    f"{newline()}{fields}{newline()}{indent_spaces(fmt)}"
+  | false -> string:join(list:map(fields.fields, format_field(fmt)), ", ")
+
+fn format_field(
   fmt:   Formatter
   field: ast:Field
 ) -> str
@@ -135,18 +151,24 @@ fn format_func(
   let decorators = format_decorators(fmt, func.decorators)
   let vis = format_vis(fmt, func.vis)
   let name = func.name
+
   let args = list:map(func.input.args, format_argument(fmt))
-    |> string:join(", ")
+
+  let args = match func.input.multi
+    | true ->
+      let args = indent_multiline(inc(fmt), args)
+      f"{newline()}{args}{newline()}{indent_spaces(fmt)}"
+    | false -> string:join(args, ", ")
 
   let output = match func.output
     | Ok(ty) -> f" -> {format_ty(fmt, ty)}"
     | Err(_) -> ""
+
   let body = match func.body
     | Ok(expr) -> f"{format_expr(fmt, expr)}"
-    | Err(_) -> ""
+    | Err(_) -> newline()
 
-  f"{decorators}{vis}fn {name}({args}){output}{body}{newline()}"
-
+  f"{decorators}{vis}fn {name}({args}){output}{body}"
 
 fn format_vis(
   fmt: Formatter
@@ -204,7 +226,10 @@ fn format_ty(
   | ast:Ty:Int(_, kind) -> format_ty_int(fmt, kind)
   | ast:Ty:Str(_) -> "str"
   | ast:Ty:Ref(_, ty) -> f"&{format_ty(fmt, ty)}"
-  | ast:Ty:Tuple(_, tys) -> f"({string:join(list:map(tys, format_ty(fmt)), ", ")})"
+  | ast:Ty:Tuple(_, tys) ->
+    tys
+    |> list:map(format_ty(fmt))
+    |> string:join(" * ")
   | ast:Ty:List(_, ty) -> f"[{format_ty(fmt, ty)}]"
   | ast:Ty:Generic(_, name) -> f"'{name}"
   | ast:Ty:Func(_, input, output) ->
@@ -224,11 +249,11 @@ fn format_ty_int(
   kind: number:IntKind
 ) -> str
   match kind
-  | number:IntKind:U8 -> "u8"
+  | number:IntKind:U8  -> "u8"
   | number:IntKind:U16 -> "u16"
   | number:IntKind:U32 -> "u32"
   | number:IntKind:U64 -> "u64"
-  | number:IntKind:I8 -> "i8"
+  | number:IntKind:I8  -> "i8"
   | number:IntKind:I16 -> "i16"
   | number:IntKind:I32 -> "i32"
   | number:IntKind:I64 -> "i64"
@@ -262,11 +287,20 @@ fn format_expr(
   | ast:Expr:As(_, expr, ty) -> f"{format_expr(fmt, expr)} as {format_ty(fmt, ty)}"
   | ast:Expr:Field(_, expr, name) -> f"{format_expr(fmt, expr)}.{name}"
   | ast:Expr:Call(_, expr, args, multi, spread) ->
-    let args = string:join(list:map(args, format_call_arg(fmt)), ", ")
-    let spread = match spread
-      | Ok(expr) -> f", ..{format_expr(fmt, expr)}"
-      | Err(_) -> ""
-    f"{format_expr(fmt, expr)}({args}{spread})"
+    let args = args |> list:map(format_call_arg(fmt))
+
+    let args = match spread
+      | Ok(expr) -> list:append(args, f"..{format_expr(fmt, expr)}")
+      | Err(_) -> args
+
+    match multi
+    | true -> 
+      let args = indent_multiline(inc(fmt), args)
+      let args = f"{newline()}{args}{newline()}{indent_spaces(fmt)}"
+      f"{format_expr(fmt, expr)}({args})"
+    | false ->
+      let args = string:join(args, ", ")
+      f"{format_expr(fmt, expr)}({args})"
   | ast:Expr:Pipe(_, expr, funcs, multi) ->
     match multi
     | true -> 
