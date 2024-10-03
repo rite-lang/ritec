@@ -35,6 +35,12 @@ fn quote() -> str
 fn newline() -> str
   char(10)
 
+fn open_brace() -> str
+  char(123)
+
+fn close_brace() -> str
+  char(125)
+
 pub fn format(module: ast:Module) -> str
   let fmt = Formatter(
     depth: 0
@@ -93,7 +99,7 @@ fn format_type_single(
     | Err(_) -> ""
 
   let fields = format_fields(fmt, ty.fields)
-  f"{decorators}{vis}type {name}{generics}({fields})"
+  f"{decorators}{vis}type {name}{generics}{fields}"
 
 fn format_type_adt(
   fmt: Formatter
@@ -106,11 +112,15 @@ fn format_type_adt(
     | Ok(generics) -> f"<{string:join(generics, ", ")}>"
     | Err(_) -> ""
 
-  let variants = ty.variants
-    |> list:map(format_type_variant(inc(fmt)))
-    |> indent_multiline(inc(fmt), _)
+  let variants = match ty.variants
+    | [] -> ""
+    | _ ->
+      ty.variants
+      |> list:map(format_type_variant(inc(fmt)))
+      |> indent_multiline(inc(fmt), _)
+      |> string:concat(f" = {newline()}", _)
 
-  f"{decorators}{vis}type {name}{generics} = {newline()}{variants}"
+  f"{decorators}{vis}type {name}{generics}{variants}"
 
 fn format_type_variant(
   fmt:     Formatter
@@ -118,18 +128,22 @@ fn format_type_variant(
 ) -> str
   let name = variant.name
   let fields = format_fields(fmt, variant.fields)
-  f"| {name}({fields})"
+  f"| {name}{fields}"
 
 fn format_fields(
   fmt:    Formatter
   fields: ast:Fields
 ) -> str
-  match fields.multi
-  | true ->
-    let fields = list:map(fields.fields, format_field(fmt))
-    let fields = indent_multiline(inc(fmt), fields)
-    f"{newline()}{fields}{newline()}{indent_spaces(fmt)}"
-  | false -> string:join(list:map(fields.fields, format_field(fmt)), ", ")
+  match fields.fields
+  | [] -> ""
+  | _ ->
+    let fields = match fields.multi
+      | true ->
+        let fields = list:map(fields.fields, format_field(fmt))
+        let fields = indent_multiline(inc(fmt), fields)
+        f"{newline()}{fields}{newline()}{indent_spaces(fmt)}"
+      | false -> string:join(list:map(fields.fields, format_field(fmt)), ", ")
+    f"({fields})"
 
 fn format_field(
   fmt:   Formatter
@@ -270,7 +284,7 @@ fn format_expr(
     | false -> "false"
   | ast:Expr:Int(_, value) -> f"{value}"
   | ast:Expr:String(_, value) -> f"{quote()}{value}{quote()}"
-  | ast:Expr:Format(_, exprs) -> "f{quote()} .. {quote()}"
+  | ast:Expr:Format(_, exprs) -> f"f{quote()}{format_format_string(fmt, exprs)}{quote()}"
   | ast:Expr:Paren(_, expr) -> f"({format_expr(fmt, expr)})"
   | ast:Expr:Tuple(_, exprs) -> f"({string:join(list:map(exprs, format_expr(fmt)), ", ")})"
   | ast:Expr:Path(_, path) -> format_path(fmt, path)
@@ -427,3 +441,16 @@ fn format_un_op(
   | ast:UnOp:Deref -> "*"
   | ast:UnOp:Not -> "!"
   | ast:UnOp:Neg -> "-"
+
+fn format_format_string(
+  fmt:   Formatter
+  exprs: [ast:Expr * ast:Format]
+) -> str
+  match exprs
+  | [] -> ""
+  | [(expr, format), ..rest] ->
+    let part = match expr
+      | ast:Expr:String(_, s) -> s
+      | _ -> f"{open_brace()}{format_expr(fmt, expr)}{close_brace()}"
+
+    f"{part}{format_format_string(fmt, rest)}"

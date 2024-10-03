@@ -1,2 +1,8 @@
 fn main()
-  f"Such a cool string {x} {1 + 1 * 20} {|x| x} a{Wow()} {{ }} {{}}"
+  diagnostic:new(
+    severity: Error
+    code:     "expected:path"
+    message:  f"expected path, found `{token:format(token)}`"
+  )
+  |> diagnostic:add_label("here", span)
+  |> Err

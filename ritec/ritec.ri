@@ -6,7 +6,7 @@ import std:result:Result
 
 fn main(args: [str])
   let sources = span:new_sources()
-  let assert Ok(source) = span:load_source("ritec/parse/lexer.ri")
+  let assert Ok(source) = span:load_source("test/test.ri")
   let sources, id = span:add_source(sources, source)
 
   match run(source.text, id)
