@@ -7,6 +7,25 @@ import std:result:Result
 import ast:Expr
 import ast:Ty
 
+pub type Formatter(
+  depth: int
+  indent: int
+)
+
+fn inc(
+  fmt: Formatter
+) -> Formatter
+  Formatter(fmt.depth + 1, ..fmt)
+
+fn indent_spaces(fmt: Formatter) -> str
+  string:repeat(string:repeat(" ", fmt.indent), fmt.depth)
+
+fn indent_line(fmt: Formatter, line: str) -> str
+  f"{indent_spaces(fmt)}{line}"
+
+fn indent_multiline(fmt: Formatter, lines: [str]) -> str
+  string:join(list:map(lines, indent_line(fmt)), newline())
+
 fn char(c: u8) -> str
   string:from_bytes(array:from_list([c]))
 
@@ -16,110 +35,133 @@ fn quote() -> str
 fn newline() -> str
   char(10)
 
+pub fn format(module: ast:Module) -> str
+  let fmt = Formatter(
+    depth: 0
+    indent: 2
+  )
+
+  format_module(fmt, module)
+
 pub fn format_module(
+  fmt:    Formatter
   module: ast:Module
 ) -> str
   let decorators =
-    list:map(module.decorators, format_decorator)
+    list:map(module.decorators, format_decorator(fmt))
     |> string:join(newline())
 
   let items =
-    list:map(module.items, format_item)
+    list:map(module.items, format_item(fmt))
     |> string:join(newline())
 
-  f"{decorators}{newline()}{items}"
+  f"{decorators}{items}"
 
 fn format_item(
+  fmt:  Formatter
   item: ast:Item
 ) -> str
   match item
-  | ast:Item:Import(imp) -> format_import(imp)
-  | ast:Item:Func(func) -> format_func(func)
-  | ast:Item:Type(ty) -> format_type(ty)
+  | ast:Item:Import(imp) -> format_import(fmt, imp)
+  | ast:Item:Func(func) -> format_func(fmt, func)
+  | ast:Item:Type(ty) -> format_type(fmt, ty)
 
 
 fn format_import(
+  fmt: Formatter
   imp: ast:Import
 ) -> str
-  f"{format_vis(imp.vis)}import {format_path(imp.path)}"
+  f"{format_vis(fmt, imp.vis)}import {format_path(fmt, imp.path)}"
 
 fn format_type(
-  ty: ast:Type
+  fmt: Formatter
+  ty:  ast:Type
 ) -> str
   ""
 
 fn format_type_single(
-  ty: ast:Single
+  fmt: Formatter
+  ty:  ast:Single
 ) -> str
-  let decorators = list:map(ty.decorators, format_decorator)
-    |> string:join(newline())
-  let vis = format_vis(ty.vis)
+  let decorators = format_decorators(fmt, ty.decorators)
+  let vis = format_vis(fmt, ty.vis)
   let name = ty.name
   let generics = match ty.generics
     | Ok(generics) -> f"<{string:join(generics, ", ")}>"
     | Err(_) -> ""
-  let fields = string:join(list:map(ty.fields, format_type_field), newline())
-  f"{decorators}{newline()}{vis}type {name}{generics}({newline()}{fields}{newline()})"
+  let fields = string:join(list:map(ty.fields, format_type_field(fmt)), newline())
+  f"{decorators}{vis}type {name}{generics}({newline()}{fields}{newline()})"
 
 fn format_type_adt(
-  ty: ast:Adt
+  fmt: Formatter
+  ty:  ast:Adt
 ) -> str
-  let decorators = list:map(ty.decorators, format_decorator)
-    |> string:join(newline())
-  let vis = format_vis(ty.vis)
+  let decorators = format_decorators(fmt, ty.decorators)
+  let vis = format_vis(fmt, ty.vis)
   let name = ty.name
   let generics = match ty.generics
     | Ok(generics) -> f"<{string:join(generics, ", ")}>"
     | Err(_) -> ""
-  let variants = string:join(list:map(ty.variants, format_type_variant), newline())
-  f"{decorators}{newline()}{vis}type {name}{generics} = {newline()}{variants}"
+  let variants = string:join(list:map(ty.variants, format_type_variant(fmt)), newline())
+  f"{decorators}{vis}type {name}{generics} = {newline()}{variants}"
 
 fn format_type_variant(
+  fmt:     Formatter
   variant: ast:Variant
 ) -> str
   let name = variant.name
-  let fields = string:join(list:map(variant.fields, format_type_field), f"{newline()}")
+  let fields = string:join(list:map(variant.fields, format_type_field(fmt)), f"{newline()}")
   f"| {name}({fields}{newline()})"
 
 fn format_type_field(
+  fmt:   Formatter
   field: ast:Field
 ) -> str
-  let decorators = list:map(field.decorators, format_decorator)
-    |> string:join(newline())
+  let decorators = format_decorators(fmt, field.decorators)
 
   let name = field.name
   let ty = match field.ty
-    | Ok(ty) -> f": {format_ty(ty)}"
+    | Ok(ty) -> f": {format_ty(fmt, ty)}"
     | Err(_) -> ""
 
-  f"{decorators}{newline()}{name}{ty}"
+  f"{decorators}{name}{ty}"
 
 fn format_func(
+  fmt:  Formatter
   func: ast:Func
 ) -> str
-  let decorators = list:map(func.decorators, format_decorator)
-    |> string:join(newline())
-  let vis = format_vis(func.vis)
+  let decorators = format_decorators(fmt, func.decorators)
+  let vis = format_vis(fmt, func.vis)
   let name = func.name
-  let args = string:join(list:map(func.input, format_argument), ", ")
+  let args = string:join(list:map(func.input, format_argument(fmt)), ", ")
   let output = match func.output
-    | Ok(ty) -> f" -> {format_ty(ty)}"
+    | Ok(ty) -> f" -> {format_ty(fmt, ty)}"
     | Err(_) -> ""
   let body = match func.body
-    | Ok(expr) -> f"{newline()}{format_expr(expr)}"
+    | Ok(expr) -> f"{format_expr(fmt, expr)}"
     | Err(_) -> ""
 
-  f"{decorators}{newline()}{vis}fn {name}({args}){output}{newline()}   {body}"
+  f"{decorators}{vis}fn {name}({args}){output}{body}{newline()}"
 
 
 fn format_vis(
+  fmt: Formatter
   vis: ast:Vis
 ) -> str
   match vis
   | ast:Vis:Public -> "pub "
   | ast:Vis:Private -> ""
 
+fn format_decorators(
+  fmt:        Formatter
+  decorators: [ast:Decorator]
+) -> str
+  list:map(decorators, format_decorator(fmt))
+  |> list:map(string:concat(_, newline()))
+  |> string:join("")
+
 fn format_decorator(
+  fmt:       Formatter
   decorator: ast:Decorator
 ) -> str
   mut s = ""
@@ -136,40 +178,45 @@ fn format_decorator(
   | true ->
     let args = list:map(decorator.args, |x| f"{quote()}{x}{quote()}")
     let args = string:join(args, ", ")
-    f"#[{decorator.name}({args})]"
-  | false -> s
+    s = f"#[{decorator.name}({args})]"
+  | false -> void
+
+  indent_line(fmt, s)
 
 fn format_path(
+  fmt:  Formatter
   path: ast:Path
 ) -> str
   string:join(path.segments, ":")
 
 fn format_ty(
+  fmt: Formatter
   ty: ast:Ty
 ) -> str
   match ty
   | ast:Ty:Infer(_) -> "_"
   | ast:Ty:Void(_) -> "void"
   | ast:Ty:Bool(_) -> "bool"
-  | ast:Ty:Int(_, kind) -> format_ty_int(kind)
+  | ast:Ty:Int(_, kind) -> format_ty_int(fmt, kind)
   | ast:Ty:Str(_) -> "str"
-  | ast:Ty:Ref(_, ty) -> f"&{format_ty(ty)}"
-  | ast:Ty:Tuple(_, tys) -> f"({string:join(list:map(tys, format_ty), ", ")})"
-  | ast:Ty:List(_, ty) -> f"[{format_ty(ty)}]"
+  | ast:Ty:Ref(_, ty) -> f"&{format_ty(fmt, ty)}"
+  | ast:Ty:Tuple(_, tys) -> f"({string:join(list:map(tys, format_ty(fmt)), ", ")})"
+  | ast:Ty:List(_, ty) -> f"[{format_ty(fmt, ty)}]"
   | ast:Ty:Generic(_, name) -> f"'{name}"
   | ast:Ty:Func(_, input, output) ->
-    let input = string:join(list:map(input, format_ty), ", ")
+    let input = string:join(list:map(input, format_ty(fmt)), ", ")
     let output = match output
-      | Ok(ty) -> format_ty(ty)
+      | Ok(ty) -> format_ty(fmt, ty)
       | Err(_) -> "void"
     f"fn({input}) -> {output}"
   | ast:Ty:Path(_, path, generics) ->
     let generics = match generics
-      | Ok(tys) -> f"<{string:join(list:map(tys, format_ty), ", ")}>"
+      | Ok(tys) -> f"<{string:join(list:map(tys, format_ty(fmt)), ", ")}>"
       | Err(_) -> ""
-    f"{format_path(path)}{generics}"
+    f"{format_path(fmt, path)}{generics}"
 
 fn format_ty_int(
+  fmt:  Formatter
   kind: number:IntKind
 ) -> str
   match kind
@@ -184,6 +231,7 @@ fn format_ty_int(
   | number:IntKind:Int -> "int"
 
 fn format_expr(
+  fmt:  Formatter
   expr: ast:Expr
 ) -> str
   match expr
@@ -194,66 +242,71 @@ fn format_expr(
   | ast:Expr:Int(_, value) -> f"{value}"
   | ast:Expr:String(_, value) -> f"{quote()}{value}{quote()}"
   | ast:Expr:Format(_, exprs) -> "f{quote()} .. {quote()}"
-  | ast:Expr:Paren(_, expr) -> f"({format_expr(expr)})"
-  | ast:Expr:Tuple(_, exprs) -> f"({string:join(list:map(exprs, format_expr), ", ")})"
-  | ast:Expr:Path(_, path) -> format_path(path)
+  | ast:Expr:Paren(_, expr) -> f"({format_expr(fmt, expr)})"
+  | ast:Expr:Tuple(_, exprs) -> f"({string:join(list:map(exprs, format_expr(fmt)), ", ")})"
+  | ast:Expr:Path(_, path) -> format_path(fmt, path)
   | ast:Expr:List(_, head, tail) ->
-    let head = string:join(list:map(head, format_expr), ", ")
+    let head = string:join(list:map(head, format_expr(fmt)), ", ")
     let tail = match tail
-      | Ok(expr) -> f", ..{format_expr(expr)}"
+      | Ok(expr) -> f", ..{format_expr(fmt, expr)}"
       | Err(_) -> ""
     f"[{head}{tail}]"
-  | ast:Expr:Block(_, exprs) -> f"  {string:join(list:map(exprs, format_expr), newline())}"
-  | ast:Expr:As(_, expr, ty) -> f"{format_expr(expr)} as {format_ty(ty)}"
-  | ast:Expr:Field(_, expr, name) -> f"{format_expr(expr)}.{name}"
+  | ast:Expr:Block(_, exprs) ->
+    let fmt = inc(fmt)
+    indent_multiline(fmt, list:map(exprs, format_expr(fmt)))
+    |> string:concat(newline(), _)
+  | ast:Expr:As(_, expr, ty) -> f"{format_expr(fmt, expr)} as {format_ty(fmt, ty)}"
+  | ast:Expr:Field(_, expr, name) -> f"{format_expr(fmt, expr)}.{name}"
   | ast:Expr:Call(_, expr, args, spread) ->
-    let args = string:join(list:map(args, format_call_arg), ", ")
+    let args = string:join(list:map(args, format_call_arg(fmt)), ", ")
     let spread = match spread
-      | Ok(expr) -> f", ..{format_expr(expr)}"
+      | Ok(expr) -> f", ..{format_expr(fmt, expr)}"
       | Err(_) -> ""
-    f"{format_expr(expr)}({args}{spread})"
+    f"{format_expr(fmt, expr)}({args}{spread})"
   | ast:Expr:Pipe(_, expr, funcs) ->
-    let funcs = string:join(list:map(funcs, format_expr), " |> ")
-    f"{format_expr(expr)} |> {funcs}"
+    let funcs = string:join(list:map(funcs, format_expr(fmt)), " |> ")
+    f"{format_expr(fmt, expr)} |> {funcs}"
   | ast:Expr:Binary(_, lhs, op, rhs) ->
-    f"{format_expr(lhs)} {format_bin_op(op)} {format_expr(rhs)}"
-  | ast:Expr:Unary(_, op, expr) -> f"{format_un_op(op)}{format_expr(expr)}"
+    f"{format_expr(fmt, lhs)} {format_bin_op(fmt, op)} {format_expr(fmt, rhs)}"
+  | ast:Expr:Unary(_, op, expr) -> f"{format_un_op(fmt, op)}{format_expr(fmt, expr)}"
   | ast:Expr:Let(_, is_assert, pat, ty, expr) ->
     let is_assert = match is_assert
       | true -> "assert "
       | false -> ""
     let ty = match ty
-      | Ok(ty) -> f": {format_ty(ty)}"
+      | Ok(ty) -> f": {format_ty(fmt, ty)}"
       | Err(_) -> ""
-    f"let {is_assert}{format_pat(pat)}{ty} = {format_expr(expr)}"
+    f"let {is_assert}{format_pat(fmt, pat)}{ty} = {format_expr(fmt, expr)}"
   | ast:Expr:Mut(_, name, ty, expr) ->
     let ty = match ty
-      | Ok(ty) -> f": {format_ty(ty)}"
+      | Ok(ty) -> f": {format_ty(fmt, ty)}"
       | Err(_) -> ""
-    f"mut {name}{ty} = {format_expr(expr)}"
-  | ast:Expr:Assign(_, lhs, rhs) -> f"{format_expr(lhs)} = {format_expr(rhs)}"
+    f"mut {name}{ty} = {format_expr(fmt, expr)}"
+  | ast:Expr:Assign(_, lhs, rhs) -> f"{format_expr(fmt, lhs)} = {format_expr(fmt, rhs)}"
   | ast:Expr:Match(_, expr, arms) ->
-    let arms = string:join(list:map(arms, format_arm), newline())
-    f"match {format_expr(expr)}{newline()}{arms}"
+    let arms = string:join(list:map(arms, format_arm(fmt)), newline())
+    f"match {format_expr(fmt, expr)}{newline()}{arms}"
   | ast:Expr:Closure(_, args, body) ->
-    let args = string:join(list:map(args, format_argument), ", ")
-    f"|{args}| {format_expr(body)}"
+    let args = string:join(list:map(args, format_argument(fmt)), ", ")
+    f"|{args}| {format_expr(fmt, body)}"
   | ast:Expr:Panic(_, message) -> match message
     | Ok(message) -> f"panic {quote()}{message}{quote()}"
     | Err(_) -> "panic"
   | ast:Expr:Assert(_, expr, message) -> match message
-    | Ok(message) -> f"assert {format_expr(expr)} {quote()}{message}{quote()}"
-    | Err(_) -> f"assert {format_expr(expr)}"
-  | ast:Expr:Try(_, expr) -> f"try {format_expr(expr)}"
+    | Ok(message) -> f"assert {format_expr(fmt, expr)} {quote()}{message}{quote()}"
+    | Err(_) -> f"assert {format_expr(fmt, expr)}"
+  | ast:Expr:Try(_, expr) -> f"{format_expr(fmt, expr)}?"
 
 fn format_arm(
+  fmt: Formatter
   arm: ast:Arm
 ) -> str
-  let pat = format_pat(arm.pat)
-  let expr = format_expr(arm.body)
-  f"| {pat} -> {expr}"
+  let pat = format_pat(fmt, arm.pat)
+  let expr = format_expr(fmt, arm.body)
+  indent_line(fmt, f"| {pat} -> {expr}")
 
 fn format_pat(
+  fmt: Formatter
   pat: ast:Pat
 ) -> str
   match pat
@@ -262,43 +315,45 @@ fn format_pat(
   | ast:Pat:Bool(_, value) -> match value
     | true -> "true"
     | false -> "false"
-  | ast:Pat:Tuple(_, pats) -> f"({string:join(list:map(pats, format_pat), ", ")})"
+  | ast:Pat:Tuple(_, pats) -> f"({string:join(list:map(pats, format_pat(fmt)), ", ")})"
   | ast:Pat:Variant(_, path, pats) ->
-    let pats = string:join(list:map(pats, format_pat), ", ")
-    f"{format_path(path)}({pats})"
+    let pats = string:join(list:map(pats, format_pat(fmt)), ", ")
+    f"{format_path(fmt, path)}({pats})"
   | ast:Pat:List(_, head, tail) ->
-    let head = string:join(list:map(head, format_pat), ", ")
+    let head = string:join(list:map(head, format_pat(fmt)), ", ")
     let tail = match tail
-      | Ok(pat) -> f", ..{format_pat(pat)}"
+      | Ok(pat) -> f", ..{format_pat(fmt, pat)}"
       | Err(_) -> ""
     f"[{head}{tail}]"
 
+/// TODO
 fn format_argument(
+  fmt: Formatter
   arg: ast:Argument
 ) -> str
-  let decorators = list:map(arg.decorators, format_decorator)
-    |> string:join(newline())
-
+  let decorators = format_decorators(fmt, arg.decorators)
   let name = arg.name
   let ty = match arg.ty
-    | Ok(ty) -> f": {format_ty(ty)}"
+    | Ok(ty) -> f": {format_ty(fmt, ty)}"
     | Err(_) -> ""
 
-  f"{decorators}{newline()}{name}{ty}"
+  f"{decorators}{name}{ty}"
 
 fn format_call_arg(
+  fmt: Formatter
   arg: ast:CallArgument
 ) -> str
   match arg
   | ast:CallArgument:Positional(expr) -> match expr
-    | Ok(expr) -> format_expr(expr)
+    | Ok(expr) -> format_expr(fmt, expr)
     | Err(_) -> "_"
   | ast:CallArgument:Named(expr, name) -> match expr
-    | Ok(expr) -> f"{name}: {format_expr(expr)}"
+    | Ok(expr) -> f"{name}: {format_expr(fmt, expr)}"
     | Err(_) -> f"{name}: _"
 
 fn format_bin_op(
-  op: ast:BinOp
+  fmt: Formatter
+  op:  ast:BinOp
 ) -> str
   match op
   | ast:BinOp:Add -> "+"
@@ -316,7 +371,8 @@ fn format_bin_op(
   | ast:BinOp:Ge -> ">="
 
 fn format_un_op(
-  op: ast:UnOp
+  fmt: Formatter
+  op:  ast:UnOp
 ) -> str
   match op
   | ast:UnOp:Ref -> "&"

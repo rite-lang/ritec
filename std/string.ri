@@ -92,3 +92,9 @@ pub fn starts_with(s: str, prefix: str) -> bool
 pub fn ends_with(s: str, suffix: str) -> bool
   let len = length(s)
   suffix == slice(s, len - length(suffix), len)
+
+/// Repeat a string n times.
+pub fn repeat(s: str, n: int) -> str
+  match n > 0
+  | true -> s |> concat(repeat(s, n - 1))
+  | false -> ""

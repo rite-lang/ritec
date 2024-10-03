@@ -18,7 +18,7 @@ fn run(text, id)
 
   match parse:parse(stream)
   | Ok((module, _)) ->
-    format:format_module(module) |> std:io:println
+    format:format(module) |> std:io:println
     Ok(void)
   | Err(diagnostic) ->
     diagnostic:report:new()
