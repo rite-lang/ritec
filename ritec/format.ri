@@ -317,17 +317,20 @@ fn format_expr(
       f"{format_expr(fmt, expr)}({args})"
   | ast:Expr:Pipe(_, expr, funcs, multi) ->
     match multi
-    | true -> 
-      let funcs = list:map(funcs, format_expr(fmt))
-        |> list:map(string:concat(" |> ", _))
-
-      f"{format_expr(fmt, expr)}{funcs}"
-    | false ->
+    | true ->
       let funcs = list:map(funcs, format_expr(fmt))
         |> list:map(string:concat("|> ", _))
-        |> indent_multiline(inc(fmt), _)
+        |> list:map(indent_line(fmt, _))
+        |> list:map(string:concat(_, newline()))
+        |> string:join("")
 
       f"{format_expr(fmt, expr)}{newline()}{funcs}"
+    | false ->
+      let funcs = list:map(funcs, format_expr(fmt))
+        |> list:map(string:concat(" |> ", _))
+        |> string:join("")
+
+      f"{format_expr(fmt, expr)}{funcs}"
   | ast:Expr:Binary(_, lhs, op, rhs) ->
     f"{format_expr(fmt, lhs)} {format_bin_op(fmt, op)} {format_expr(fmt, rhs)}"
   | ast:Expr:Unary(_, op, expr) -> f"{format_un_op(fmt, op)}{format_expr(fmt, expr)}"
@@ -338,12 +341,26 @@ fn format_expr(
     let ty = match ty
       | Ok(ty) -> f": {format_ty(fmt, ty)}"
       | Err(_) -> ""
-    f"let {is_assert}{format_pat(fmt, pat)}{ty} = {format_expr(fmt, expr)}"
+
+    // some blocks need an additional indent here
+    let efmt = match expr
+      | ast:Expr:Match(_, _, _) -> inc(fmt)
+      | ast:Expr:Pipe(_, _, _, true) -> inc(fmt)
+      | _ -> fmt
+
+    f"let {is_assert}{format_pat(fmt, pat)}{ty} = {format_expr(efmt, expr)}"
   | ast:Expr:Mut(_, name, ty, expr) ->
     let ty = match ty
       | Ok(ty) -> f": {format_ty(fmt, ty)}"
       | Err(_) -> ""
-    f"mut {name}{ty} = {format_expr(fmt, expr)}"
+
+    // some blocks need an additional indent here
+    let efmt = match expr
+      | ast:Expr:Match(_, _, _) -> inc(fmt)
+      | ast:Expr:Pipe(_, _, _, true) -> inc(fmt)
+      | _ -> fmt
+
+    f"mut {name}{ty} = {format_expr(efmt, expr)}"
   | ast:Expr:Assign(_, lhs, rhs) -> f"{format_expr(fmt, lhs)} = {format_expr(fmt, rhs)}"
   | ast:Expr:Match(_, expr, arms) ->
     let arms = string:join(list:map(arms, format_arm(fmt)), newline())
