@@ -593,7 +593,7 @@ fn lex_indent(lexer: Lexer)
 
             diagnostic:new(
               severity:  diagnostic:Error
-              code:      "E0001"
+              code:      "invalid:indent"
               message:   "indentation must be consistent, and cannot mix tabs and spaces"
             )
             |> diagnostic:add_label("here", span)
