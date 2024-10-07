@@ -591,6 +591,7 @@ fn parse_expr(tokens: &mut TokenStream, multiline: bool) -> miette::Result<Expr>
         Token::Let => parse_let_expr(tokens, multiline),
         Token::Mut => parse_mut_expr(tokens, multiline),
         Token::Match => parse_match_expr(tokens, multiline),
+        Token::Return => parse_return_expr(tokens),
         Token::Assert => parse_assert_expr(tokens, multiline),
         _ => parse_assign_expr(tokens, multiline),
     }
@@ -824,6 +825,17 @@ fn parse_pat_term(tokens: &mut TokenStream) -> miette::Result<Pat> {
         )
         .with_source_code(tokens.peek().1)),
     }
+}
+
+fn parse_return_expr(tokens: &mut TokenStream) -> miette::Result<Expr> {
+    let span = tokens.expect(Token::Return)?;
+
+    let expr = match tokens.is(Token::Newline) {
+        true => None,
+        false => Some(Box::new(parse_expr(tokens, false)?)),
+    };
+
+    Ok(Expr::Return(expr, span))
 }
 
 fn parse_assert_expr(tokens: &mut TokenStream, _multiline: bool) -> miette::Result<Expr> {

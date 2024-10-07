@@ -136,6 +136,7 @@ pub enum Expr {
     LetAssert(Pat, Option<Ty>, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<Arm>, Span),
+    Return(Option<Box<Expr>>, Span),
     Closure(Vec<Argument>, Box<Expr>),
     Panic(&'static str, Span),
     Assert(Box<Expr>, Option<&'static str>, Span),
@@ -208,6 +209,7 @@ impl Expr {
                 start.join(end)
             }
             Expr::Match(_, _, span) => *span,
+            Expr::Return(_, span) => *span,
             Expr::Closure(args, expr) => {
                 let end = expr.span();
                 let start = args.first().map_or(end, |arg| arg.span);

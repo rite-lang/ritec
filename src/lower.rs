@@ -779,6 +779,7 @@ fn lower_expr(cx: &mut BodyCx, ast: &ast::Expr) -> miette::Result<hir::Expr> {
         ast::Expr::LetAssert(pat, ty, expr) => lower_let_assert(cx, pat, ty.as_ref(), expr),
         ast::Expr::Assign(lhs, rhs) => lower_assign(cx, lhs, rhs),
         ast::Expr::Match(input, arms, span) => lower_match(cx, input, arms, *span),
+        ast::Expr::Return(expr, span) => lower_return(cx, expr.as_deref(), *span),
         ast::Expr::Closure(args, body) => lower_closure(cx, args, body),
         ast::Expr::Panic(message, span) => lower_panic(cx, message, *span),
         ast::Expr::Assert(expr, message, span) => lower_assert(cx, expr, *message, *span),
@@ -1509,6 +1510,39 @@ fn lower_unary(
 
             let kind = hir::ExprKind::Unary(hir::UnOp::Not, Box::new(expr));
             Ok(hir::Expr { kind, ty })
+        }
+    }
+}
+
+fn lower_return(
+    cx: &mut BodyCx,
+    expr: Option<&ast::Expr>,
+    span: Span,
+) -> miette::Result<hir::Expr> {
+    let ty = cx.output.clone();
+
+    match expr {
+        Some(expr) => {
+            let expr = lower_expr(cx, expr)?;
+            cx.unit.unify(expr.ty.clone(), ty.clone(), span);
+
+            let kind = hir::ExprKind::Return(Box::new(expr));
+            Ok(hir::Expr {
+                kind,
+                ty: hir::Ty::void(span),
+            })
+        }
+        None => {
+            let kind = hir::ExprKind::Return(Box::new(hir::Expr {
+                kind: hir::ExprKind::Void,
+                ty: hir::Ty::void(span),
+            }));
+            cx.unit.unify(hir::Ty::void(span), ty.clone(), span);
+
+            Ok(hir::Expr {
+                kind,
+                ty: hir::Ty::void(span),
+            })
         }
     }
 }
