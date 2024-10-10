@@ -13,6 +13,7 @@ import token:TokenTree
 import token:Keyword
 import token:Punct
 import token:Delimiter
+import token:Comment
 
 pub fn parse_block(
   stream: TokenStream
@@ -23,8 +24,8 @@ pub fn parse_block(
   | Punct(Newline) -> parse_block(token:advance(stream, 1))
   | Group(Indent, tokens) ->
     let stream = token:advance(stream, 1)
-    let exprs, _ = parse_block_rec(tokens, false)?
-    Ok((ast:Expr:Block(span, exprs), stream))
+    let items, _ = parse_block_rec(tokens)?
+    Ok((ast:Expr:Block(span, items), stream))
   | token ->
     diagnostic:new(
       severity: Error
@@ -36,24 +37,38 @@ pub fn parse_block(
 
 fn parse_block_rec(
   stream: TokenStream
-  newline: bool
-) -> Result<[bool * ast:Expr] * TokenStream, Diagnostic>
+) -> Result<[ast:BlockItem] * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
 
   match token
   | Eof -> Ok(([], stream))
+  | Comment(Any(comment)) ->
+    let stream = token:advance(stream, 1)
+    let _, stream = token:expect(stream, Punct(Newline))?
+    let items, stream = parse_block_rec(stream)?
+    let item = ast:BlockItem:Comment(span, comment)
+
+    Ok(([item, ..items], stream))
   | Punct(Newline) -> 
     let stream = token:advance(stream, 1)
-    parse_block_rec(stream, true)
+    let items, stream = parse_block_rec(stream)?
+    let item = ast:BlockItem:Newline(span)
+
+    Ok(([item, ..items], stream))
   | _ ->
     let expr, stream = parse(stream, true)?
+
+    let item = ast:BlockItem:Expr(expr, Err(void))
 
     match token:peek(stream)
     | Punct(Newline), _ ->
       let stream = token:advance(stream, 1)
-      let exprs, stream = parse_block_rec(stream, false)?
-      Ok(([(newline, expr), ..exprs], stream))
-    | _ -> Ok(([(newline, expr)], stream))
+      let items, stream = parse_block_rec(stream)?
+
+      Ok(([item, ..items], stream))
+    | _ ->
+      let items, stream = parse_block_rec(stream)?
+      Ok(([item, ..items], stream))
 
 pub fn parse(
   stream: TokenStream
@@ -64,6 +79,7 @@ pub fn parse(
   match token
   | Keyword(Let)    -> parse_let(stream, multiline)
   | Keyword(Mut)    -> parse_mut(stream, multiline)
+  | Keyword(Return) -> parse_return(stream, multiline)
   | Keyword(Assert) -> parse_assert(stream)
   | Keyword(Match)  -> parse_match(stream, multiline)
   | token -> parse_assign(stream, multiline)
@@ -137,8 +153,22 @@ fn is_arm(stream: TokenStream) -> bool
   | ((Punct(Or), _), _) -> true
   | _ -> false
 
+fn parse_return(
+  stream: TokenStream
+  multiline: bool
+) -> Result<ast:Expr * TokenStream, Diagnostic>
+  let span, stream = token:expect(stream, Keyword(Return))?
+
+  let expr, stream = match token:is(stream, Punct(Newline))
+    | true  -> Err(void), stream
+    | false ->
+      let expr, stream = parse(stream, multiline)?
+      Ok(expr), stream
+
+  Ok((ast:Expr:Return(span, expr), stream))
+
 /// Parse a match expression.
-pub fn parse_match(
+fn parse_match(
   stream: TokenStream
   multiline: bool
 ) -> Result<ast:Expr * TokenStream, Diagnostic>

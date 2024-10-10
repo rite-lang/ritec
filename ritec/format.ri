@@ -305,20 +305,21 @@ fn format_expr(
       | Ok(expr) -> f", ..{format_expr(fmt, expr)}"
       | Err(_) -> ""
     f"[{head}{tail}]"
-  | ast:Expr:Block(_, exprs) ->
+  | ast:Expr:Block(_, items) ->
     let fmt = inc(fmt)
-    exprs
-    |> list:map(|pair| 
-      match pair
-      | true, expr -> 
-        let expr = format_expr(fmt, expr)
-          |> indent_line(fmt, _)
 
-        f"{newline()}{expr}"
-      | false, expr -> format_expr(fmt, expr)
+    items
+    |> list:map(|item| 
+      match item
+      | ast:BlockItem:Newline(_) -> newline()
+      | ast:BlockItem:Comment(_, text) -> 
+        let comment = indent_line(fmt, f"//{text}")
+        f"{newline()}{comment}"
+      | ast:BlockItem:Expr(expr, _) -> 
+        let expr = format_expr(fmt, expr)
+        f"{newline()}{indent_spaces(fmt)}{expr}"
     )
-    |> indent_multiline(fmt, _)
-    |> string:concat(newline(), _)
+    |> string:join("")
   | ast:Expr:As(_, expr, ty) -> f"{format_expr(fmt, expr)} as {format_ty(fmt, ty)}"
   | ast:Expr:Field(_, expr, name) -> f"{format_expr(fmt, expr)}.{name}"
   | ast:Expr:Call(_, expr, args, multi, spread) ->
@@ -392,6 +393,9 @@ fn format_expr(
   | ast:Expr:Closure(_, args, body) ->
     let args = string:join(list:map(args, format_argument(fmt)), ", ")
     f"|{args}| {format_expr(fmt, body)}"
+  | ast:Expr:Return(_, expr) -> match expr
+    | Ok(expr) -> f"return {format_expr(fmt, expr)}"
+    | Err(_) -> "return"
   | ast:Expr:Panic(_, message) -> match message
     | Ok(message) -> f"panic {quote()}{message}{quote()}"
     | Err(_) -> "panic"

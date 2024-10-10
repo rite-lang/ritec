@@ -12,7 +12,7 @@ import token:Delimiter
 import token:TokenTree
 import token:Keyword
 import token:Punct
-import token:Doc
+import token:Comment
 
 /// Parse a list of items
 pub fn parse_items(
@@ -34,6 +34,7 @@ pub fn parse(
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let stream = token:take_all(stream, Punct(Newline))
   let decorators, stream = parse_decorators(stream)?
+
   // allow a pub specifier before the item
   // disallow decorators for imports by requiring it to be empty.
   match (token:peek(stream), token:peek_nth(stream, 1), decorators)
@@ -66,7 +67,7 @@ fn parse_decorators_rec(
   let token, span = token:peek(stream)
 
   match token
-  | Doc(Item, comment) ->
+  | Comment(Doc(comment)) ->
     let stream = token:advance(stream, 1)
     let acc = list:append(acc, ast:Decorator(span, "doc", [comment]))
     parse_decorators_rec(stream, acc)
@@ -154,7 +155,7 @@ fn parse_mod_doc_comments_rec(
 ) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
   match token
-  | Doc(Module, comment) ->
+  | Comment(Mod(comment)) ->
     let stream = token:advance(stream, 1)
     let acc = list:append(acc, ast:Decorator(span, "moddoc", [comment]))
     parse_mod_doc_comments_rec(stream, acc)

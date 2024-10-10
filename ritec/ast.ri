@@ -129,7 +129,7 @@ pub type Expr =
     head: [Expr]
     tail: Result<Expr, void>
   )
-  | Block(span: Span, exprs: [bool * Expr])
+  | Block(span: Span, items: [BlockItem])
   | As(span: Span, expr: Expr, ty: Ty)
   | Field(span: Span, expr: Expr, field: str)
   | Call(
@@ -163,9 +163,15 @@ pub type Expr =
   | Assign(span: Span, lhs: Expr, rhs: Expr)
   | Match(span: Span, expr: Expr, arms: [Arm])
   | Closure(span: Span, input: [Argument], body: Expr)
+  | Return(span: Span, expr: Result<Expr, void>)
   | Panic(span: Span, message: Result<str, void>)
   | Assert(span: Span, expr: Expr, message: Result<str, void>)
   | Try(span: Span, expr: Expr)
+
+pub type BlockItem =
+  | Newline(span: Span)
+  | Comment(span: Span, text: str)
+  | Expr(expr: Expr, comment: Result<str, void>)
 
 pub type CallArgument =
   | Positional(expr: Result<Expr, void>)

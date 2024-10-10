@@ -33,7 +33,7 @@ pub type Base =
 
 pub type TokenTree =
   | Eof
-  | Doc(level: Doc, comment: str)
+  | Comment(comment: Comment)
   | Snake(snake: str)
   | Pascal(pascal: str)
   | Path(path: [str])
@@ -44,9 +44,10 @@ pub type TokenTree =
   | Keyword(keyword: Keyword)
   | Group(delimiter: Delimiter, tokens: TokenStream)
 
-pub type Doc =
-  | Module
-  | Item
+pub type Comment =
+  | Mod(comment: str)
+  | Doc(comment: str)
+  | Any(comment: str)
 
 pub type Delimiter =
   | Parentheses
@@ -125,7 +126,9 @@ pub type Punct =
 pub fn format(token: TokenTree) -> str
   match token
   | Eof -> "EOF"
-  | Doc(level, comment) -> comment
+  | Comment(Mod(comment)) -> comment
+  | Comment(Doc(comment)) -> comment
+  | Comment(Any(comment)) -> comment
   | Snake(snake) -> snake
   | Pascal(pascal) -> pascal
   | Path(path) -> string:join(path, ":")

@@ -17,7 +17,7 @@ import ritec:span:Span
 
 import token:Base
 import token:Delimiter
-import token:Doc
+import token:Comment
 import token:Keyword
 import token:Punct
 import token:TokenStream
@@ -151,27 +151,30 @@ fn lex_tokens(
         | true ->
           let lexer = advance(lexer, 2)
 
-          let level, lexer = match peek(lexer) == Ok("/")
-            | true -> Ok(Item), advance(lexer, 1)
+          let comment, new_lexer = match peek(lexer) == Ok("/")
+            | true ->
+              let lexer = advance(lexer, 1)
+              let comment, lexer = lex_comment(lexer)
+              Comment:Doc(comment), lexer
             | false ->
               match peek(lexer) == Ok("!")
-              | true -> Ok(Module), advance(lexer, 1)
-              | false -> Err(void), lexer
+              | true ->
+                let lexer = advance(lexer, 1)
+                let comment, lexer = lex_comment(lexer)
+                Comment:Mod(comment), lexer
+              | false ->
+                let comment, lexer = lex_comment(lexer)
+                Comment:Any(comment), lexer
 
-          let comment, new_lexer = lex_comment(lexer)
-
-          match level
-          | Ok(level) ->
-            let span = Span(
-              lo:     lexer.offset
-              hi:     new_lexer.offset
-              source: lexer.source
-            )
-            
-            let token = token:TokenTree:Doc(level, comment)
-            let tokens, lexer = lex_tokens(new_lexer)?
-            Ok(([(token, span), ..tokens], lexer))
-          | Err(_) -> lex_tokens(new_lexer)
+          let span = Span(
+            lo:     lexer.offset
+            hi:     new_lexer.offset
+            source: lexer.source
+          )
+          
+          let token = TokenTree:Comment(comment)
+          let tokens, lexer = lex_tokens(new_lexer)?
+          Ok(([(token, span), ..tokens], lexer))
         | false ->
           match lex_open_delim(lexer) 
           | Ok((delimiter, new_lexer)) ->
@@ -442,8 +445,8 @@ fn lex_format(lexer) -> Result<str * [TokenStream * str] * Lexer, Diagnostic>
     )
     |> diagnostic:add_label("here", span)
     |> Err
-  // we need to look ahead to see if we are escaping the control character
   | Ok(g), Ok(h) ->
+    // we need to look ahead to see if we are escaping the control character
     match g == quote
     | true -> Ok(("", [], advance(lexer, 1)))
     | false ->
@@ -483,8 +486,8 @@ fn lex_format(lexer) -> Result<str * [TokenStream * str] * Lexer, Diagnostic>
           let lexer = advance(lexer, 1)
           let string, tokens, lexer = lex_format(lexer)?
           Ok((string:concat(g, string), tokens, lexer))
-    // last character in file HAS to terminate the f-string
   | Ok(quote), _ ->
+    // last character in file HAS to terminate the f-string
     Ok(("", [], advance(lexer, 1)))
   | _ ->
     let span = Span(
