@@ -216,10 +216,10 @@ fn parse_match_arms_rec(
   acc: [ast:Arm]
 ) -> Result<[ast:Arm] * TokenStream, Diagnostic>
   match is_arm(stream)
-  | true ->
+  | false -> Ok((acc, stream))
+  | true  ->
     let arm, stream = parse_match_arm(stream)?
     parse_match_arms_rec(stream, list:append(acc, arm))
-  | false -> Ok((acc, stream))
 
 fn parse_match_arm(
   stream: TokenStream

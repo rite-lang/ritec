@@ -1,0 +1,56 @@
+import std:result:Result
+
+import ritec:span:Span
+import ritec:number:IntKind
+import ritec:number:FloatKind
+
+pub type Part =
+  | Void
+  | Bool
+  | List
+  | Tuple
+  | Func
+  | Str
+  | Ref
+  | Int(kind: IntKind)
+  | Generic(index: int, func: int)
+  | Adt(id: int)
+
+pub type Ty =
+  | Infer(
+    span:  Span
+    bound: Result<Bound, void>
+    id:    int
+    func:  int
+  )
+  | Partial(
+    span: Span
+    part: Part
+    args: [Ty]
+  )
+  | Field(
+    span: Span
+    base: Ty
+    name: str
+  )
+  | Tuple(
+    span:  Span
+    base:  Ty
+    index: int
+  )
+  | Call(
+    span: Span
+    func: Ty
+    args: [Result<Ty, void>]
+  )
+  | Pipe(
+    span:  Span
+    input: Ty
+    func:  Ty
+    args:  [Result<Ty, void>]
+  )
+
+pub type Bound =
+  | Unsigned
+  | Signed
+  | Float

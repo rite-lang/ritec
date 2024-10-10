@@ -148,11 +148,11 @@ pub type Expr =
   | Binary(span: Span, lhs: Expr, op: BinOp, rhs: Expr)
   | Unary(span: Span, op: UnOp, expr: Expr)
   | Let(
-    span:       Span
-    is_assert:  bool
-    pat:        Pat
-    ty:         Result<Ty, void>
-    expr:       Expr
+    span:      Span
+    is_assert: bool
+    pat:       Pat
+    ty:        Result<Ty, void>
+    expr:      Expr
   )
   | Mut(
     span: Span
