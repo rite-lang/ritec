@@ -1,3 +1,5 @@
+import std:dict
+import std:dict:Dict
 import std:result:Result
 
 import ritec:span:Span
@@ -13,8 +15,11 @@ pub type Part =
   | Str
   | Ref
   | Int(kind: IntKind)
-  | Generic(index: int, func: int)
   | Adt(id: int)
+  | Generic(
+    index: int
+    func:  int
+  )
 
 pub type Ty =
   | Infer(
@@ -54,3 +59,52 @@ pub type Bound =
   | Unsigned
   | Signed
   | Float
+
+pub type TyEnv(
+  next:          int
+  constraints:   [Constraint]
+  substitutions: Dict<Ty, Ty>
+)
+
+pub type Constraint(
+  span: Span
+  lhs:  Ty
+  rhs:  Ty
+)
+
+pub fn new_env() -> &TyEnv
+  &TyEnv(
+    next:          0
+    constraints:   []
+    substitutions: dict:new()
+  )
+
+pub fn unify(
+  env:  &TyEnv
+  span: Span
+  lhs:  Ty
+  rhs:  Ty
+) -> void
+  let constraint = Constraint(
+    span: span
+    lhs:  lhs
+    rhs:  rhs
+  )
+
+  env.constraints = [constraint, ..env.constraints]
+
+pub fn infer(
+  env:   &TyEnv
+  span:  Span
+  bound: Result<Bound, void>
+  func:  int
+) -> Ty
+  let id   = env.next
+  env.next = env.next + 1
+
+  Infer(
+    span:  span
+    bound: bound
+    id:    id
+    func:  func
+  )
