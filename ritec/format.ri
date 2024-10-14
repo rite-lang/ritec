@@ -4,6 +4,8 @@ import std:string
 import std:array
 import std:result:Result
 
+import ritec:attribute:Attribute
+
 import ast:Expr
 import ast:Ty
 
@@ -60,7 +62,7 @@ pub fn format_module(
   fmt:    Formatter
   module: ast:Module
 ) -> str
-  let decorators = module.decorators
+  let attrs = module.attrs
     |> list:map(format_decorator(fmt))
     |> string:join(newline())
 
@@ -68,7 +70,7 @@ pub fn format_module(
     |> list:map(format_item(fmt))
     |> string:join(string:repeat(newline(), 2))
 
-  f"{decorators}{items}"
+  f"{attrs}{items}"
 
 fn format_item(
   fmt:  Formatter
@@ -97,7 +99,7 @@ fn format_type_single(
   fmt: Formatter
   ty:  ast:Single
 ) -> str
-  let decorators = format_decorators(fmt, ty.decorators)
+  let attrs = format_attrs(fmt, ty.attrs)
   let vis = format_vis(fmt, ty.vis)
   let name = ty.name
 
@@ -106,13 +108,13 @@ fn format_type_single(
     | Err(_) -> ""
 
   let fields = format_fields(fmt, ty.fields)
-  f"{decorators}{vis}type {name}{generics}{fields}"
+  f"{attrs}{vis}type {name}{generics}{fields}"
 
 fn format_type_adt(
   fmt: Formatter
   ty:  ast:Adt
 ) -> str
-  let decorators = format_decorators(fmt, ty.decorators)
+  let attrs = format_attrs(fmt, ty.attrs)
   let vis = format_vis(fmt, ty.vis)
   let name = ty.name
   let generics = match ty.generics
@@ -127,7 +129,7 @@ fn format_type_adt(
       |> indent_multiline(inc(fmt), _)
       |> string:concat(f" = {newline()}", _)
 
-  f"{decorators}{vis}type {name}{generics}{variants}"
+  f"{attrs}{vis}type {name}{generics}{variants}"
 
 fn format_type_variant(
   fmt:     Formatter
@@ -156,20 +158,20 @@ fn format_field(
   fmt:   Formatter
   field: ast:Field
 ) -> str
-  let decorators = format_decorators(fmt, field.decorators)
+  let attrs = format_attrs(fmt, field.attrs)
 
   let name = field.name
   let ty = match field.ty
     | Ok(ty) -> f": {format_ty(fmt, ty)}"
     | Err(_) -> ""
 
-  f"{decorators}{name}{ty}"
+  f"{attrs}{name}{ty}"
 
 fn format_func(
   fmt:  Formatter
   func: ast:Func
 ) -> str
-  let decorators = format_decorators(fmt, func.decorators)
+  let attrs = format_attrs(fmt, func.attrs)
   let vis = format_vis(fmt, func.vis)
   let name = func.name
 
@@ -189,7 +191,7 @@ fn format_func(
     | Ok(expr) -> f"{format_expr(fmt, expr)}"
     | Err(_) -> newline()
 
-  f"{decorators}{vis}fn {name}({args}){output}{body}"
+  f"{attrs}{vis}fn {name}({args}){output}{body}"
 
 fn format_vis(
   fmt: Formatter
@@ -199,17 +201,17 @@ fn format_vis(
   | ast:Vis:Public -> "pub "
   | ast:Vis:Private -> ""
 
-fn format_decorators(
+fn format_attrs(
   fmt:        Formatter
-  decorators: [ast:Decorator]
+  attrs: [Attribute]
 ) -> str
-  list:map(decorators, format_decorator(fmt))
+  list:map(attrs, format_decorator(fmt))
   |> list:map(string:concat(_, newline()))
   |> string:join("")
 
 fn format_decorator(
   fmt:       Formatter
-  decorator: ast:Decorator
+  decorator: Attribute
 ) -> str
   mut s = ""
 
@@ -286,12 +288,21 @@ fn format_expr(
 ) -> str
   match expr
   | ast:Expr:Void(_) -> "void"
-  | ast:Expr:Bool(_, value) -> match value
+  | ast:Expr:Bool(_, value) -> 
+    match value
     | true -> "true"
     | false -> "false"
   | ast:Expr:Int(_, value) -> f"{value}"
   | ast:Expr:String(_, value) -> f"{quote()}{value}{quote()}"
-  | ast:Expr:Format(_, exprs) -> f"f{quote()}{format_format_string(fmt, exprs)}{quote()}"
+  | ast:Expr:Format(_, start, formats) ->
+    let formats = formats
+      |> list:map(|pair: ast:Format * str|
+        let format, string = pair
+        f"{open_brace()}{format_expr(fmt, format.expr)}{close_brace()}{string}"
+      )
+      |> string:join("")
+
+    f"{quote()}{start}{formats}{quote()}"
   | ast:Expr:Paren(_, expr) -> f"({format_expr(fmt, expr)})"
   | ast:Expr:Tuple(_, exprs) ->
     let s = f"{string:join(list:map(exprs, format_expr(inc_tuple_lvl(fmt))), ", ")}"
@@ -358,7 +369,8 @@ fn format_expr(
       f"{format_expr(fmt, expr)}{funcs}"
   | ast:Expr:Binary(_, lhs, op, rhs) ->
     f"{format_expr(fmt, lhs)} {format_bin_op(fmt, op)} {format_expr(fmt, rhs)}"
-  | ast:Expr:Unary(_, op, expr) -> f"{format_un_op(fmt, op)}{format_expr(fmt, expr)}"
+  | ast:Expr:Unary(_, op, expr) ->
+    f"{format_un_op(fmt, op)}{format_expr(fmt, expr)}"
   | ast:Expr:Let(_, is_assert, pat, ty, expr) ->
     let is_assert = match is_assert
       | true -> "assert "
@@ -386,23 +398,28 @@ fn format_expr(
       | _ -> fmt
 
     f"mut {name}{ty} = {format_expr(efmt, expr)}"
-  | ast:Expr:Assign(_, lhs, rhs) -> f"{format_expr(fmt, lhs)} = {format_expr(fmt, rhs)}"
+  | ast:Expr:Assign(_, lhs, rhs) ->
+    f"{format_expr(fmt, lhs)} = {format_expr(fmt, rhs)}"
   | ast:Expr:Match(_, expr, arms) ->
     let arms = string:join(list:map(arms, format_arm(fmt)), newline())
     f"match {format_expr(fmt, expr)}{newline()}{arms}"
   | ast:Expr:Closure(_, args, body) ->
     let args = string:join(list:map(args, format_argument(fmt)), ", ")
     f"|{args}| {format_expr(fmt, body)}"
-  | ast:Expr:Return(_, expr) -> match expr
+  | ast:Expr:Return(_, expr) ->
+    match expr
     | Ok(expr) -> f"return {format_expr(fmt, expr)}"
     | Err(_) -> "return"
-  | ast:Expr:Panic(_, message) -> match message
+  | ast:Expr:Panic(_, message) ->
+    match message
     | Ok(message) -> f"panic {quote()}{message}{quote()}"
     | Err(_) -> "panic"
-  | ast:Expr:Assert(_, expr, message) -> match message
+  | ast:Expr:Assert(_, expr, message) ->
+    match message
     | Ok(message) -> f"assert {format_expr(fmt, expr)} {quote()}{message}{quote()}"
     | Err(_) -> f"assert {format_expr(fmt, expr)}"
-  | ast:Expr:Try(_, expr) -> f"{format_expr(fmt, expr)}?"
+  | ast:Expr:Try(_, expr) -> 
+    f"{format_expr(fmt, expr)}?"
 
 fn format_arm(
   fmt: Formatter
@@ -447,13 +464,13 @@ fn format_argument(
   fmt: Formatter
   arg: ast:Argument
 ) -> str
-  let decorators = format_decorators(fmt, arg.decorators)
+  let attrs = format_attrs(fmt, arg.attrs)
   let name = arg.name
   let ty = match arg.ty
     | Ok(ty) -> f": {format_ty(fmt, ty)}"
     | Err(_) -> ""
 
-  f"{decorators}{name}{ty}"
+  f"{attrs}{name}{ty}"
 
 fn format_call_arg(
   fmt: Formatter
@@ -495,16 +512,3 @@ fn format_un_op(
   | ast:UnOp:Deref -> "*"
   | ast:UnOp:Not -> "!"
   | ast:UnOp:Neg -> "-"
-
-fn format_format_string(
-  fmt:   Formatter
-  exprs: [ast:Expr * ast:Format]
-) -> str
-  match exprs
-  | [] -> ""
-  | [(expr, format), ..rest] ->
-    let part = match expr
-      | ast:Expr:String(_, s) -> s
-      | _ -> f"{open_brace()}{format_expr(fmt, expr)}{close_brace()}"
-
-    f"{part}{format_format_string(fmt, rest)}"

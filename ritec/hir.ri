@@ -1,0 +1,254 @@
+pub import ty
+
+import std:vec
+import std:vec:Vec
+import std:result:Result
+import std:dict:Dict
+
+import ritec:span
+import ritec:span:Span
+import ritec:attribute:Attribute
+
+import ty:Ty
+
+pub type Unit(
+  modules: Vec<Module>
+  funcs:   Vec<Func>
+  adts:    Vec<Adt>
+  env:     ty:Env
+)
+
+pub type Module(
+  attrs:   [Attribute]
+  name:    str
+  imports: Dict<str, Import>
+)
+
+pub type Import(
+  span: Span
+  vis:  Vis
+  item: Item
+)
+
+pub type Item =
+  | Module(index: int)
+  | Func(index: int)
+  | Adt(index: int)
+
+pub type Vis =
+  | Public
+  | Private
+
+pub type Func(
+  span:     Span
+  attrs:    [Attribute]
+  name:     str
+  generics: [Generic]
+  input:    [Argument]
+  output:   Ty
+  locals:   Vec<Local>
+  captures: [int]
+  body:     Expr
+)
+
+pub type Argument(
+  name:  str
+  local: int
+)
+
+pub type Local(
+  mutable: bool
+  name:    str
+  ty:      Ty
+)
+
+pub type Adt(
+  span:     Span
+  attrs:    [Attribute]
+  vis:      Vis
+  name:     str
+  generics: [Generic]
+  variants: [Variant]
+)
+
+pub type Variant(
+  span:   Span
+  name:   str
+  fields: [Field]
+)
+
+pub type Field(
+  span:  Span
+  attrs: [Attribute]
+  name:  str
+  ty:    Ty
+)
+
+pub type Generic(
+  name: str
+  span: Span
+)
+
+pub type Expr =
+  | Void(
+    span: Span
+  )
+  | Bool(
+    span: Span
+    value: bool
+  )
+  | Int(
+    span: Span
+    value: int
+  )
+  | String(
+    span: Span
+    value: str
+  )
+  | Format(
+    span: Span
+    exprs: [Expr]
+  )
+  | Tuple(
+    span: Span
+    exprs: [Expr]
+  )
+  | Func(
+    span: Span
+    func: int
+  )
+  | Variant(
+    span: Span
+    variant: int
+  )
+  | Local(
+    span: Span
+    local: int
+  )
+  | List(
+    span: Span
+    head: [Expr]
+    tail: Result<Expr, void>
+  )
+  | Block(
+    span:  Span
+    exprs: [Expr]
+  )
+  | As(
+    span: Span
+    expr: Expr
+    ty:   Ty
+  )
+  | Field(
+    span:  Span
+    expr:  Expr
+    field: str
+  )
+  | Call(
+    span:   Span
+    func:   Expr
+    args:   [Result<Expr, void>]
+    spread: Result<Expr, void>
+  )
+  | Pipe(
+    span: Span
+    base: Expr
+    func: Expr
+    args: [Result<Expr, void>]
+  )
+  | Binary(
+    span: Span
+    lhs: Expr
+    op: BinOp
+    rhs: Expr
+  )
+  | Unary(
+    span: Span
+    op: UnOp
+    expr: Expr
+  )
+  | Let(
+    span:      Span
+    is_assert: bool
+    pat:       Pat
+    ty:        Ty
+    expr:      Expr
+  )
+  | Mut(
+    span:  Span
+    local: int
+    ty:    Ty
+    expr:  Expr
+  )
+  | Assign(
+    span: Span
+    lhs:  Expr
+    rhs:  Expr
+  )
+  | Match(
+    span: Span
+    expr: Expr
+    arms: [Arm]
+  )
+  | Closure(
+    span:  Span
+    input: [Argument]
+    body:  Expr
+  )
+  | Return(
+    span: Span
+    expr: Result<Expr, void>
+  )
+  | Panic(
+    span: Span
+    message: Result<str, void>
+  )
+  | Assert(
+    span: Span
+    expr: Expr
+    message: Result<str, void>
+  )
+  | Try(
+    span: Span
+    expr: Expr
+  )
+
+pub type BinOp =
+  | Add
+  | Sub
+  | Mul
+  | Div
+  | Mod
+  | And
+  | Or
+  | Eq
+  | Ne
+  | Lt
+  | Le
+  | Gt
+  | Ge
+
+pub type UnOp =
+  | Ref
+  | Deref
+  | Neg
+  | Not
+
+pub type Arm(
+  span: Span
+  pat:  Pat
+  body: Expr
+)
+
+pub type Pat =
+  | Wild(span: Span)
+  | Bind(span: Span, local: int)
+  | Bool(span: Span, value: bool)
+  | Tuple(span: Span, pats: [Pat])
+  | Variant(
+    span:    Span
+    adt:     int
+    variant: int
+    pats:    [Pat]
+  )
+  | List(span: Span, head: [Pat], tail: Result<Pat, void>)

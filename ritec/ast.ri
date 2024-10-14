@@ -2,17 +2,12 @@ import std:result:Result
 
 import span:Span
 import number:IntKind
-
-pub type Decorator(
-  span: Span
-  name: str
-  args: [str]
-)
+import attribute:Attribute
 
 pub type Module(
-  span:       Span
-  decorators: [Decorator]
-  items:      [Item]
+  span:  Span
+  attrs: [Attribute]
+  items: [Item]
 )
 
 pub type Item =
@@ -26,14 +21,18 @@ pub type Import(
   path: Path
 )
 
+pub type Vis =
+  | Public
+  | Private
+
 pub type Func(
-  span:       Span
-  decorators: [Decorator]
-  vis:        Vis
-  name:       str
-  input:      Arguments
-  output:     Result<Ty, void>
-  body:       Result<Expr, void>
+  span:   Span
+  attrs:  [Attribute]
+  vis:    Vis
+  name:   str
+  input:  Arguments
+  output: Result<Ty, void>
+  body:   Result<Expr, void>
 )
 
 pub type Arguments(
@@ -43,10 +42,10 @@ pub type Arguments(
 )
 
 pub type Argument(
-  span:       Span
-  decorators: [Decorator]
-  name:       str
-  ty:         Result<Ty, void>
+  span:  Span
+  attrs: [Attribute]
+  name:  str
+  ty:    Result<Ty, void>
 )
 
 pub type Type =
@@ -54,21 +53,21 @@ pub type Type =
   | Single(single: Single)
 
 pub type Adt(
-  span:       Span
-  decorators: [Decorator]
-  vis:        Vis
-  name:       str
-  generics:   Result<[str], void>
-  variants:   [Variant]
+  span:     Span
+  attrs:    [Attribute]
+  vis:      Vis
+  name:     str
+  generics: Result<[str], void>
+  variants: [Variant]
 )
 
 pub type Single(
-  span:       Span
-  decorators: [Decorator]
-  vis:        Vis
-  name:       str
-  generics:   Result<[str], void>
-  fields:     Fields
+  span:     Span
+  attrs:    [Attribute]
+  vis:      Vis
+  name:     str
+  generics: Result<[str], void>
+  fields:   Fields
 )
 
 pub type Variant(
@@ -84,15 +83,11 @@ pub type Fields(
 )
 
 pub type Field(
-  span:       Span
-  decorators: [Decorator]
-  name:       str
-  ty:         Result<Ty, void>
+  span:  Span
+  attrs: [Attribute]
+  name:  str
+  ty:    Result<Ty, void>
 )
-
-pub type Vis =
-  | Public
-  | Private
 
 pub type Ty = 
   | Infer(span: Span)
@@ -120,7 +115,11 @@ pub type Expr =
   | Bool(span: Span, value: bool)
   | Int(span: Span, value: int)
   | String(span: Span, value: str)
-  | Format(span: Span, exprs: [Expr * Format])
+  | Format(
+    span:    Span
+    start:   str
+    formats: [Format * str]
+  )
   | Paren(span: Span, expr: Expr)
   | Tuple(span: Span, exprs: [Expr])
   | Path(span: Span, path: Path)
@@ -167,6 +166,10 @@ pub type Expr =
   | Panic(span: Span, message: Result<str, void>)
   | Assert(span: Span, expr: Expr, message: Result<str, void>)
   | Try(span: Span, expr: Expr)
+
+pub type Format(
+  expr: Expr
+)
 
 pub type BlockItem =
   | Newline(span: Span)
@@ -216,6 +219,3 @@ pub type Path(
   span:     Span
   segments: [str]
 )
-
-pub type Format =
-  | String

@@ -1,0 +1,7 @@
+import span:Span
+
+pub type Attribute(
+  span: Span
+  name: str
+  args: [str]
+)

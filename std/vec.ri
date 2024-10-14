@@ -7,40 +7,54 @@ import result:Result
 /// A dynamically sized array.
 pub type Vec<'a>(
   size: int
-  capacity: int
   data: Array<'a>
 )
 
 /// Create a new empty vec.
 pub fn new() -> Vec<'a>
-  Vec(0, 0, array:empty())
+  Vec(0, array:empty())
 
 /// Optionally extend the capacity of the array.
-pub fn push(vec: Vec<'a>, value: 'a) -> Vec<'a>
-  let data = match vec.capacity == vec.size
-    | true -> array:extend(vec.data, vec.capacity + 1, value)
-    | false -> vec.data
+pub fn push(vec: Vec<'a>, item: 'a) -> Vec<'a>
+  let vec = match cap(vec) == vec.size
+    | true -> grow(vec, item)
+    | false -> vec
 
   Vec(
     size: vec.size + 1
-    capacity: array:length(data)
-    data: array:set(data, vec.size, value)
+    data: array:set(vec.data, vec.size, item)
   )
+
+fn cap(vec: Vec<'a>) -> int
+  array:length(vec.data)
+
+fn grow(vec: Vec<'a>, item: 'a) -> Vec<'a>
+  let new_cap = match cap(vec) == 0
+    | true -> 1
+    | false -> cap(vec) * 2
+
+  Vec(
+    size: vec.size
+    data: array:extend(vec.data, new_cap, item)
+  )
+  
 
 /// Retrieve element and mutate the vec
 pub fn pop(vec: Vec<'a>) -> Result<'a * Vec<'a>, void>
   match vec.size == 0
-  | true -> Err(void)
-  | false -> Ok((std:array:get(vec.data, vec.size - 1)?, Vec(vec.size - 1, vec.capacity, vec.data)))
+  | true  -> Err(void)
+  | false ->
+    let item = array:get(vec.data, vec.size - 1)?
+
+    Ok((item, Vec(vec.size - 1, vec.data)))
 
 /// Access element at index.
 pub fn get(vec: Vec<'a>, index: int) -> Result<'a, void>
   array:get(vec.data, index)
 
 /// Set element at index.
-pub fn set(vec: Vec<'a>, index: int, value: 'a) -> Vec<'a>
-  Vec(vec.size, vec.capacity, array:set(vec.data, index, value))
+pub fn set(vec: Vec<'a>, index: int, item: 'a) -> Vec<'a>
+  Vec(vec.size, array:set(vec.data, index, item))
 
-pub fn len(vec: Vec<'a>) -> int
+pub fn length(vec: Vec<'a>) -> int
   vec.size
-

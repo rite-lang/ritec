@@ -843,9 +843,17 @@ fn parse_format(stream: TokenStream) -> Result<ast:Expr * TokenStream, Diagnosti
   let token, span, stream = token:next(stream)
 
   match token
-  | Format(fmt, tokens) ->
-    let exprs = parse_format_rec(tokens, [ (ast:Expr:String(span, fmt), ast:Format:String) ])?
-    Ok((ast:Expr:Format(span, exprs), stream))
+  | Format(start, formats) ->
+    let formats = formats
+      |> list:try_map(|pair|
+        let stream, string = pair
+        let expr, stream = parse(stream, false)?
+        let _, _ = token:expect(stream, Eof)?
+        let format = ast:Format:Format(expr)
+        Ok((format, string))
+      )
+    
+    Ok((ast:Expr:Format(span, start, formats?), stream))
   | _ ->
     diagnostic:new(
       severity: Error
@@ -854,20 +862,6 @@ fn parse_format(stream: TokenStream) -> Result<ast:Expr * TokenStream, Diagnosti
     )
     |> diagnostic:add_label("here", span)
     |> Err
-
-fn parse_format_rec(
-  tokens: [TokenStream * str]
-  acc:    [ast:Expr * ast:Format]
-) -> Result<[ast:Expr * ast:Format], Diagnostic>
-  match tokens
-  | [(stream, fmt), ..tail] ->
-    let expr, stream = parse(stream, false)?
-    let acc = acc
-      |> std:list:append((expr, ast:Format:String))
-      |> std:list:append((ast:Expr:String(expr.span, fmt), ast:Format:String))
-
-    parse_format_rec(tail, acc)
-  | [] -> Ok(acc)
 
 fn parse_string(stream: TokenStream) -> Result<str * Span * TokenStream, Diagnostic>
   let token, span = token:peek(stream)

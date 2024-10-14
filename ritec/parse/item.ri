@@ -6,6 +6,7 @@ import ritec:span
 import ritec:diagnostic
 import ritec:diagnostic:Severity
 import ritec:diagnostic:Diagnostic
+import ritec:attribute:Attribute
 
 import token:TokenStream
 import token:Delimiter
@@ -27,23 +28,23 @@ pub fn parse_items(
     parse_items(stream, acc)
 
 /// Fn, Type, Import
-/// decorators
+/// attrs
 /// Doc comments to fn, fn args (multiline) variants, variants fields multiline (as decorator)
 pub fn parse(
   stream: TokenStream
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let stream = token:take_all(stream, Punct(Newline))
-  let decorators, stream = parse_decorators(stream)?
+  let attrs, stream = parse_attrs(stream)?
 
   // allow a pub specifier before the item
-  // disallow decorators for imports by requiring it to be empty.
-  match (token:peek(stream), token:peek_nth(stream, 1), decorators)
+  // disallow attrs for imports by requiring it to be empty.
+  match (token:peek(stream), token:peek_nth(stream, 1), attrs)
   | (Keyword(Import), _), _                   , [] -> parse_import(stream)
   | (Keyword(Pub), _),    (Keyword(Import), _), [] -> parse_import(stream)
-  | (Keyword(Type), _),   _                   , _  -> parse_type(stream, decorators)
-  | (Keyword(Pub), _),    (Keyword(Type), _)  , _  -> parse_type(stream, decorators)
-  | (Keyword(Fn), _),     _                   , _  -> parse_func(stream, decorators)
-  | (Keyword(Pub), _),    (Keyword(Fn), _)    , _  -> parse_func(stream, decorators)
+  | (Keyword(Type), _),   _                   , _  -> parse_type(stream, attrs)
+  | (Keyword(Pub), _),    (Keyword(Type), _)  , _  -> parse_type(stream, attrs)
+  | (Keyword(Fn), _),     _                   , _  -> parse_func(stream, attrs)
+  | (Keyword(Pub), _),    (Keyword(Fn), _)    , _  -> parse_func(stream, attrs)
   | _ ->
     let token, span = token:peek(stream)
     diagnostic:new(
@@ -54,28 +55,28 @@ pub fn parse(
     |> diagnostic:add_label("here", span)
     |> Err
 
-/// Parse all decorators (including doc comments) and newlines.
-fn parse_decorators(
+/// Parse all attrs (including doc comments) and newlines.
+fn parse_attrs(
   stream: TokenStream
-) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
-  parse_decorators_rec(stream, [])
+) -> Result<[Attribute] * TokenStream, Diagnostic>
+  parse_attrs_rec(stream, [])
 
-fn parse_decorators_rec(
+fn parse_attrs_rec(
   stream: TokenStream
-  acc:    [ast:Decorator]
-) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+  acc:    [Attribute]
+) -> Result<[Attribute] * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
 
   match token
   | Comment(Doc(comment)) ->
     let stream = token:advance(stream, 1)
-    let acc = list:append(acc, ast:Decorator(span, "doc", [comment]))
-    parse_decorators_rec(stream, acc)
+    let acc = list:append(acc, Attribute(span, "doc", [comment]))
+    parse_attrs_rec(stream, acc)
   | Punct(Pound) ->
     let decorator, stream = parse_decorator(stream)?
     let acc = list:append(acc, decorator)
-    parse_decorators_rec(stream, acc)
-  | Punct(Newline) -> parse_decorators_rec(token:advance(stream, 1), acc)
+    parse_attrs_rec(stream, acc)
+  | Punct(Newline) -> parse_attrs_rec(token:advance(stream, 1), acc)
   | _ ->
     Ok((acc, stream))
 
@@ -88,7 +89,7 @@ fn parse_decorators_rec(
 /// str, ..., str EOF
 fn parse_decorator(
   stream: TokenStream
-) -> Result<ast:Decorator * TokenStream, Diagnostic>
+) -> Result<Attribute * TokenStream, Diagnostic>
   // we consume at least the first two tokens of the top
   // stream # [ ... ]
   let span, stream = token:expect(stream, Punct(Pound))?
@@ -111,10 +112,10 @@ fn parse_decorator(
       token:expect(args_stream, Eof)?
       token:expect(group_stream, Eof)?
 
-      Ok((ast:Decorator(span, name, args), stream))
+      Ok((Attribute(span, name, args), stream))
     | _ ->
       token:expect(group_stream, Eof)?
-      Ok((ast:Decorator(span, name, []), stream))
+      Ok((Attribute(span, name, []), stream))
 
   | _ ->
     diagnostic:new(Error, "expected:brackets", f"expected brackets, found `{token:format(token)}`")
@@ -142,22 +143,22 @@ fn parse_decorator_args(
     |> diagnostic:add_label("here", span)
     |> Err
 
-/// Parse all module doc comments (and newlines) as decorators.
+/// Parse all module doc comments (and newlines) as attrs.
 pub fn parse_mod_doc_comments(
   stream: TokenStream
-) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+) -> Result<[Attribute] * TokenStream, Diagnostic>
   parse_mod_doc_comments_rec(stream, [])
 
-/// Parse module doc comments as decorators
+/// Parse module doc comments as attrs
 fn parse_mod_doc_comments_rec(
   stream: TokenStream
-  acc:    [ast:Decorator]
-) -> Result<[ast:Decorator] * TokenStream, Diagnostic>
+  acc:    [Attribute]
+) -> Result<[Attribute] * TokenStream, Diagnostic>
   let token, span = token:peek(stream)
   match token
   | Comment(Mod(comment)) ->
     let stream = token:advance(stream, 1)
-    let acc = list:append(acc, ast:Decorator(span, "moddoc", [comment]))
+    let acc = list:append(acc, Attribute(span, "moddoc", [comment]))
     parse_mod_doc_comments_rec(stream, acc)
   | Punct(Newline) -> parse_mod_doc_comments_rec(token:advance(stream, 1), acc)
   | _ -> Ok((acc, stream))
@@ -174,7 +175,7 @@ fn parse_import(
 /// Parse a type declaration
 fn parse_type(
   stream: TokenStream
-  decorators: [ast:Decorator]
+  attrs: [Attribute]
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let vis, stream = parse_vis(stream)?
   let _, stream = token:expect(stream, Keyword(Type))?
@@ -194,7 +195,7 @@ fn parse_type(
     // same as newline
     let ty = ast:Adt:Adt(
       span:       name_span
-      decorators: decorators
+      attrs: attrs
       vis:        vis
       name:       name
       generics:   generics
@@ -207,7 +208,7 @@ fn parse_type(
 
     let ty = ast:Adt:Adt(
       span:       name_span
-      decorators: decorators
+      attrs: attrs
       vis:        vis
       name:       name
       generics:   generics
@@ -222,7 +223,7 @@ fn parse_type(
 
     let ty = ast:Single:Single(
       span:       name_span
-      decorators: decorators
+      attrs: attrs
       vis:        vis
       name:       name
       generics:   generics
@@ -236,7 +237,7 @@ fn parse_type(
 
     let ty = ast:Adt:Adt(
       span:       name_span
-      decorators: decorators
+      attrs: attrs
       vis:        vis
       name:       name
       generics:   generics
@@ -356,8 +357,8 @@ fn parse_type_fields_multiline(
   stream: TokenStream
   acc:    [ast:Field]
 ) -> Result<[ast:Field] * TokenStream, Diagnostic>
-  let decorators, stream = parse_decorators(stream)?
-  let field, stream = parse_type_field(stream, decorators)?
+  let attrs, stream = parse_attrs(stream)?
+  let field, stream = parse_type_field(stream, attrs)?
   let acc = list:append(acc, field)
   let _, stream = token:take(stream, Punct(Comma))
   let token, span = token:peek(stream)
@@ -377,7 +378,7 @@ fn parse_type_fields_multiline(
 /// Parse a single variant field
 fn parse_type_field(
   stream: TokenStream
-  decorators: [ast:Decorator]
+  attrs: [Attribute]
 ) -> Result<ast:Field * TokenStream, Diagnostic>
   let name, name_span, stream = ritec:parse:parse_snake(stream)?
 
@@ -388,12 +389,12 @@ fn parse_type_field(
       Ok(ty), stream
     | Err(_), stream -> Err(void), stream
 
-  Ok((ast:Field:Field(name_span, decorators, name, ty), stream))
+  Ok((ast:Field:Field(name_span, attrs, name, ty), stream))
 
 /// Parse a function
 fn parse_func(
   stream: TokenStream
-  decorators: [ast:Decorator]
+  attrs: [Attribute]
 ) -> Result<ast:Item * TokenStream, Diagnostic>
   let vis, stream = parse_vis(stream)?
   let span, stream = token:expect(stream, Keyword(Fn))?
@@ -405,7 +406,7 @@ fn parse_func(
   let input = ast:Arguments(stream.span, args, multi)
   let func = ast:Func:Func(
     span:       span
-    decorators: decorators
+    attrs: attrs
     vis:        vis
     name:       name
     input:      input
@@ -488,9 +489,9 @@ fn parse_func_args_multiline(
   stream: TokenStream
   acc:    [ast:Argument]
 ) -> Result<[ast:Argument] * TokenStream, Diagnostic>
-  // takes all comments, decorators and newlines
-  let decorators, stream = parse_decorators(stream)?
-  let arg, stream = parse_func_arg(stream, decorators)?
+  // takes all comments, attrs and newlines
+  let attrs, stream = parse_attrs(stream)?
+  let arg, stream = parse_func_arg(stream, attrs)?
   let acc = list:append(acc, arg)
   let _, stream = token:take(stream, Punct(Comma))
   let token, span = token:peek(stream)
@@ -511,7 +512,7 @@ fn parse_func_args_multiline(
 
 fn parse_func_arg(
   stream: TokenStream
-  decorators: [ast:Decorator]
+  attrs: [Attribute]
 ) -> Result<ast:Argument * TokenStream, Diagnostic>
   let name, name_span, stream = ritec:parse:parse_snake(stream)?
 
@@ -521,7 +522,7 @@ fn parse_func_arg(
       Ok(ty), stream
     | Err(_), stream -> Err(void), stream
 
-  Ok((ast:Argument(name_span, decorators, name, ty), stream))
+  Ok((ast:Argument(name_span, attrs, name, ty), stream))
 
 /// Parse an optional function output type
 /// -> Ty

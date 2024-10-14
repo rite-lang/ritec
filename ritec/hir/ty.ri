@@ -60,7 +60,7 @@ pub type Bound =
   | Signed
   | Float
 
-pub type TyEnv(
+pub type Env(
   next:          int
   constraints:   [Constraint]
   substitutions: Dict<Ty, Ty>
@@ -72,15 +72,15 @@ pub type Constraint(
   rhs:  Ty
 )
 
-pub fn new_env() -> &TyEnv
-  &TyEnv(
+pub fn new_env() -> &Env
+  &Env(
     next:          0
     constraints:   []
     substitutions: dict:new()
   )
 
 pub fn unify(
-  env:  &TyEnv
+  env:  &Env
   span: Span
   lhs:  Ty
   rhs:  Ty
@@ -94,7 +94,7 @@ pub fn unify(
   env.constraints = [constraint, ..env.constraints]
 
 pub fn infer(
-  env:   &TyEnv
+  env:   &Env
   span:  Span
   bound: Result<Bound, void>
   func:  int
