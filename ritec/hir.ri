@@ -1,4 +1,7 @@
 pub import ty
+pub import solve
+
+pub import ty:Ty
 
 import std:vec
 import std:vec:Vec

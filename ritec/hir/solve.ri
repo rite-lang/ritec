@@ -1,0 +1,83 @@
+import std:list
+import std:result:Result
+
+import ritec:span:Span
+import ritec:diagnostic
+import ritec:diagnostic:Diagnostic
+
+import hir:Unit
+import ty:Env
+import ty:Ty
+
+type Retry =
+  | Retry
+  | Error(err: Diagnostic)
+
+pub fn solve(
+  unit: Unit
+  env: &Env
+) -> Result<void, Diagnostic>
+  solve_rec(unit, env)
+
+fn solve_rec(
+  unit: Unit
+  env: &Env
+) -> Result<void, Diagnostic>
+  match env.constraints
+  | [] -> Ok(void)
+  | [constraint, ..rest] ->
+    env.constraints = rest 
+
+    let retry = unify_ty_ty(
+      unit
+      env
+      constraint.lhs
+      constraint.rhs
+      constraint.span
+    )
+
+    match retry
+    | Ok(_) -> solve_rec(unit, env)
+    | Err(Retry) ->
+      env.constraints = list:append(env.constraints, constraint)
+      solve_rec(unit, env)
+    | Err(Error(e)) -> Err(e)
+
+fn unify_ty_ty(
+  unit: Unit
+  env: &Env
+  lhs: Ty
+  rhs: Ty
+  span: Span
+) -> Result<void, Retry>
+  match lhs, rhs
+  | Infer(l_span, l_bound, l_id, l_func), Infer(r_span, r_bound, r_id, r_func) ->
+    panic "unimplemented"
+  | _ -> panic "unreachable"
+
+fn normalize_field(
+  unit: Unit
+  env: &Env
+  base: Ty
+  name: str
+  span: Span
+) -> Result<Ty, Retry>
+  panic "unimplemented"
+  
+fn normalize_tuple(
+  unit: Unit
+  env: &Env
+  base: Ty
+  index: int
+  span: Span
+) -> Result<Ty, Retry>
+  panic "unimplemented"
+
+fn normalize_call(
+  unit: Unit
+  env: &Env
+  func: Ty
+  args: [Result<Ty, void>]
+  span: Span
+) -> Result<Ty, Retry>
+  panic "unimplemented"
