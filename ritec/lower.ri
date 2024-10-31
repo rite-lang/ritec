@@ -1,0 +1,6 @@
+import std:result:Result
+
+import ritec:diagnostic:Diagnostic
+
+pub fn lower(hir: hir:Unit, ast: ast:Module) -> Result<hir:Unit, Diagnostic>
+  panic

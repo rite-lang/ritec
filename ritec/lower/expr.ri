@@ -1,0 +1,31 @@
+import std:vec
+import std:vec:Vec
+import std:result:Result
+
+import ritec:ast
+import ritec:hir
+import ritec:diagnostic:Diagnostic
+
+pub type BodyCx(
+  hir:      hir:Unit
+  generics: Vec<hir:Generic>
+  locals:   Vec<hir:Local>
+  scope:    Vec<str * int>
+)
+
+pub fn new_body_cx(
+  hir:      hir:Unit
+  generics: Vec<hir:Generic>
+) -> BodyCx
+  BodyCx(
+    hir:      hir
+    generics: generics
+    locals:   vec:new()
+    scope:    vec:new()
+  )
+
+pub fn lower_expr(
+  cx: BodyCx
+  ast: ast:Expr
+) -> Result<hir:Expr * BodyCx, Diagnostic>
+  panic
