@@ -60,6 +60,13 @@ pub type Bound =
   | Signed
   | Float
 
+pub fn new_void(span: Span) -> Ty
+  Partial(
+    span: span
+    part: Void
+    args: []
+  )
+
 pub type Env(
   next:          int
   constraints:   [Constraint]
@@ -72,19 +79,21 @@ pub type Constraint(
   rhs:  Ty
 )
 
-pub fn new_env() -> &Env
-  &Env(
+pub fn env() -> Env
+  Env(
     next:          0
     constraints:   []
     substitutions: dict:new()
   )
 
 pub fn unify(
-  env:  &Env
+  env:  Env
   span: Span
   lhs:  Ty
   rhs:  Ty
-) -> void
+) -> Env
+  mut env = env
+
   let constraint = Constraint(
     span: span
     lhs:  lhs
@@ -92,19 +101,24 @@ pub fn unify(
   )
 
   env.constraints = [constraint, ..env.constraints]
+  env
 
 pub fn infer(
-  env:   &Env
+  env:   Env
   span:  Span
   bound: Result<Bound, void>
   func:  int
-) -> Ty
+) -> Ty * Env
+  mut env = env
+
   let id   = env.next
   env.next = env.next + 1
 
-  Infer(
+  let ty = Infer(
     span:  span
     bound: bound
     id:    id
     func:  func
   )
+
+  ty, env

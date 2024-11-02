@@ -4,6 +4,8 @@ pub import diagnostic
 
 import std:result:Result
 
+import diagnostic:report
+
 fn main(args: [str])
   let sources = span:new_sources()
   let assert Ok(source) = span:load_source("ritec/parse/lexer.ri")
@@ -16,11 +18,19 @@ fn main(args: [str])
 fn run(text, id)
   let stream = parse:lexer:lex(id, text)?
 
-  match parse:parse(stream)
-  | Ok((module, _)) ->
-    format:format(module) |> std:io:println
-    Ok(void)
-  | Err(diagnostic) ->
-    diagnostic:report:new()
-    |> diagnostic:report:add(diagnostic)
-    |> Err
+  let ast, _ = report:map(parse:parse(stream))?
+
+  let module = hir:Module:Module(
+    attrs:   ast.attrs
+    name:    "lexer"
+    imports: std:dict:new()
+  )
+
+  let unit = hir:new()
+  let unit, id = hir:add_module(unit, module)
+
+  let unit = report:map(lower:register_module(unit, id, ast))?
+
+  std:debug:print(unit)
+
+  Ok(void)

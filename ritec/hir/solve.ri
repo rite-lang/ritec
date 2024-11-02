@@ -13,43 +13,41 @@ type Retry =
   | Retry
   | Error(err: Diagnostic)
 
-pub fn solve(
-  unit: Unit
-  env: Env
-) -> Result<Env, Diagnostic>
-  solve_rec(unit, env)
+pub fn solve(unit: Unit) -> Result<Unit, Diagnostic>
+  solve_rec(unit)
 
-fn solve_rec(
-  unit: Unit
-  env: Env
-) -> Result<Env, Diagnostic>
-  match env.constraints
-  | [] -> Ok(env)
+fn solve_rec(unit: Unit) -> Result<Unit, Diagnostic>
+  mut unit = unit
+
+  match unit.env.constraints
+  | [] -> Ok(unit)
   | [constraint, ..rest] ->
-    let env = Env(constraints: rest, ..env)
+    unit.env.constraints = rest
 
     let retry = unify_ty_ty(
       unit
-      env
       constraint.lhs
       constraint.rhs
       constraint.span
     )
 
     match retry
-    | Ok(env) -> solve_rec(unit, env)
-    | Err(Retry) ->
-      let constraints = list:append(env.constraints, constraint)
-      solve_rec(unit, Env(constraints: constraints, ..env))
+    | Ok(unit) -> solve_rec(unit)
     | Err(Error(e)) -> Err(e)
+    | Err(Retry) ->
+      unit.env.constraints = list:append(
+        unit.env.constraints
+        constraint
+      )
+
+      solve_rec(unit)
 
 fn unify_ty_ty(
   unit: Unit
-  env: Env
   lhs: Ty
   rhs: Ty
   span: Span
-) -> Result<Env, Retry>
+) -> Result<Unit, Retry>
   match lhs, rhs
   | Infer(l_span, l_bound, l_id, l_func), Infer(r_span, r_bound, r_id, r_func) ->
     panic "unimplemented"
@@ -57,27 +55,24 @@ fn unify_ty_ty(
 
 fn normalize_field(
   unit: Unit
-  env: Env
   base: Ty
   name: str
   span: Span
-) -> Result<Ty * Env, Retry>
+) -> Result<Ty * Unit, Retry>
   panic "unimplemented"
   
 fn normalize_tuple(
   unit: Unit
-  env: &Env
   base: Ty
   index: int
   span: Span
-) -> Result<Ty * Env, Retry>
+) -> Result<Ty * Unit, Retry>
   panic "unimplemented"
 
 fn normalize_call(
   unit: Unit
-  env: &Env
   func: Ty
   args: [Result<Ty, void>]
   span: Span
-) -> Result<Ty * Env, Retry>
+) -> Result<Ty * Unit, Retry>
   panic "unimplemented"

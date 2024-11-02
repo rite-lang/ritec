@@ -1,4 +1,5 @@
 import std:list
+import std:result:Result
 
 import ritec:span:Sources
 
@@ -34,3 +35,8 @@ pub fn print(report: Report, sources: Sources)
   |> list:each(|diagnostic|
     diagnostic:print(diagnostic, sources)
   )
+
+pub fn map(result: Result<'a, Diagnostic>) -> Result<'a, Report>
+  match result
+  | Ok(a) -> Ok(a)
+  | Err(b) -> Err(Report([b]))

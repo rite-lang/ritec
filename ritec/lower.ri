@@ -1,6 +1,105 @@
+import std:dict
+import std:list
+import std:vec
 import std:result:Result
 
 import ritec:diagnostic:Diagnostic
 
-pub fn lower(hir: hir:Unit, ast: ast:Module) -> Result<hir:Unit, Diagnostic>
+fn lower_vis(ast: ast:Vis) -> hir:Vis
+  match ast
+  | ast:Public -> hir:Public
+  | ast:Private -> hir:Private
+
+pub fn register_module(
+  hir: hir:Unit
+  id: int
+  ast: ast:Module
+) -> Result<hir:Unit, Diagnostic>
+  mut hir = hir
+
+  list:each(ast.items, |item|
+    let assert Ok(module) = vec:get(hir.modules, id)
+    mut module = module
+
+    match item
+    | ast:Item:Type(ast) ->
+      let adt, vis = match ast
+        | ast:Type:Adt(ast) ->
+          let adt = hir:Adt:Adt(
+            span:     ast.span
+            attrs:    ast.attrs
+            name:     ast.name
+            generics: []
+            variants: []
+          )
+
+          adt, lower_vis(ast.vis)
+        | ast:Type:Single(ast) ->
+          let adt = hir:Adt:Adt(
+            span:     ast.span
+            attrs:    ast.attrs
+            name:     ast.name
+            generics: []
+            variants: []
+          )
+
+          adt, lower_vis(ast.vis)
+
+      let new_hir, id = hir:add_adt(hir, adt)
+      hir = new_hir
+
+      let imp = hir:Import(
+        span: adt.span
+        vis:  vis
+        item: Ok(hir:Item:Adt(id))
+      )
+
+      module.imports = module.imports
+      |> dict:insert(adt.name, imp)
+    | ast:Item:Func(ast) ->
+      let func = hir:Func:Func(
+        span:     ast.span
+        attrs:    ast.attrs
+        name:     ast.name
+        generics: []
+        input:    []
+        output:   hir:ty:new_void(ast.span)
+        locals:   vec:new()
+        captures: []
+        body:     hir:Expr:Void(ast.span)
+      )
+
+      let new_hir, id = hir:add_func(hir, func)
+      hir = new_hir
+
+      let imp = hir:Import(
+        span: ast.span
+        vis:  lower_vis(ast.vis)
+        item: Ok(hir:Item:Func(id))
+      )
+
+      module.imports = module.imports
+      |> dict:insert(ast.name, imp)
+    | ast:Item:Import(ast) ->
+      let assert Ok(name) = list:last(ast.path.segments)
+
+      let imp = hir:Import(
+        span: ast.span
+        vis:  lower_vis(ast.vis)
+        item: Err(ast.path)
+      )
+
+      module.imports = module.imports
+      |> dict:insert(name, imp)
+
+    hir.modules = vec:set(hir.modules, id, module)
+  )
+
+  Ok(hir)
+
+pub fn lower_module(
+  hir: hir:Unit
+  id: int
+  ast: ast:Module
+) -> Result<hir:Unit, Diagnostic>
   panic

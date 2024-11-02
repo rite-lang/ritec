@@ -5,12 +5,14 @@ pub import ty:Ty
 
 import std:vec
 import std:vec:Vec
-import std:result:Result
+import std:dict
 import std:dict:Dict
+import std:result:Result
 
 import ritec:span
 import ritec:span:Span
 import ritec:attribute:Attribute
+import ritec:ast:Path
 
 import ty:Ty
 
@@ -21,6 +23,47 @@ pub type Unit(
   env:     ty:Env
 )
 
+pub fn new() -> Unit
+  Unit(
+    modules: vec:new()
+    funcs:   vec:new()
+    adts:    vec:new()
+    env:     ty:env()
+  )
+
+pub fn add_module(
+  unit: Unit
+  module: Module
+) -> Unit * int
+  mut unit = unit
+
+  let id = vec:length(unit.modules)
+  unit.modules = vec:push(unit.modules, module)
+
+  unit, id
+
+pub fn add_func(
+  unit: Unit
+  func: Func
+) -> Unit * int
+  mut unit = unit
+
+  let id = vec:length(unit.funcs)
+  unit.funcs = vec:push(unit.funcs, func)
+
+  unit, id
+
+pub fn add_adt(
+  unit: Unit
+  adt: Adt
+) -> Unit * int
+  mut unit = unit
+
+  let id = vec:length(unit.adts)
+  unit.adts = vec:push(unit.adts, adt)
+
+  unit, id
+
 pub type Module(
   attrs:   [Attribute]
   name:    str
@@ -30,7 +73,7 @@ pub type Module(
 pub type Import(
   span: Span
   vis:  Vis
-  item: Item
+  item: Result<Item, Path>
 )
 
 pub type Item =
@@ -68,7 +111,6 @@ pub type Local(
 pub type Adt(
   span:     Span
   attrs:    [Attribute]
-  vis:      Vis
   name:     str
   generics: [Generic]
   variants: [Variant]
